@@ -364,3 +364,55 @@ fn a_frame_stamp_lands_every_packet_on_that_frame() {
     let umps: Vec<Ump> = at.iter().map(|(_, ump)| *ump).collect();
     assert_eq!(payload_of(&umps), full.payload());
 }
+
+/// Dropped keys release what they hold: each note `note_on` started and
+/// `note_off` did not end gets its Note Off on the next block, and an ended note
+/// gets none.
+#[test]
+fn dropping_the_keys_ends_each_note_they_hold() {
+    let (mut d, mut keys) = rig();
+    for note in [60, 64, 67] {
+        keys.note_on(
+            Stamp::NextBlock,
+            MidiChannel::of(2),
+            NoteNumber::of(note),
+            NoteVelocity::new(0x8000),
+        )
+        .unwrap();
+    }
+    keys.note_off(Stamp::NextBlock, MidiChannel::of(2), NoteNumber::of(64))
+        .unwrap();
+    d.block();
+    drop(keys);
+    d.block();
+    assert_eq!(
+        sent(&d),
+        [
+            midi::note_off(MidiChannel::of(2), 60, 0),
+            midi::note_off(MidiChannel::of(2), 67, 0),
+        ]
+    );
+}
+
+/// A Note Off the ring refused leaves the note held, so dropping the keys ends it.
+#[test]
+fn a_refused_note_off_is_sent_when_the_keys_drop() {
+    let (node, writer) = EventInletNode::pair(EventCapacity::of(1));
+    let mut d = Direct::new(node, SampleRate::SR_48K, 64);
+    let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
+    keys.note_on(
+        Stamp::NextBlock,
+        MidiChannel::FIRST,
+        NoteNumber::of(60),
+        NoteVelocity::new(0x8000),
+    )
+    .unwrap();
+    assert_eq!(
+        keys.note_off(Stamp::NextBlock, MidiChannel::FIRST, NoteNumber::of(60)),
+        Err(PushError::Full)
+    );
+    d.block();
+    drop(keys);
+    d.block();
+    assert_eq!(sent(&d), [midi::note_off(MidiChannel::FIRST, 60, 0)]);
+}

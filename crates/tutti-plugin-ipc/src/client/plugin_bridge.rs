@@ -162,6 +162,18 @@ impl PluginBridge {
         self.audio.set_automation_state_rt(mode)
     }
 
+    /// One step of a host gesture toward the plugin, queued on the control path
+    /// the server's main loop drains. A step the queue refuses is kept and
+    /// sent by [`flush_host_edits`](Self::flush_host_edits).
+    pub(crate) fn host_edit(&self, edit: tutti_plugin_types::ParamEdit) {
+        self.audio.host_edit(edit);
+    }
+
+    /// Sends the gesture steps a full control queue kept back.
+    pub(crate) fn flush_host_edits(&self) {
+        self.audio.flush_host_edits();
+    }
+
     /// Loads `data` into the audio instance and the editor instance.
     ///
     /// The **audio** instance's answer is the one returned.

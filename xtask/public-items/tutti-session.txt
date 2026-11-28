@@ -124,6 +124,7 @@ enum value::slot::DepthKey
 enum value::slot::ShapeKey
 enum value::slot::SlotId
 enum value::target::TargetId
+enum value::target::sealed::GestureStep
 enum value::watcher::ChangedBy
 enum watch::FollowEvent
 fn analyze::Session::analyze
@@ -293,10 +294,6 @@ fn graph::observe::Taps::open_event
 fn graph::observe::Taps::open_main_output
 fn graph::observe::Taps::open_ports
 fn graph::observe::Taps::reopen_event
-fn graph::testing::Graph::testing
-fn graph::testing::Testing::keeps_reclaimer
-fn graph::testing::Testing::rebuild_settling
-fn graph::testing::Testing::waiting_replacements
 fn input::Input::node
 fn input::InputConfig::capacity
 fn input::InputConfig::channels
@@ -630,10 +627,6 @@ fn plugin_diagnostics::PluginBuses::input_count
 fn plugin_diagnostics::PluginBuses::main_input
 fn plugin_diagnostics::PluginBuses::output
 fn plugin_diagnostics::PluginBuses::output_count
-fn plugin_params::ParamGesture::id
-fn plugin_params::ParamGesture::node
-fn plugin_params::ParamGesture::set
-fn plugin_params::PluginParam::edit
 fn plugin_params::PluginParam::id
 fn plugin_params::PluginParam::info
 fn plugin_params::PluginParam::normalized
@@ -907,7 +900,6 @@ struct graph::Replacement
 struct graph::observe::Meters
 struct graph::observe::NotReopened
 struct graph::observe::Taps
-struct graph::testing::Testing
 struct hang::HangPolicy
 struct input::Input
 struct input::InputConfig
@@ -1014,7 +1006,6 @@ struct plugin::state::SaveStateOp
 struct plugin::state::Saved
 struct plugin_diagnostics::Diagnostics
 struct plugin_diagnostics::PluginBuses
-struct plugin_params::ParamGesture
 struct plugin_params::PluginParam
 struct plugin_params::PluginParams
 struct plugin_presets::ListedPreset
@@ -1149,8 +1140,10 @@ trait value::target::sealed::Lane
 trait value::target::sealed::Sealed
 trait value::target::sealed::Store
 trait value::watcher::IntoTargets
+trait value::watcher::IntoWatched
 trait value::watcher::Watchable
 trait value::watcher::seal::Sealed
+trait value::watcher::seal_watched::Sealed
 trait wire_ends::WireEnd
 trait wire_ends::WireStart
 trait wire_ends::sealed::end::Sealed

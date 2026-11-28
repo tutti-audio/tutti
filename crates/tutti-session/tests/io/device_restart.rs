@@ -14,7 +14,9 @@ use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{Error, InputPort, LiveSession, MainOutput, OutputPort, Replacement, Session};
+use tutti_session::{
+    Error, InputPort, LiveSession, MainOutput, OutputPort, Replacement, Session, SessionEvent,
+};
 use tutti_timeline::MotionCommand;
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples};
 
@@ -460,13 +462,21 @@ fn a_replace_after_the_restart_lands_at_once() {
         )
         .expect("the replace is accepted");
     assert_eq!(landed.erase(), osc);
-    assert_eq!(
-        s.graph_ref().testing().waiting_replacements(),
-        0,
-        "nothing waits: the re-prepare is done"
+    let mut events = s.update();
+    let mut out = Vec::new();
+    for _ in 0..50 {
+        let block = new
+            .render_block(Samples::new(480))
+            .expect("the stream is open");
+        out.extend(block.iter().step_by(2));
+        events.extend(s.update());
+    }
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Replaced { .. })),
+        "the replace swapped at once: no deferred swap was reported, {events:?}"
     );
-    let out = play(&mut s, &new, 480, 50);
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     assert!(
         (period(&out[4_800..]) - 24.0).abs() < 0.01,
         "2 kHz at 48 kHz, measured {}",

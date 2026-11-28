@@ -502,7 +502,6 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
         .expect("the node is in the graph");
     assert_eq!(replaced, knob, "the key names the incoming node at once");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
 
     // Update by update through the re-prepare: the executor checks its units
     // out (a silent block), the editor sends them back, the executor
@@ -525,7 +524,6 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
         }
         other => panic!("landed once the graph resumed: {other:?}"),
     }
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     for _ in 0..512 {
         s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
@@ -560,10 +558,8 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
             Replacement::new(Params(Knob::at(3.0).holding(&token))),
         )
         .expect("the node is in the graph");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
 
     s.remove(knob).unwrap();
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0, "purged");
     assert_eq!(Arc::strong_count(&token), 1, "the incoming node dropped");
 
     let mut out = [0.0f32];
@@ -619,7 +615,6 @@ fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
     assert_eq!(node, knob.erase());
     assert_eq!(running.event_out, 0);
     assert_eq!(incoming.event_out, 1);
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
 
     // Nothing changed: the knob is still the node, still steerable.
     s.set(knob.drive().to(Drive::new(4.0))).unwrap();
@@ -661,7 +656,6 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
             Replacement::new(ForkByClone(Holder(Arc::clone(&token)))),
         )
         .expect("accepted: the shapes are checked when it lands");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
     assert!(Arc::strong_count(&token) > 1, "the incoming node waits");
 
     let mut out = [0.0f32];
@@ -680,7 +674,6 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
         matches!(refused, ReplaceRefused::ShapeChanged { .. }),
         "{refused:?}"
     );
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     assert_eq!(Arc::strong_count(&token), 1, "the incoming node is dropped");
 }
 
@@ -736,7 +729,6 @@ fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
         let _ = s.update();
         s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     for _ in 0..512 {
         s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
@@ -756,7 +748,6 @@ fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
         let _ = s.update();
         s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     for _ in 0..512 {
         s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
@@ -784,11 +775,11 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
         .graph()
         .replace(two, Replacement::new(band(3)))
         .expect("accepted");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
     assert!(
         s.graph_ref().gain_reduction(&three, 2).is_some(),
         "the key names the incoming node's controls"
     );
+    assert!(s.update().is_empty(), "parked: the swap has not landed");
 }
 
 /// **A removal drops a parked swap and says so**: the graph re-prepares, a
@@ -859,11 +850,6 @@ fn a_replace_on_a_poisoned_graph_is_refused() {
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))));
     assert!(refused.is_err(), "{refused:?}");
-    assert_eq!(
-        s.graph_ref().testing().waiting_replacements(),
-        0,
-        "nothing waits"
-    );
     assert!(s.update().is_empty());
 }
 
@@ -1236,7 +1222,6 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
             Replacement::new(incoming).fade(Fade::new(Samples::new(0))),
         )
         .expect("the node is in the graph");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     assert_eq!(
         Arc::strong_count(&first.token),
         2,
@@ -1367,24 +1352,21 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
             Replacement::new(Params(Knob::at(3.0))).fade(Fade::new(Samples::ZERO)),
         )
         .expect("accepted");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 2);
 
     let mut events = Vec::new();
     for _ in 0..8 {
         events.extend(s.update());
         s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::ReplaceFailed { .. })),
+    let count = |want: fn(&SessionEvent) -> bool| events.iter().filter(|e| want(e)).count();
+    assert_eq!(
+        count(|e| matches!(e, SessionEvent::ReplaceFailed { .. })),
+        1,
         "the first was refused: {events:?}"
     );
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Replaced { .. })),
+    assert_eq!(
+        count(|e| matches!(e, SessionEvent::Replaced { .. })),
+        1,
         "the second landed: {events:?}"
     );
 

@@ -20,7 +20,7 @@ pub(crate) mod wire;
 /// self-describing, a struct is positional and an enum is a varint over declaration
 /// order. Any change to a serialized type's shape, an appended field and an
 /// appended variant included, moves this.
-pub const PROTOCOL_VERSION: u32 = 72;
+pub const PROTOCOL_VERSION: u32 = 73;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -82,9 +82,9 @@ pub use envelope::{
     AppMidiMapApplied, ApplyOutcome, ArmPluginMidiLearn, AudioReply, AudioRequest, BlockWrites,
     CloseEditor, ControlFrame, ControlReply, ControlRequest, CurrentPreset, EditorOpened,
     EditorSized, GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized,
-    GetParameterPlain, GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Lane,
-    LaneOpened, LoadPlugin, LoadPreset, LoadState, ModeOutcome, News, OpenEditor, OpenLane,
-    ParameterList, ParameterNormalized, ParameterPlain, ParameterText, ParameterValue,
+    GetParameterPlain, GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring,
+    HostEdit, Lane, LaneOpened, LoadPlugin, LoadPreset, LoadState, ModeOutcome, News, OpenEditor,
+    OpenLane, ParameterList, ParameterNormalized, ParameterPlain, ParameterText, ParameterValue,
     ParameterValueFromText, PluginLoaded, PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet,
     ReqId, Request, SampleRateSet, SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize,
     SetRenderMode, SetSampleRate, SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown,
@@ -547,6 +547,12 @@ mod tests {
                 "SetRenderMode",
                 ControlRequest::SetRenderMode {
                     mode: RenderMode::Realtime,
+                },
+            ),
+            (
+                "HostEdit",
+                ControlRequest::HostEdit {
+                    edit: tutti_plugin_types::ParamEdit::Begin(param_id),
                 },
             ),
         ]

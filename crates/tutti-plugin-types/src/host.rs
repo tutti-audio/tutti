@@ -23,6 +23,7 @@
 //! one plugin instance at once.
 
 use std::num::{NonZeroU32, NonZeroUsize};
+use std::sync::Arc;
 use tutti_platform::Instant;
 
 use dpi::Size;
@@ -35,8 +36,8 @@ use crate::{
     ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{
-    Delivered, MidiAssignment, MidiMapApplied, ParamEdit, ParameterChanges, PluginLearnError,
-    bypass_parameter, bypass_value, is_bypassed,
+    Delivered, HostEdits, MidiAssignment, MidiMapApplied, ParamEdit, ParameterChanges,
+    PluginLearnError, bypass_parameter, bypass_value, is_bypassed,
 };
 use crate::{
     MainThreadMarker, ModeTold, Prepare, RenderMode, RenderModeSupport, Request, RescanScope,
@@ -392,6 +393,36 @@ pub trait Control: EditorWindow {
     /// no ticks a plugin's reports are never applied to its controller.
     fn flush_edits(&mut self, main: MainThreadMarker) {
         let _ = main;
+    }
+
+    /// The list the host's gestures toward this plugin are posted to
+    /// (`PluginHandle::edit`), for a format that defines one (VST3's
+    /// `IEditControllerHostEditing`, AU's gesture notifications); `None` for a
+    /// format that does not (CLAP, VST2). The list is the plugin's for its
+    /// life: the same one answers every call.
+    fn host_edits(&self) -> Option<&Arc<HostEdits>> {
+        None
+    }
+
+    /// Makes `list` the list of a plugin that replaces the one it was posted
+    /// for (a rebuild): the handle keeps posting to the same list, and the
+    /// replacement starts with none open. A format with no list ignores it.
+    fn adopt_host_edits(&mut self, list: Arc<HostEdits>) {
+        let _ = list;
+    }
+
+    /// Applies one of the host's gestures to the plugin, on the main thread, in
+    /// the order the list holds them. Only a format with a
+    /// [`host_edits`](Self::host_edits) list is asked.
+    fn apply_host_edit(&mut self, main: MainThreadMarker, edit: ParamEdit) {
+        let _ = (main, edit);
+    }
+
+    /// Applies every gesture [`host_edits`](Self::host_edits) holds, oldest first.
+    fn drain_host_edits(&mut self, main: MainThreadMarker) {
+        if let Some(edits) = self.host_edits().cloned() {
+            edits.drain(|edit| self.apply_host_edit(main, edit));
+        }
     }
 
     /// The plugin's own main-thread work (CLAP `on_main_thread`).
@@ -991,9 +1022,24 @@ impl<W: Wraps> Control for W {
         self.plugin_mut().arm_plugin_midi_learn(main, armed)
     }
 
+    /// The plugin's own, then what its Processor reported (`tick`), then the
+    /// host's gestures, so a gesture's values land after the reports.
     fn flush_edits(&mut self, main: MainThreadMarker) {
         self.plugin_mut().flush_edits(main);
         self.tick(main);
+        self.drain_host_edits(main);
+    }
+
+    fn host_edits(&self) -> Option<&Arc<HostEdits>> {
+        self.plugin().host_edits()
+    }
+
+    fn apply_host_edit(&mut self, main: MainThreadMarker, edit: ParamEdit) {
+        self.plugin_mut().apply_host_edit(main, edit);
+    }
+
+    fn adopt_host_edits(&mut self, list: Arc<HostEdits>) {
+        self.plugin_mut().adopt_host_edits(list);
     }
 
     fn run_main_thread(&mut self, main: MainThreadMarker) {

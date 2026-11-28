@@ -9,7 +9,7 @@ use tutti_plugin_ipc::{
     AppMidiMapApplied, ArmPluginMidiLearn, CloseEditor, CurrentPreset, EditorOpened, EditorSized,
     GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
     GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Handling,
-    LoadPlugin, LoadPreset, LoadState, ModeOutcome, OpenEditor, OpenLane, ParameterList,
+    HostEdit, LoadPlugin, LoadPreset, LoadState, ModeOutcome, OpenEditor, OpenLane, ParameterList,
     ParameterNormalized, ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText,
     PluginLoaded, PluginMidiLearn, PresetList, PresetLoaded, RenderModeSet, SampleRateSet,
     SaveState, SavedState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode,
@@ -159,6 +159,19 @@ impl Handle<SetAutomationState> for Session {
     fn handle(&mut self, cx: &mut Handling<'_>, SetAutomationState { mode }: SetAutomationState) {
         if let Some(plugin) = self.plugin.as_mut() {
             plugin.plugin_mut().set_automation_state(cx.main, mode);
+        }
+    }
+}
+
+impl Handle<HostEdit> for Session {
+    /// Posted to the plugin's list; the main loop's flush drains it in order.
+    fn handle(&mut self, _cx: &mut Handling<'_>, HostEdit { edit }: HostEdit) {
+        if let Some(list) = self
+            .plugin
+            .as_mut()
+            .and_then(|plugin| plugin.plugin_mut().control_mut()?.host_edits().cloned())
+        {
+            list.post(edit);
         }
     }
 }

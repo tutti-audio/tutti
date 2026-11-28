@@ -14,8 +14,8 @@ use tutti_graph::{EventCapacity, EventInletWriter, Stamp};
 use tutti_midi_protocol::Addressed;
 use tutti_rt::PushError;
 use tutti_ump::{
-    Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Sysex7Packets, SysexPart,
-    Voice2,
+    Address, KeyBitset, Message, MidiChannel, MidiGroup, NoteKey, NoteNumber, NoteVelocity,
+    Sysex7Packets, SysexPart, Voice2,
 };
 use tutti_units::Losses;
 
@@ -31,10 +31,18 @@ pub const LIVE_INLET_CAPACITY: EventCapacity = EventCapacity::of(256);
 /// silent, so a bounce renders the instrument with none of it. Notes an export
 /// must hold are a clip on the timeline (`MidiClipNode`, through the
 /// session's `play_clip`).
+///
+/// **Dropping the keys releases what they hold**: a Note Off goes for each note
+/// [`note_on`](Self::note_on) started and [`note_off`](Self::note_off) has not
+/// ended, so dropped keys never leave a note stuck. A Note Off the ring has no room
+/// for is counted as the writer counts a refused event. A note started through the
+/// writer's own `push` is not tracked and is not released.
 #[derive(Debug)]
 pub struct MidiKeys {
     writer: EventInletWriter,
     group: MidiGroup,
+    /// The notes the helpers started and have not ended.
+    held: Box<KeyBitset>,
 }
 
 impl MidiKeys {
@@ -44,7 +52,11 @@ impl MidiKeys {
     /// (`MidiGroup::FIRST` for the first).
     #[must_use]
     pub fn new(writer: EventInletWriter, group: MidiGroup) -> Self {
-        Self { writer, group }
+        Self {
+            writer,
+            group,
+            held: Box::new(KeyBitset::new()),
+        }
     }
 
     /// What the inlet has lost, in events (the writer's
@@ -95,11 +107,13 @@ impl MidiKeys {
         note: NoteNumber,
         velocity: NoteVelocity,
     ) -> Result<(), PushError> {
-        self.voice(at, channel, Voice2::note_on(note, velocity))
+        self.voice(at, channel, Voice2::note_on(note, velocity))?;
+        self.held.insert(self.key(channel, note));
+        Ok(())
     }
 
     /// A MIDI 2.0 Note Off at release velocity 0 on the keys' Group, for `at`. A full
-    /// ring refuses it, which would leave the note stuck.
+    /// ring refuses it, and the note stays held: dropping the keys sends its Note Off.
     ///
     /// # Errors
     ///
@@ -110,7 +124,9 @@ impl MidiKeys {
         channel: MidiChannel,
         note: NoteNumber,
     ) -> Result<(), PushError> {
-        self.voice(at, channel, Voice2::note_off(note, NoteVelocity::MIN))
+        self.voice(at, channel, Voice2::note_off(note, NoteVelocity::MIN))?;
+        self.held.remove(self.key(channel, note));
+        Ok(())
     }
 
     /// A Universal System Exclusive message on the keys' Group, for `at`: the
@@ -166,6 +182,17 @@ impl MidiKeys {
         Ok(())
     }
 
+    /// The held-note key of `note` on `channel` of the keys' Group.
+    fn key(&self, channel: MidiChannel, note: NoteNumber) -> NoteKey {
+        NoteKey::new(
+            Address {
+                group: self.group,
+                channel,
+            },
+            note,
+        )
+    }
+
     fn voice(
         &mut self,
         at: impl Into<Stamp>,
@@ -177,6 +204,20 @@ impl MidiKeys {
             channel,
         };
         self.writer.push(at, Message::Midi2(address, voice))
+    }
+}
+
+impl Drop for MidiKeys {
+    /// Sends a Note Off for each note still held, for the next block. A refusal is
+    /// the writer's: a full ring counts it, and a dropped node has nothing to end.
+    fn drop(&mut self) {
+        for key in self.held.iter() {
+            let address = key.address();
+            let off = Voice2::note_off(key.note(), NoteVelocity::MIN);
+            let _ = self
+                .writer
+                .push(Stamp::NextBlock, Message::Midi2(address, off));
+        }
     }
 }
 

@@ -25,7 +25,7 @@ use super::gesture::{Deferred, Ending, Gesture};
 use super::saved::SavedValues;
 use super::slot::{self, SlotCell, SlotId};
 use super::target::{AnyAssign, AnyTarget};
-use super::watcher::{Feed, Grouping, IntoTargets, Watcher};
+use super::watcher::{Feed, Grouping, IntoTargets, IntoWatched, Watcher};
 use crate::AppKey;
 
 /// What one node's params are written through, and what they were declared at.
@@ -756,7 +756,7 @@ impl<K: AppKey> Values<K> {
     ///
     /// As [`Session::watch`](crate::Session::watch), and
     /// [`ValueErrorKind::Closed`] once the session is gone.
-    pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
+    pub fn watch<W: IntoWatched>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
         self.state()?.watch(targets)
     }
 

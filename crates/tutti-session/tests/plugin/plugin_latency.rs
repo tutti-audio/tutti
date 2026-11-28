@@ -292,11 +292,6 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
         )
         .expect("the replace is accepted");
     assert_eq!(landed.erase(), node.erase());
-    assert_eq!(
-        s.graph_ref().testing().waiting_replacements(),
-        0,
-        "nothing waits"
-    );
     let _ = s.update();
     let _ = s.update();
 
