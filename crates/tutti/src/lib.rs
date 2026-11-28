@@ -903,7 +903,7 @@ pub mod plugin {
 /// a file (`MidiFile`, which is a `StandardMidiFile` or a `ClipFile`; `Track`, `Tick`), a message (`Message`, `Ump`,
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
-/// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
+/// the session's MIDI (`Midi`, `InstrumentHandle`, `InstrumentDecl` and its `LeaseError`), its route rule, events and
 /// errors (`MidiRouteRule`, `MidiRouteId`, `MidiEvent`, `MidiError`), its
 /// followers (`FollowTempo`, `FollowClock`, `FollowMachineControl`), the
 /// sync node that sends the transport (`SyncOut`, `SyncMessages`), a host's own output (`MidiSink`, `OpenMidiSink`, `Stamping`), and under `midi-hardware` a device (`MidiDeviceId`,
@@ -1030,9 +1030,10 @@ pub mod midi {
     #[cfg(feature = "session")]
     pub use tutti_session::{
         AnyNode, ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl,
-        FollowTempo, HeldReader, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack,
-        LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
-        NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause, Unplayed,
+        FollowTempo, HeldReader, InstrumentDecl, InstrumentHandle, LeaseError, LoadMidi,
+        LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId,
+        MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping,
+        TrackError, UnfollowCause, Unplayed,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

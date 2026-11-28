@@ -69,6 +69,14 @@ impl Ports {
     }
 }
 
+/// Which node a key names at one end of a wire: the node itself, or, for an
+/// instrument's audio leaving it, the strip after its main pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Role {
+    Node,
+    Strip,
+}
+
 /// A wire as the graph names it, with its feedback delay (`None` for a direct
 /// wire). A bus wire has no delayed edge.
 #[derive(Clone, Copy, Debug)]
@@ -80,31 +88,34 @@ pub(crate) enum Resolved {
 }
 
 impl Resolved {
-    /// The graph's wire for `id`, its keys named by `node`.
-    pub(crate) fn of<K>(id: &WireId<K>, node: impl Fn(&K) -> NodeKey) -> Self {
+    /// The graph's wire for `id`, its keys named by `node`: audio leaves an
+    /// instrument from its strip, and everything else is the node.
+    pub(crate) fn of<K>(id: &WireId<K>, node: impl Fn(&K, Role) -> NodeKey) -> Self {
         let delay = id.delay;
+        let out = |key: &K| node(key, Role::Strip);
+        let at = |key: &K| node(key, Role::Node);
         match &id.ends {
             WireEnds::Main(from, to) => Self::Main(
-                node(from),
+                out(from),
                 to.as_ref()
-                    .map_or(MainSink::MainOutput, |to| MainSink::Node(node(to))),
+                    .map_or(MainSink::MainOutput, |to| MainSink::Node(at(to))),
                 delay,
             ),
-            WireEnds::Channel(from, out, to, input) => Self::Channel(
-                OutputPort::new(node(from), *out),
-                InputPort::new(node(to), *input),
+            WireEnds::Channel(from, port, to, input) => Self::Channel(
+                OutputPort::new(out(from), *port),
+                InputPort::new(at(to), *input),
                 delay,
             ),
-            WireEnds::Event(from, out, to, input) => Self::Event(
-                EventOutputPort::new(node(from), *out),
-                EventInputPort::new(node(to), *input),
+            WireEnds::Event(from, port, to, input) => Self::Event(
+                EventOutputPort::new(at(from), *port),
+                EventInputPort::new(at(to), *input),
                 delay,
             ),
-            WireEnds::Bus(from, out, to) => Self::Bus(
-                BusOutputPort::Node(NodeBus::new(node(from), *out)),
+            WireEnds::Bus(from, port, to) => Self::Bus(
+                BusOutputPort::Node(NodeBus::new(out(from), *port)),
                 to.as_ref()
                     .map_or(BusInputPort(BusEnd::MainOutput), |(to, bus)| {
-                        BusInputPort::new(node(to), *bus)
+                        BusInputPort::new(at(to), *bus)
                     }),
             ),
         }

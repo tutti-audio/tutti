@@ -1133,18 +1133,14 @@ fn a_drop_off_the_main_thread_is_destroyed_on_the_main_threads_next_tick() {
     plugin
         .open_embedded(main, &parent, tutti_plugin_types::ContentScale::IDENTITY)
         .expect("opens");
-    let before = tutti_plugin_types::MainWork::deferred_drops();
+    let before = work.deferred_drops();
     std::thread::spawn(move || drop(plugin)).join().unwrap();
     assert_eq!(
         gui_capture().create_balance,
         1,
         "nothing was called on the wrong thread"
     );
-    assert_eq!(
-        tutti_plugin_types::MainWork::deferred_drops(),
-        before + 1,
-        "counted"
-    );
+    assert_eq!(work.deferred_drops(), before + 1, "counted");
     assert!(work.run(main) >= 1);
     assert_eq!(
         gui_capture().create_balance,

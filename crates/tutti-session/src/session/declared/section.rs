@@ -177,7 +177,8 @@ pub(super) fn kind<F: Float, K: AppKey>(
     let Some(old) = kept.nodes.get(key) else {
         return Kind::Add;
     };
-    let same_type = old.declaration.config.config_type() == new.config_type();
+    let same_type = old.declaration.config.config_type() == new.config_type()
+        && old.declaration.config.played().is_some() == new.played().is_some();
     if !graph.contains(old.node) || !same_type {
         Kind::Readd
     } else if old.declaration.config.same_structure(&**new) {
@@ -296,7 +297,8 @@ impl<K: AppKey, F: Float> Judge<'_, K, F> {
                                 .into_iter()
                                 .flatten()
                                 .all(|key| kept.nodes.contains_key(key));
-                            known && Resolved::of(id, |key| kept.nodes[key].node).held(self.graph)
+                            known
+                                && Resolved::of(id, |key, role| kept.at(key, role)).held(self.graph)
                         })
                 })
     }

@@ -30,6 +30,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use tutti_rt::{Tally, TallyWriter, tally};
+
 pub use tutti_platform::MainThreadMarker;
 
 /// Work a thread that is not the main thread hands to it.
@@ -71,10 +73,6 @@ impl Drop for Work {
 /// counts pieces of work.
 static STRANDED: AtomicU64 = AtomicU64::new(0);
 
-/// Plugin drops handed to a collector by [`MainWorkHandle::defer_drop`]. Raw:
-/// no unit counts drops.
-static DEFERRED_DROPS: AtomicU64 = AtomicU64::new(0);
-
 /// The collector of the work other threads hand to the main thread: owned by
 /// the owner of the plugins that send it (a session), drained on the main
 /// thread.
@@ -92,6 +90,8 @@ static DEFERRED_DROPS: AtomicU64 = AtomicU64::new(0);
 pub struct MainWork {
     queue: Receiver<Work>,
     pumped: Arc<AtomicBool>,
+    /// Plugin drops [`MainWorkHandle::defer_drop`] handed to this collector.
+    deferred_drops: Tally<u64>,
 }
 
 /// The send side of a [`MainWork`]: a plugin's way to hand a close to the main
@@ -101,6 +101,8 @@ pub struct MainWork {
 pub struct MainWorkHandle {
     queue: Sender<Work>,
     pumped: Arc<AtomicBool>,
+    /// Adds to [`MainWork::deferred_drops`].
+    deferred_drops: TallyWriter<u64>,
 }
 
 impl MainWork {
@@ -109,12 +111,18 @@ impl MainWork {
     pub fn new() -> (MainWork, MainWorkHandle) {
         let (queue, inbox) = channel();
         let pumped = Arc::new(AtomicBool::new(false));
+        let deferred_drops = tally();
         (
             MainWork {
                 queue: inbox,
                 pumped: Arc::clone(&pumped),
+                deferred_drops: deferred_drops.clone(),
             },
-            MainWorkHandle { queue, pumped },
+            MainWorkHandle {
+                queue,
+                pumped,
+                deferred_drops: deferred_drops.writer(),
+            },
         )
     }
 
@@ -140,15 +148,14 @@ impl MainWork {
         STRANDED.load(Ordering::Relaxed)
     }
 
-    /// How many plugin drops, process-wide since the process began, a thread
-    /// that is not the plugin's own handed to a collector
-    /// ([`MainWorkHandle::defer_drop`]), whichever format the plugin is. A
-    /// diagnostic only; it changes no behaviour. The owner of the plugins should
-    /// have dropped them on the main thread, so an app reads it after closing a
-    /// session, and a nonzero count is worth a look.
+    /// How many plugin drops a thread that is not the plugin's own handed to
+    /// this collector ([`MainWorkHandle::defer_drop`]) since it was made,
+    /// whichever format the plugin is. A diagnostic only; it changes no
+    /// behaviour. The owner of the plugins should have dropped them on the main
+    /// thread, and a nonzero count is worth a look.
     #[must_use]
-    pub fn deferred_drops() -> u64 {
-        DEFERRED_DROPS.load(Ordering::Relaxed)
+    pub fn deferred_drops(&self) -> u64 {
+        self.deferred_drops.get()
     }
 }
 
@@ -227,7 +234,7 @@ impl MainWorkHandle {
     /// thread, counted in [`MainWork::deferred_drops`]. The same rules apply,
     /// including "never from an audio thread".
     pub fn defer_drop(&self, work: impl FnOnce(MainThreadMarker) + Send + 'static) {
-        DEFERRED_DROPS.fetch_add(1, Ordering::Relaxed);
+        self.deferred_drops.add(1);
         self.defer(work);
     }
 }
@@ -236,18 +243,20 @@ impl MainWorkHandle {
 mod tests {
     use super::{MainWork, Work};
 
-    /// **Only a plugin drop counts as a deferred drop**: `defer_drop` adds one
-    /// each, plain `defer` adds none, and the collector runs both.
+    /// **Only a plugin drop counts as a deferred drop, and only on its own
+    /// collector**: `defer_drop` adds one each, plain `defer` adds none, and a
+    /// second collector in the process counts nothing of the first's.
     #[test]
-    fn a_deferred_drop_is_counted_and_other_deferred_work_is_not() {
+    fn a_deferred_drop_is_counted_by_its_own_collector_only() {
         let main = tutti_fixtures::main_thread();
         let (work, handle) = MainWork::new();
-        let before = MainWork::deferred_drops();
+        let (other, _other_handle) = MainWork::new();
         handle.defer(|_main| {});
-        assert_eq!(MainWork::deferred_drops(), before, "plain work");
+        assert_eq!(work.deferred_drops(), 0, "plain work");
         handle.defer_drop(|_main| {});
         handle.defer_drop(|_main| {});
-        assert_eq!(MainWork::deferred_drops(), before + 2, "two drops");
+        assert_eq!(work.deferred_drops(), 2, "two drops");
+        assert_eq!(other.deferred_drops(), 0, "another collector's count");
         assert_eq!(work.run(main), 3, "the collector runs all three");
     }
 

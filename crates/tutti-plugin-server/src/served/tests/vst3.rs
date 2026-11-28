@@ -889,6 +889,7 @@ fn the_servers_losses_are_told_to_the_host_when_they_change() {
                     commands_refused,
                     edits_refused,
                     refused_off_thread_calls,
+                    ..
                 } => Some((
                     *commands_refused,
                     *edits_refused,

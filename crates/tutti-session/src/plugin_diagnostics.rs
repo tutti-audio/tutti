@@ -103,7 +103,8 @@ impl<'a> Diagnostics<'a> {
     /// [`bridge_losses`](Self::bridge_losses), which are the host side's. All
     /// zero for a plugin that runs in this process; its refused off-thread
     /// calls are in [`refused_off_thread_calls`](Self::refused_off_thread_calls),
-    /// which counts them for every hosting.
+    /// which counts them for every hosting. The counts are the current
+    /// server's: a recovery starts a new server, whose counts start at zero.
     pub fn server_losses(&self) -> ServerLosses {
         self.hosted
             .controls

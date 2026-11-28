@@ -17,6 +17,8 @@ use std::marker::PhantomData;
 
 use tutti_units::{Gain, Samples};
 
+#[cfg(feature = "midi")]
+use crate::patch::InstrumentDecl;
 use crate::patch::{Declarations, IntoPatch, NodeDecl, PatchTarget, WireDecl, WireEnds};
 use crate::{BusWire, ChannelWire, EventWire, MainBusWire, MainOutput, Weighted, Wire};
 
@@ -196,6 +198,33 @@ impl<K: Clone, C> NodeDecl<K, C> {
     }
 }
 
+/// The ends of a declared instrument: its audio leaves from its strip, and
+/// its event input is the node's own, beside its queue.
+#[cfg(feature = "midi")]
+impl<K: Clone, C> InstrumentDecl<K, C> {
+    fn mention(&self) -> Mention<K> {
+        Mention::new(self.key().clone())
+    }
+
+    /// Output channel `i` of the strip, as a start.
+    #[must_use]
+    pub fn output(&self, i: usize) -> OutputEnd<K, ChannelWire> {
+        self.mention().output(i)
+    }
+
+    /// Output bus `bus` of the strip, as a start.
+    #[must_use]
+    pub fn bus_output(&self, bus: u8) -> OutputEnd<K, BusWire> {
+        self.mention().bus_output(bus)
+    }
+
+    /// Event input `i` of the instrument's node, as an end.
+    #[must_use]
+    pub fn event_input(&self, i: u16) -> InputEnd<K, EventWire> {
+        self.mention().event_input(i)
+    }
+}
+
 /// The wire between two ends of one kind.
 fn join<K, W: Wire>(from: OutputEnd<K, W>, to: InputEnd<K, W>) -> WireEnds<K> {
     match (from.port, to.key, to.port) {
@@ -246,6 +275,14 @@ impl<K: Clone, C> sealed::start::Sealed<K> for &NodeDecl<K, C> {
     }
 }
 
+#[cfg(feature = "midi")]
+impl<K: Clone, C> sealed::start::Sealed<K> for &InstrumentDecl<K, C> {
+    type Wire = MainBusWire;
+    fn start(self) -> (Chain<K>, OutputEnd<K, MainBusWire>) {
+        (Chain::empty(), OutputEnd::of(self.key().clone(), Out::Main))
+    }
+}
+
 impl<K, W: Wire> sealed::start::Sealed<K> for OutputEnd<K, W> {
     type Wire = W;
     fn start(self) -> (Chain<K>, OutputEnd<K, W>) {
@@ -267,6 +304,8 @@ impl<K: Clone> sealed::start::Sealed<K> for Chain<K> {
 
 impl<K> WireStart<K> for Mention<K> {}
 impl<K: Clone, C> WireStart<K> for &NodeDecl<K, C> {}
+#[cfg(feature = "midi")]
+impl<K: Clone, C> WireStart<K> for &InstrumentDecl<K, C> {}
 impl<K, W: Wire> WireStart<K> for OutputEnd<K, W> {}
 impl<K: Clone> WireStart<K> for Chain<K> {}
 
