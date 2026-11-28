@@ -863,11 +863,14 @@ fn fir_convolver() {
         .design(SampleRate::SR_48K, &[tilt])
         .unwrap();
     IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
-        ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &fir)
-                .block_size(Samples::new(64)),
+        ConvolverNode::<f32>::from(
+            FirConvolverConfig::new(
+                tutti_buffers::ChannelTopology::MONO,
+                std::sync::Arc::new(fir.clone()),
+            )
+            .unwrap()
+            .block_size(Samples::new(64)),
         )
-        .unwrap()
     })
     .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
     .check();
@@ -893,11 +896,15 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     ir: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
-            .block_size(block_size),
+    tutti_nodes::ConvolverNode::from(
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::MONO,
+            tutti_nodes::IrLayout::PerChannel,
+            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ir])),
+        )
+        .expect("one response on a mono bus")
+        .block_size(block_size),
     )
-    .expect("one response on a mono bus")
 }
 
 fn tube_stage() {

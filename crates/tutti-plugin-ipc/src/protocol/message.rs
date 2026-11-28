@@ -7,6 +7,7 @@
 
 use super::envelope::{ControlReply, ControlRequest, Working};
 use tutti_plugin_types::{MainThreadMarker, ServerError};
+use tutti_units::{Normalized, ParamId};
 
 /// What the server's loop does once a request is handled.
 // One value per message, moved once to the transport loop; a `ControlReply`
@@ -17,12 +18,12 @@ pub enum Reaction {
     /// Send this reply back to the host.
     Reply(ControlReply),
     /// Send the plugin's saved state back: a `StateReady` frame and the object
-    /// holding these bytes.
+    /// holding these bytes, with the writes stated beside them.
     ///
     /// The state does not fit a frame, so it is answered as an object. The handler
     /// returns it rather than writing to the transport, so handling stays a pure
     /// function of the request, testable without a socket.
-    State(Vec<u8>),
+    State(SavedState),
     /// No reply; keep looping.
     None,
     /// The host asked for shutdown; leave the loop.
@@ -56,11 +57,17 @@ impl<R: Into<Reaction>> From<Result<R, ServerError>> for Reaction {
 /// in place of its [`StateReady`](super::StateReady), whose object the transport
 /// makes.
 #[derive(Debug)]
-pub struct SavedState(pub Vec<u8>);
+pub struct SavedState {
+    /// The state's bytes.
+    pub bytes: Vec<u8>,
+    /// The writes the plugin's control holds that no block has applied, read
+    /// before the bytes.
+    pub pending: Vec<(ParamId, Normalized)>,
+}
 
 impl From<SavedState> for Reaction {
     fn from(state: SavedState) -> Self {
-        Self::State(state.0)
+        Self::State(state)
     }
 }
 

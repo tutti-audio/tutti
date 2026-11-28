@@ -172,9 +172,12 @@ fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        unassigned_bus(width),
+        tutti_nodes::IrLayout::PerChannel,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }
 
 /// True stereo from `[LL, LR, RL, RR]`.
@@ -185,15 +188,15 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     rr: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
-    tutti_nodes::ConvolverNode::try_from(
+    tutti_nodes::ConvolverNode::from(
         tutti_nodes::ConvolverConfig::new(
             tutti_buffers::ChannelTopology::STEREO,
-            &[ll, lr, rl, rr],
+            tutti_nodes::IrLayout::TrueStereo,
+            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ll, lr, rl, rr])),
         )
-        .true_stereo()
+        .expect("four responses on a stereo pair")
         .block_size(block_size),
     )
-    .expect("four responses on a stereo pair")
 }
 
 /// An ambisonic set of `input` in, `output` out.
@@ -203,9 +206,10 @@ fn ambisonic_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sa
     irs: &[tutti_buffers::Mono<'_, S>],
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(output, irs)
-            .ambisonic(input)
-            .block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        output,
+        tutti_nodes::IrLayout::Ambisonic(input),
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }

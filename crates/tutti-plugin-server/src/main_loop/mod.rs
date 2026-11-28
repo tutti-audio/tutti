@@ -267,7 +267,7 @@ pub(crate) fn serve_every(
         match reaction {
             Reaction::Shutdown => return Ok(()),
             Reaction::Reply(reply) => transport.send(&ControlFrame::Reply { id, reply })?,
-            Reaction::State(state) => crate::transport::send_state(transport, id, &state)?,
+            Reaction::State(state) => crate::transport::send_state(transport, id, state)?,
             Reaction::None => {}
         }
         for event in session.drain_async_events(main) {

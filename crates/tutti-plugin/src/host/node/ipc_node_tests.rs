@@ -466,7 +466,9 @@ fn a_served_plugin_reopens_and_restores_off_the_main_thread() {
             tutti_plugin_types::MainThreadMarker::new().is_none(),
             "no main thread here"
         );
-        first.reopen_restoring(Some(&state)).map(|r| (first, r))
+        first
+            .reopen_restoring(Some(&state.bytes))
+            .map(|r| (first, r))
     })
     .join()
     .expect("the worker returns")

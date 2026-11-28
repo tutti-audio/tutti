@@ -76,7 +76,7 @@ module-cycle tutti_units::units::frames,tutti_units::units::transport
 module-cycle tutti_vst2_ffi::host,tutti_vst2_ffi::interfaces
 module-cycle tutti_vst2_host::arrangement,tutti_vst2_host::control,tutti_vst2_host::editor,tutti_vst2_host::host,tutti_vst2_host::loaded,tutti_vst2_host::param_properties,tutti_vst2_host::parameters,tutti_vst2_host::state
 module-cycle tutti_vst3_ffi::audio,tutti_vst3_ffi::bus_buffers,tutti_vst3_ffi::com,tutti_vst3_ffi::module,tutti_vst3_ffi::module_entry,tutti_vst3_ffi::plugin,tutti_vst3_ffi::types,tutti_vst3_ffi::view
-module-cycle tutti_vst3_host::host::control,tutti_vst3_host::host::controller,tutti_vst3_host::host::instance,tutti_vst3_host::host::loaded,tutti_vst3_host::host::processor,tutti_vst3_host::host::shell
+module-cycle tutti_vst3_host::host::control,tutti_vst3_host::host::instance,tutti_vst3_host::host::loaded,tutti_vst3_host::host::processor,tutti_vst3_host::host::shell
 module-cycle tutti_vst3_host::host::editor_instance,tutti_vst3_host::host::hosting
 module-cycle tutti_vst3_host::host::loaded::parameters,tutti_vst3_host::host::loaded::state
 module-cycle xtask::gates,xtask::recipes
@@ -257,7 +257,6 @@ field-leak tutti_midi_file::file::StandardMidiFile::repairs
 field-leak tutti_midi_file::file::StandardMidiFile::tracks
 field-leak tutti_midi_hardware::backend::legacy_port::sender::Ends::1
 field-leak tutti_midi_hardware::ci::Member::device
-field-leak tutti_midi_hardware::ci::Member::group
 field-leak tutti_midi_hardware::ci::Member::initiators
 field-leak tutti_midi_hardware::ci::Member::process
 field-leak tutti_midi_hardware::ci::Member::properties
