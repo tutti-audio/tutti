@@ -418,6 +418,33 @@ fn a_main_output_declared_after_the_build_folds_from_the_plan_that_carries_it() 
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 
+/// **No offline session has a main output of no channels**: a build declared
+/// empty, and a declaration of an empty main output after it, are refused by
+/// name, and so is a device of no channels.
+#[test]
+fn an_offline_session_never_has_a_main_output_of_no_channels() {
+    let empty = ChannelTopology::new([]).expect("an empty list is a topology");
+    assert!(matches!(
+        offline(Session::builder().main_output_topology(empty), 2),
+        Err(Error::Output(FoldError::Buffer(
+            tutti_buffers::BufferError::ZeroWidth
+        )))
+    ));
+    let mut s = offline(Session::builder(), 2).unwrap();
+    assert!(s.declare_main_output_topology(empty).is_err());
+    assert_eq!(s.graph_ref().outputs(), 2, "the main output is unchanged");
+    let floorless = Session::builder()
+        .outputs_floor(ChannelLayout::from_count(0))
+        .outputs(ChannelLayout::from_count(0))
+        .build();
+    assert!(matches!(
+        floorless,
+        Err(Error::Output(FoldError::Buffer(
+            tutti_buffers::BufferError::ZeroWidth
+        )))
+    ));
+}
+
 /// A main output declared under a stream that is not rendering is bounded: the
 /// engine holds a few main outputs ahead of the plan in force, and past them a
 /// declaration is refused by name (`Error::MainOutput`) with the main output unchanged;
