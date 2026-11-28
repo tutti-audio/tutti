@@ -23,9 +23,9 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Wave};
 use tutti_engine::Engine;
 use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare};
-use tutti_sampler::testing::wait_for_open;
+use tutti_sampler::testing::{placed_source, wait_for_open};
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, MemorySource, Playback, SlotId, StreamStart, VoicePool, VoiceWindow,
+    DiskStreamer, DiskVoice, Playback, SlotId, StreamStart, VoicePool, VoiceWindow,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{LoopEdit, MotionCommand, Transport};
@@ -95,8 +95,7 @@ fn render_with(
             wave.append(Interleaved::new(&[sample(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
         let pool = VoicePool::new();
         let handle = ed.insert(NodeKey(1), "voice", pool).controls;
         tick = Some(handle.clone());

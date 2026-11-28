@@ -852,6 +852,7 @@ pub(crate) fn interpolate_taps<F: Float>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemorySourceConfig;
     use tutti_buffers::Interleaved;
     use tutti_buffers::MAX_CHANNELS;
     use tutti_graph::{Env, Offset, TransportChanges, TransportPosition};
@@ -1366,8 +1367,7 @@ mod tests {
         assert!(Place::<f32>::for_wave(&mono, ChannelLayout::STEREO).is_err());
         let wave = Arc::new(wave);
         assert_eq!(
-            super::super::MemorySource::with_channels(Arc::clone(&wave), ChannelLayout::STEREO)
-                .err(),
+            MemorySourceConfig::new(Arc::clone(&wave), ChannelLayout::STEREO).err(),
             Some(PlaceError::Fold(refused))
         );
         let voice = crate::memory_voice(
@@ -1481,8 +1481,7 @@ mod tests {
         ));
         let w = Arc::new(six);
         assert_eq!(
-            super::super::MemorySource::with_channels(Arc::clone(&w), ChannelLayout::from(5u16))
-                .err(),
+            MemorySourceConfig::new(Arc::clone(&w), ChannelLayout::from(5u16)).err(),
             Some(PlaceError::Fold(FoldError::Unplaced {
                 channel: 5,
                 speaker: tutti_buffers::Speaker::Unassigned

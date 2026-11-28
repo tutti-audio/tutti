@@ -33,7 +33,7 @@ use tutti_graph::{Node, Offset, Prepare, TransportChanges};
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};
 
 use super::DiskVoice;
-use crate::testing::{MockTransport, block, block_in};
+use crate::testing::{MockTransport, block, block_in, placed_source};
 use crate::{DiskStreamer, DiskStreamerConfig, Loop, Manual, MemorySource, StreamHandle};
 
 const SR: f64 = 48_000.0;
@@ -249,8 +249,7 @@ struct Memory {
 impl Memory {
     fn new(wave: Arc<tutti_buffers::Wave>, loop_: Option<Loop>, speed: f64, from: f64) -> Self {
         let clock = MockTransport::rolling(Beat::new(from), Bpm::of(120.0));
-        let mut source = MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let mut source = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
         source.set_speed(PlaybackRate::of(speed));
         source.set_loop(loop_);
         source.prepare(&Prepare::new(

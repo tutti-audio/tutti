@@ -27,6 +27,7 @@
 
 use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
+use tutti_sampler::testing::placed_source;
 
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
@@ -41,7 +42,7 @@ use tutti_graph::{
 };
 use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_sampler::{MemorySource, Playback, VoiceNode, VoiceNodeHandle};
+use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode, VoiceNodeHandle};
 use tutti_units::{
     Amplitude, Beat, BeatsPerCycle, Bipolar, Bpm, Frame, PhaseIncrement, SampleRate, Samples,
     UnitParam,
@@ -80,8 +81,7 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
 fn solo_voice() -> (Renderer, NodeKey, VoiceNodeHandle<f32>) {
-    let source = MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let source = placed_source(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)));
     let (mut solo, key, handle) = Renderer::alone(
         VoiceNode::with_channels(source, Playback::default(), ChannelLayout::MONO)
             .expect("a finite gain and a nonempty width"),
@@ -291,8 +291,10 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
 #[test]
 fn a_lane_drives_a_memory_sources_gain_around_its_cell() {
     let (mut s, key, controls) = Renderer::alone(
-        MemorySource::with_channels(flat_wave(48_000), ChannelLayout::MONO)
-            .expect("a placeable wave"),
+        MemorySource::from(
+            MemorySourceConfig::new(flat_wave(48_000), ChannelLayout::MONO)
+                .expect("a placeable wave"),
+        ),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
     s.set_transport_fn(rolling);
@@ -322,8 +324,7 @@ fn a_lane_drives_a_memory_sources_gain_around_its_cell() {
 fn a_voices_gain_port_reads_its_cell_as_its_base() {
     use tutti_graph::Node;
 
-    let source = MemorySource::placed(flat_wave(64), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let source = placed_source(flat_wave(64), VoiceWindow::from(Beat::new(0.0)));
     let play = Playback {
         gain: Amplitude::new(0.25),
         ..Playback::default()

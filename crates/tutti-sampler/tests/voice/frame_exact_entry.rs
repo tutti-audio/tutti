@@ -28,6 +28,7 @@
 //! scratch was sized from `Prepare::max_block`.
 
 use tutti_graph::testing::WireDeclared;
+use tutti_sampler::testing::placed_source;
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Planes, PlanesMut};
@@ -44,7 +45,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Env, Io, Node, Prepare, Shape, Status, TransportChanges, contract};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::FrameClock;
-use tutti_sampler::{MemorySource, SlotId, VoicePool};
+use tutti_sampler::{SlotId, VoicePool};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{
     MotionCommand, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
@@ -73,8 +74,7 @@ fn pool(start: Beat) -> VoicePool<f32> {
         wave.append(Interleaved::new(&[0.5], wave.layout()).unwrap())
             .unwrap();
     }
-    let source =
-        MemorySource::placed(Arc::new(wave), VoiceWindow::from(start)).expect("a placeable wave");
+    let source = placed_source(Arc::new(wave), VoiceWindow::from(start));
     let mut pool = VoicePool::new();
     pool.insert(SlotId(1), source, Default::default())
         .expect("a finite gain and a nonempty width");
