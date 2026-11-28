@@ -128,7 +128,7 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
 
 /// `frames` stereo frames from `session`, in `block`-frame device blocks.
 fn render(session: &mut Session, frames: usize, block: usize) -> Vec<Vec<f32>> {
-    let mut out = vec![Vec::with_capacity(frames); 2];
+    let mut out = vec![Vec::new(); 2];
     let mut interleaved = vec![0.0f32; block * 2];
     let mut done = 0;
     while done < frames {
@@ -136,7 +136,7 @@ fn render(session: &mut Session, frames: usize, block: usize) -> Vec<Vec<f32>> {
         session.render(
             &mut InterleavedMut::new(&mut interleaved[..len * 2], ChannelLayout::STEREO).unwrap(),
         );
-        for frame in interleaved[..len * 2].chunks_exact(2) {
+        for frame in interleaved[..len * 2].as_chunks::<2>().0 {
             out[0].push(frame[0]);
             out[1].push(frame[1]);
         }

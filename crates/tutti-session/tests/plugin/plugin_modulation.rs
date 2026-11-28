@@ -693,7 +693,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
             missed_before,
             "live block {b} late or missed: the plugin's chunk was played unanswered"
         );
-        for frame in out.chunks_exact(2) {
+        for frame in out.as_chunks::<2>().0 {
             live[0].push(frame[0]);
             live[1].push(frame[1]);
         }

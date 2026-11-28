@@ -265,7 +265,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
         let n = (*n).min(total - done);
         let mut out = vec![0.0f32; n * 2];
         s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
-        for frame in out.chunks_exact(2) {
+        for frame in out.as_chunks::<2>().0 {
             live[0].push(frame[0]);
             live[1].push(frame[1]);
         }

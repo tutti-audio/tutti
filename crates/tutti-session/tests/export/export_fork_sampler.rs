@@ -406,7 +406,7 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
         move |session: &mut Session, heard: &mut Vec<f32>| {
             let _ = streamer.step_until_idle(64);
             session.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
-            heard.extend(block.chunks_exact(2).map(|frame| frame[0]));
+            heard.extend(block.as_chunks::<2>().0.iter().map(|frame| frame[0]));
             assert!(heard.len() < len, "the live side ran out of file first");
         }
     };

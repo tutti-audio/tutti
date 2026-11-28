@@ -142,7 +142,11 @@ fn clip_of(path: &Path, streamed: bool) -> (Session, tutti_sampler::Clip<f32>) {
 /// Renders `clip` at beat 0 on a rolling session for `frames` frames,
 /// waiting first for a streamed clip's ring to prime.
 fn play(clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
-    let mut s = offline_48k();
+    play_in(&mut offline_48k(), clip, frames)
+}
+
+/// [`play`] in `s`.
+fn play_in(s: &mut Session, clip: tutti_sampler::Clip<f32>, frames: usize) -> Vec<f32> {
     let key = s.graph().add(clip);
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(key, 0)])
@@ -225,6 +229,44 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
                 first + k
             );
         }
+    }
+}
+
+/// **A stream plays on at its pitch after a re-rate**: the 48 kHz ramp file a
+/// session opened streams on at the new rate of 44.1 kHz, so each output frame
+/// advances the file by `48 000 / 44 100` of its frames, and the ramp, which is
+/// linear, steps by that much of its own step.
+#[test]
+fn a_stream_plays_on_at_its_pitch_after_a_rerate() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    write_ramp(&path);
+    let (mut s, clip) = clip_of(&path, true);
+    assert!(clip.is_streamed());
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    // The re-prepare's second half lands once a block has run and an update
+    // has collected.
+    let mut block = vec![0.0f32; BLOCK * 2];
+    for _ in 0..16 {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        let _ = s.update();
+        if s.commit() != tutti_session::Committed::Retry {
+            break;
+        }
+    }
+    assert_eq!(s.sample_rate(), SampleRate::SR_44K1);
+    let heard = play_in(&mut s, clip.at(Beat::new(0.0)), 3_000);
+
+    // Past the start fade: consecutive frames of the ramp.
+    let step = f64::from(value(1) - value(0)) * RATE / 44_100.0;
+    let first = heard.iter().position(|&x| x != 0.0).expect("it sounds");
+    for k in 1_100..2_000 {
+        let got = f64::from(heard[first + k + 1] - heard[first + k]);
+        assert!(
+            (got - step).abs() <= step * 1e-3,
+            "output frame {}: a step of {got}, want {step}",
+            first + k
+        );
     }
 }
 

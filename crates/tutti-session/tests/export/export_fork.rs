@@ -694,7 +694,7 @@ fn live_playback_continues_unaffected_while_an_export_renders() {
             while after < 8 {
                 session
                     .render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
-                heard.extend(block.chunks_exact(2).map(|frame| frame[0]));
+                heard.extend(block.as_chunks::<2>().0.iter().map(|frame| frame[0]));
                 if done.load(Ordering::Acquire) {
                     after += 1;
                 }
