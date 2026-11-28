@@ -6,8 +6,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DetachedSession, EventInputPort, EventOutputPort, Feeder, InputPort, MainOutput,
-    OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
+    Committed, ConnectError, DetachedSession, EventInputPort, EventOutputPort, Feeder, InputPort,
+    MainOutput, OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
 };
 use tutti_units::SampleRate;
 
@@ -123,8 +123,8 @@ fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
     let _side = s.graph().take_audio_side();
     let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
 
     let refused = s
         .graph()
@@ -268,11 +268,11 @@ fn feed_and_feeds_refuse_a_node_that_is_not_there() {
 fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
     let mut s = detached();
     let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_48K);
-    let g = s.graph();
-    let limited = g.add(ForkByClone(Rated(rates)));
-    g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
+    let limited = s.graph().add(ForkByClone(Rated(rates)));
+    s.graph()
+        .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
 
-    let refused = g.set_sample_rate(SampleRate::SR_96K).unwrap_err();
+    let refused = s.set_sample_rate(SampleRate::SR_96K).unwrap_err();
     assert_eq!(
         refused,
         SetRateError::RateUnsupported {
@@ -281,16 +281,20 @@ fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
             rate: SampleRate::SR_96K,
         }
     );
-    assert_eq!(g.testing().prepared().sample_rate(), RATE, "unchanged");
-    assert!(!g.testing().is_repreparing(), "nothing was sent");
+    assert_eq!(s.sample_rate(), RATE, "unchanged");
+    assert_eq!(
+        s.commit(),
+        Committed::Sent,
+        "nothing was sent: no re-prepare pends"
+    );
 
     // Below the range is refused the same way, and both ends are accepted.
     assert!(matches!(
-        g.set_sample_rate(SampleRate::SR_22K05),
+        s.set_sample_rate(SampleRate::SR_22K05),
         Err(SetRateError::RateUnsupported { .. })
     ));
-    g.set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_44K1);
-    g.set_sample_rate(SampleRate::SR_48K).unwrap();
-    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_48K);
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.sample_rate(), SampleRate::SR_44K1);
+    s.set_sample_rate(SampleRate::SR_48K).unwrap();
+    assert_eq!(s.sample_rate(), SampleRate::SR_48K);
 }

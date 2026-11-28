@@ -310,7 +310,7 @@ impl<F: Float> Taps<'_, F> {
     /// now, and returns the new reader: it replaces the tap of the same
     /// [`id`](EventTapReader::id), so the reader it supersedes is fed no more.
     /// What the owner of a tap does after a re-prepare at another rate
-    /// ([`set_sample_rate`](Graph::set_sample_rate); a device session's restart
+    /// ([`Session::set_sample_rate`](crate::Session::set_sample_rate); a device session's restart
     /// re-rates the graph too), so that one reader's frames are always on one
     /// scale. Each owner reopens its own tap and no other (the session's
     /// hardware MIDI out reopens its own), so another owner's reader is not

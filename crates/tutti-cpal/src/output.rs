@@ -10,9 +10,10 @@ use tutti_buffers::{Float, SampleFormat};
 use tutti_engine::{AudioCallbackState, OutputQuantum, OutputSpec, OutputStream, StreamDriver};
 use tutti_platform::Executor;
 
+use crate::audio_host::AudioHost;
 use crate::driver_seam::{CpalDriver, choose_output_config, spec_from_supported};
 use crate::error::{DeviceError, Result};
-use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
+use crate::host::{DeviceHost, DeviceSelector, device_name};
 use crate::roster::{DeviceDirection, DeviceId};
 
 /// What [`AudioEngine`] opens: the output device, its sample format and its
@@ -282,10 +283,10 @@ pub(crate) type Target = (DeviceHost, OutputConfig, Executor);
 /// ([`AudioEngine::resolve_device`] finds it), or the caller's own
 /// ([`supplied`](Self::supplied)).
 pub struct Resolved<D = CpalDriver> {
-    spec: OutputSpec,
-    driver: D,
+    pub(crate) spec: OutputSpec,
+    pub(crate) driver: D,
     /// The device's name; `None` for a supplied driver.
-    opened: Option<Opened>,
+    pub(crate) opened: Option<Opened>,
 }
 
 impl<D> Resolved<D> {
@@ -502,38 +503,6 @@ impl AudioEngine {
             spec,
             opened,
         ))
-    }
-
-    /// Starts `resolved` (this engine's device, found by
-    /// [`resolve_device`](Self::resolve_device), or a
-    /// [`supplied`](Resolved::supplied) driver, which opens no device) on `host`,
-    /// a host whose stream another driver ran (a timer): the driver takes over
-    /// the stream, `rerate` runs between the stop and the start as in
-    /// [`TuttiDriver::restart_with`](crate::TuttiDriver::restart_with), and the
-    /// host's stream, fault record and latency cell are the same ones.
-    ///
-    /// # Errors
-    /// The hook's error, or what the driver's `open` reports, as `E`, **with
-    /// the host back** and its stream stopped at its old spec: nothing plays,
-    /// and the driver the host ran is to be started again by the caller.
-    pub fn start_resolved<F: Float, D: StreamDriver<F>, E: From<DeviceError>>(
-        self,
-        host: tutti_engine::StreamHost<F>,
-        resolved: Resolved<D>,
-        rerate: impl FnOnce(&OutputSpec, &tutti_engine::Stopped<'_, F>) -> core::result::Result<(), E>,
-    ) -> core::result::Result<crate::TuttiDriver<F>, (tutti_engine::StreamHost<F>, E)>
-    where
-        D::Error: Into<DeviceError>,
-    {
-        let Resolved {
-            spec,
-            driver,
-            opened,
-        } = resolved;
-        match self.origin.started(opened) {
-            Ok(origin) => crate::TuttiDriver::take_over(host, spec, driver, rerate, origin),
-            Err(e) => Err((host, e.into())),
-        }
     }
 
     /// Starts a stream at the current [`spec`](OutputStream::spec) through `driver`.

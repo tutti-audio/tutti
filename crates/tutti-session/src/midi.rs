@@ -1078,12 +1078,9 @@ impl MidiState {
     /// `Phase::MidiOut`: drains every output's tap to its device or sink.
     /// Whether the graph was edited.
     pub(crate) fn midi_out_phase<F: Float>(&mut self, graph: &mut Graph<F>, now: Instant) -> bool {
-        // A graph re-rated outside the device hook (`Graph::set_sample_rate`)
-        // is followed here, before this update's events are read.
         self.last_now = Some(now);
-        let mut edited = self.follow_rate(graph, now);
         let timing = self.output_timing(now);
-        edited |= self.sinks.drain(graph, timing.as_ref());
+        let mut edited = self.sinks.drain(graph, timing.as_ref());
         edited |= self.ports.drain_outputs(graph, timing.as_ref());
         edited
     }

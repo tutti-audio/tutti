@@ -260,10 +260,6 @@ fn silence_is_the_empty_set() {
             .unwrap()
             .is_empty()
     );
-    assert!(
-        r.s.graph_ref().testing().planned_compensation().is_some(),
-        "no `PortSource::Zero` is stored: the spec validates"
-    );
     assert!(left(&mut r.s).iter().all(|&x| x == 0.0));
 }
 

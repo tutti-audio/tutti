@@ -9,6 +9,7 @@
 //! added the same way, and, unlike the audio inlet, there is no rate to refuse
 //! and an export fork is accepted.
 
+use crate::committed::committed;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
@@ -190,15 +191,13 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
         "cut at once"
     );
     let _ = s.update();
-    let cut = s.graph().testing().commits_sent();
     // Past the span an audio edge would fade over.
     for _ in 0..(2 * tutti_graph::declick_frames(SampleRate::SR_48K).get()) {
         s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     }
-    let _ = s.update();
     assert_eq!(
-        s.graph().testing().commits_sent(),
-        cut,
+        committed(&s.update()),
+        0,
         "no commit collects a fade that ended"
     );
 

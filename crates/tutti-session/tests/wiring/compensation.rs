@@ -103,18 +103,7 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
     let _ = s.update();
     assert!(!s.graph_ref().has_uncommitted_edits(), "committed");
 
-    let sent = s
-        .graph_ref()
-        .testing()
-        .sent_compensation()
-        .expect("the commit sent a plan");
-    assert_eq!(
-        s.compensation().to_vec(),
-        sent.channels(),
-        "per-channel pre-roll"
-    );
-    assert_eq!(s.latency(), sent.total(), "total latency");
-    assert_eq!(sent.total(), lat, "and it is the limiter's lookahead");
+    assert_eq!(s.latency(), lat, "total latency is the limiter's lookahead");
     assert_eq!(
         s.compensation().to_vec().first().copied(),
         Some(Samples::new(0)),
@@ -133,43 +122,6 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
         authored,
         "nothing is spliced into the wiring"
     );
-}
-
-/// **The spec's latency fold and the compiled plan agree**, on a latent graph
-/// and on one with no latency: the fold (`latency_plan`, what a readout
-/// reads) is what the compiled plan compensates by, zeros and all (the fold
-/// reports no channels when nothing is latent; the plan a zero per output).
-#[test]
-fn the_latency_fold_and_the_compiled_plan_agree() {
-    fn figures(s: &DetachedSession) -> (Vec<Samples>, Samples) {
-        let folded = s.graph_ref().testing().latency_plan();
-        let planned = s
-            .graph_ref()
-            .testing()
-            .planned_compensation()
-            .expect("a plan is compiled");
-        let width = folded.channels().len().max(planned.channels().len());
-        let of = |c: &tutti_graph::Compensation| -> (Vec<Samples>, Samples) {
-            ((0..width).map(|i| c.for_channel(i)).collect(), c.total())
-        };
-        let (f, p) = (of(&folded), of(&planned));
-        assert_eq!(
-            f, p,
-            "the spec's latency fold and the compiled plan disagree"
-        );
-        f
-    }
-
-    let mut s = detached();
-    let (_, lat) = skewed(&mut s);
-    let _ = s.update();
-    assert_eq!(figures(&s).1, lat);
-
-    let mut s = detached();
-    let a = s.graph().add(ForkByClone(Const::mono(1.0)));
-    s.graph().connect(a, MainOutput).unwrap();
-    let _ = s.update();
-    assert_eq!(figures(&s).1, Samples::new(0));
 }
 
 /// **A re-prepare to a new rate republishes the figures once it resumes**,
@@ -198,7 +150,7 @@ fn a_re_prepare_republishes_the_figures_once_it_resumes() {
     let mut out = [0.0f32; 2];
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
 
-    s.graph().set_sample_rate(SampleRate::SR_48K).unwrap();
+    s.set_sample_rate(SampleRate::SR_48K).unwrap();
     for _ in 0..3 {
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
         let _ = s.update();

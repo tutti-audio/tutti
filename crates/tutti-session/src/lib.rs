@@ -210,7 +210,7 @@ pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
 pub use clock::{
-    Clock, Offline, OfflineSession, RealTime, SessionFloat, SystemClock, SystemSession,
+    Clock, Offline, OfflineSession, RealTime, SessionFloat, Stepped, SystemClock, SystemSession,
 };
 #[cfg(feature = "testing")]
 pub use clock::{Detached, DetachedSession};

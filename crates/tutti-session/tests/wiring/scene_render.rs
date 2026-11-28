@@ -75,6 +75,8 @@ struct Scene {
     side: AudioSide,
     filter: NodeKey,
     drive: Key<DistortionNode<f32>>,
+    /// The limiter on the right channel, when the scene has one.
+    limiter: Option<NodeKey>,
 }
 
 /// A saw through a low-pass and a waveshaper on the left channel, the same
@@ -91,10 +93,7 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("builds");
-    session
-        .graph()
-        .set_sample_rate(SampleRate::of(RATE))
-        .unwrap();
+    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
     let side = session.graph().take_audio_side();
 
     let g = session.graph();
@@ -107,15 +106,14 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     g.set_sources(InputPort::new(drive, 0), [OutputPort::new(filter, 0)])
         .unwrap()
         .unfaded();
-    let right = if with_limiter {
+    let limiter = with_limiter.then(|| {
         let lim = g.add(limiter());
         g.set_sources(InputPort::new(lim, 0), [OutputPort::new(osc, 0)])
             .unwrap()
             .unfaded();
         lim.erase()
-    } else {
-        osc.erase()
-    };
+    });
+    let right = limiter.unwrap_or_else(|| osc.erase());
     g.set_sources(MainOutput::channel(0), [OutputPort::new(drive, 0)])
         .unwrap()
         .unfaded();
@@ -128,6 +126,7 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
         side,
         filter: filter.erase(),
         drive,
+        limiter,
     }
 }
 
@@ -176,7 +175,8 @@ fn assert_sounds(out: &[Vec<f32>], what: &str) {
 #[test]
 fn a_compensated_scene_delays_its_dry_channel_by_the_lookahead() {
     let mut s = scene(true);
-    let lookahead = s.session.graph_ref().testing().latency_plan().total().get();
+    let lim = s.limiter.expect("a limiter");
+    let lookahead = s.session.graph_ref().node_latency(lim).unwrap().get();
     // The limiter's default lookahead, in frames at `RATE`.
     assert!(lookahead > 0, "the limiter reports its lookahead");
     let b = render(&mut s.side, 9_600, 256);
@@ -386,8 +386,9 @@ fn pdc_is_the_compilers() {
         [s.drive.output(0)],
         "nothing is spliced in; the plan delays the channel"
     );
+    let lim = s.limiter.expect("a limiter");
     assert!(
-        s.session.graph_ref().testing().latency_plan().total().get() > 0,
+        s.session.graph_ref().node_latency(lim).unwrap().get() > 0,
         "the limiter reports its lookahead"
     );
 }

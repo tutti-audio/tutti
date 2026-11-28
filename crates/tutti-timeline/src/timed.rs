@@ -37,8 +37,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use crossbeam_queue::ArrayQueue;
 use tutti_units::{At, Beat, Frame};
 
+use super::command::MotionCommand;
 use super::loop_region::LoopEdit;
-use super::motion::MotionCommand;
 
 tutti_rt::id! {
     /// One take of a session: the number its take events carry. Minted by the

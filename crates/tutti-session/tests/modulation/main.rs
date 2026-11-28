@@ -57,3 +57,7 @@ mod program_targets;
 #[cfg(feature = "export")]
 #[path = "../support/bounced.rs"]
 mod bounced;
+
+// What an `update`'s events say it sent.
+#[path = "../support/committed.rs"]
+mod committed;

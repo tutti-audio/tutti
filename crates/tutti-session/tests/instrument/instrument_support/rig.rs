@@ -111,20 +111,13 @@ impl Rig {
         }
     }
 
-    /// Renders until a re-prepare has landed, and one block after it so the
-    /// instrument's queue has run on the new clock.
+    /// Renders the blocks a re-prepare takes to land (each block's update
+    /// runs its second commit), and one more so the instrument's queue has
+    /// run on the new clock.
     pub(crate) fn settle(&mut self) {
-        for _ in 0..64 {
+        for _ in 0..4 {
             self.block();
-            if !self.session.graph_ref().testing().is_repreparing() {
-                break;
-            }
         }
-        assert!(
-            !self.session.graph_ref().testing().is_repreparing(),
-            "the re-prepare lands"
-        );
-        self.block();
     }
 
     /// `at` frames past the origin: where a case stamps.

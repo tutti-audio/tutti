@@ -23,6 +23,7 @@ mod audio;
 #[cfg(test)]
 mod beat_walk;
 mod clock;
+mod command;
 mod fsm;
 mod handle;
 mod loop_region;
@@ -39,9 +40,10 @@ mod walk;
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 pub use audio::{Applied, AudioTaken, TransportAudio};
+pub use command::{AfterLocate, FadeOut, MotionCommand, Roll};
 pub use handle::Transport;
 pub use loop_region::{LoopEdit, LoopRegion};
-pub use motion::{AfterLocate, FadeOut, MotionCommand, MotionFsm, MotionState, Roll};
+pub use motion::{MotionFsm, MotionState};
 pub use offline::{OfflineTimeline, OfflineTimelineConfig};
 pub use project_meter::{
     ProjectMeter, TimeSignatureCell, TimeSignatureSlot, TimeSignatureSlotReader,

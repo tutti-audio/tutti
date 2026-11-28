@@ -100,3 +100,8 @@ mod system_clock;
 // A session's input and output ports render a block without allocating.
 #[cfg(feature = "midi-hardware")]
 mod ports_no_alloc;
+
+// What an `update`'s events say it sent.
+#[cfg(feature = "midi-hardware")]
+#[path = "../support/committed.rs"]
+mod committed;

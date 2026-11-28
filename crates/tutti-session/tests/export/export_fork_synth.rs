@@ -98,8 +98,9 @@ fn font() -> Arc<SoundFont> {
 
 /// A SoundFont unit on [`PRESET`].
 fn sf2(font: &Arc<SoundFont>) -> SoundFontUnit<f32> {
-    let mut unit =
-        SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).expect("the unit builds");
+    let mut unit = SoundFontUnit::from(
+        SoundFontConfig::new(Arc::clone(font)).expect("a font with a playable preset"),
+    );
     unit.program_change(MidiChannel::FIRST, PRESET);
     unit
 }
@@ -115,10 +116,7 @@ fn session_with<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send +
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    session
-        .graph()
-        .set_sample_rate(SampleRate::of(RATE))
-        .unwrap();
+    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
     let synth = session.graph().add(unit);
     // The dry pair; the unit's other outputs are sends.
     for c in 0..2 {
@@ -265,10 +263,7 @@ fn a_param_on_a_synth_reaches_it_and_its_fork() {
             .outputs_floor(ChannelLayout::STEREO)
             .build_detached(SampleRate::DEFAULT)
             .expect("a detached session builds");
-        session
-            .graph()
-            .set_sample_rate(SampleRate::of(RATE))
-            .unwrap();
+        session.set_sample_rate(SampleRate::of(RATE)).unwrap();
         let synth = session.graph().add(poly());
         session.graph().connect(synth, MainOutput).unwrap();
         let _ = session.update();

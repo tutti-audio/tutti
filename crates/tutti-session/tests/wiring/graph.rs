@@ -3,6 +3,7 @@
 //!
 //! Design 015 §9.4.
 
+use crate::committed::committed;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
@@ -17,8 +18,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    DetachedSession, Feeder, InputPort, MainOutput, OutputPort, RemoveError, ReplaceRefused,
-    Replacement, Session, SessionEvent, main_output_width,
+    Committed, DetachedSession, Feeder, InputPort, MainOutput, OutputPort, RemoveError,
+    ReplaceRefused, Replacement, Session, SessionEvent, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -284,50 +285,38 @@ fn every_source_reads_back_as_written() {
 
 /// Silence is stored as the empty set, never as a `PortSource::Zero` (which the
 /// compiler's validation refuses), whichever call wrote it: a port or output
-/// set to no sources, a cleared sink, and a fresh or widened main output. `planned_compensation` is `None` when the spec does not validate.
+/// set to no sources, a cleared sink, and a fresh or widened main output. Each
+/// state commits, which a stored zero would refuse.
 #[test]
 fn every_setter_stores_silence_as_the_empty_set() {
     let mut s = detached(2);
-    let graph = s.graph();
-    let sink = graph.add(ForkByClone(Through::mono()));
-    let src = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
-    assert!(
-        graph.testing().planned_compensation().is_some(),
-        "fresh main output"
-    );
+    let sink = s.graph().add(ForkByClone(Through::mono()));
+    let src = s.graph().add(ForkByClone(Const::frame(&[1.0, 2.0])));
+    assert_eq!(s.commit(), Committed::Sent, "fresh main output");
 
-    graph
+    s.graph()
         .set_sources(InputPort::new(sink, 0), [OutputPort::new(src, 0)])
         .unwrap()
         .unfaded();
-    graph
+    s.graph()
         .set_sources(InputPort::new(sink, 0), [])
         .unwrap()
         .unfaded();
-    assert!(
-        graph.testing().planned_compensation().is_some(),
-        "set_sources of none"
-    );
+    assert_eq!(s.commit(), Committed::Sent, "set_sources of none");
 
-    graph
+    s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(src, 0)])
         .unwrap()
         .unfaded();
-    graph
+    s.graph()
         .set_sources(MainOutput::channel(0), [])
         .unwrap()
         .unfaded();
-    assert!(
-        graph.testing().planned_compensation().is_some(),
-        "set_sources of none after one"
-    );
+    assert_eq!(s.commit(), Committed::Sent, "set_sources of none after one");
 
-    graph.connect(src, MainOutput).unwrap().unfaded();
-    graph.disconnect(src, MainOutput).unwrap();
-    assert!(
-        graph.testing().planned_compensation().is_some(),
-        "disconnected main bus"
-    );
+    s.graph().connect(src, MainOutput).unwrap().unfaded();
+    s.graph().disconnect(src, MainOutput).unwrap();
+    assert_eq!(s.commit(), Committed::Sent, "disconnected main bus");
 }
 
 /// `remove` says whether the node was there, so removing a node twice is a
@@ -418,7 +407,7 @@ fn main_output_width_takes_the_wider_side_within_the_scratch_bounds() {
 // ---- the edit flag ------------------------------------------------------------
 
 /// **An edit between two updates is committed by the next update.** One
-/// commit, and the plan it sends is a new one.
+/// commit, and the edit is what renders.
 #[test]
 fn an_edit_between_updates_is_committed_by_the_next() {
     let mut s = detached(1);
@@ -428,12 +417,6 @@ fn an_edit_between_updates_is_committed_by_the_next() {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    let sent = s.graph_ref().testing().commits_sent();
-    let plan = s
-        .graph_ref()
-        .testing()
-        .sent_plan()
-        .expect("the first update sent a plan");
 
     let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     s.graph()
@@ -441,25 +424,18 @@ fn an_edit_between_updates_is_committed_by_the_next() {
         .unwrap()
         .unfaded();
     assert!(s.graph_ref().has_uncommitted_edits());
-    let _ = s.update();
+    let events = s.update();
     assert!(
         !s.graph_ref().has_uncommitted_edits(),
         "the update committed the edit"
     );
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        sent + 1,
-        "one commit"
-    );
-    let after = s.graph_ref().testing().sent_plan().expect("a plan");
-    assert!(!Arc::ptr_eq(&plan, &after), "and it sent a new plan");
+    assert_eq!(committed(&events), 1, "one commit");
     let mut out = [0.0f32];
     s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 2.0, "the edit is what renders");
 }
 
-/// **An update with no edit sends no plan**: the plan the audio side holds
-/// is the same `Arc`, and no commit was counted.
+/// **An update with no edit sends no plan.**
 #[test]
 fn an_update_with_no_edit_sends_no_plan() {
     let mut s = detached(1);
@@ -469,18 +445,8 @@ fn an_update_with_no_edit_sends_no_plan() {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    let sent = s.graph_ref().testing().commits_sent();
-    let plan = s
-        .graph_ref()
-        .testing()
-        .sent_plan()
-        .expect("the first update sent a plan");
-    for _ in 0..3 {
-        let _ = s.update();
-    }
-    assert_eq!(s.graph_ref().testing().commits_sent(), sent, "no commit");
-    let after = s.graph_ref().testing().sent_plan().expect("a plan");
-    assert!(Arc::ptr_eq(&plan, &after), "the same plan");
+    let sent: usize = (0..3).map(|_| committed(&s.update())).sum();
+    assert_eq!(sent, 0, "no commit");
 }
 
 // ---- replacements ---------------------------------------------------------------
@@ -516,14 +482,14 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
         .set_sources(MainOutput::channel(0), [OutputPort::new(knob, 0)])
         .unwrap()
         .unfaded();
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     let mut out = [0.0f32];
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the knob plays");
 
     // The rate changes on the running graph: the first half is sent, and
     // the executor has not run it yet.
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let replaced = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
@@ -547,7 +513,9 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
 
     let events = s.update();
     match events.as_slice() {
-        [SessionEvent::Replaced { node }] => assert_eq!(*node, knob.erase()),
+        [SessionEvent::Replaced { node }, SessionEvent::Committed] => {
+            assert_eq!(*node, knob.erase());
+        }
         other => panic!("landed once the graph resumed: {other:?}"),
     }
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
@@ -577,8 +545,8 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
     let mut s = detached(1);
     let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
-    assert!(s.update().is_empty());
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let token = Arc::new(());
     s.graph()
         .replace(
@@ -619,7 +587,7 @@ fn playing_knob() -> (
         .set_sources(MainOutput::channel(0), [OutputPort::new(knob, 0)])
         .unwrap()
         .unfaded();
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     let mut out = [0.0f32];
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the knob plays");
@@ -669,7 +637,7 @@ fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
             Replacement::new(ForkByClone(Events::<0, 1>)).fade(cut),
         )
         .expect("a cut over a shape change is accepted");
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 0.0, "the incoming node, with no blend of the knob");
 }
@@ -685,7 +653,7 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
 
     let (mut s, mut side, knob) = playing_knob();
     let token = Arc::new(());
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(
             knob,
@@ -720,7 +688,7 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
 #[test]
 fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
     let (mut s, mut side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(
             knob,
@@ -748,7 +716,7 @@ fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
 fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
     // The same type.
     let (mut s, mut side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let same = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
@@ -776,7 +744,7 @@ fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
     // Another type: a write through its key, which the outgoing node's
     // table would refuse as a type mismatch.
     let (mut s, mut side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let dial = s
         .graph()
         .replace(knob, Replacement::new(Params(Dial::at(3.0))))
@@ -811,7 +779,7 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
     };
     let two = s.graph().add(band(2));
     assert!(s.graph_ref().gain_reduction(&two, 2).is_none());
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let three = s
         .graph()
         .replace(two, Replacement::new(band(3)))
@@ -829,7 +797,7 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
 #[test]
 fn removing_a_node_reports_the_parked_swap_it_drops() {
     let (mut s, _side, knob) = playing_knob();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
         .unwrap();
@@ -856,7 +824,7 @@ fn an_unfaded_removal_cuts_where_the_default_fades_out() {
         if unfaded {
             let _ = removal.unfaded();
         }
-        assert!(s.update().is_empty());
+        assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
         let mut out = [0.0f32];
         side.tick(InterleavedMut::one_frame(&mut out).unwrap());
         if unfaded {
@@ -881,7 +849,7 @@ fn a_replace_on_a_poisoned_graph_is_refused() {
     let _ = s.update();
     // Both halves run here (the executor is local); the second panics in
     // the grenade's `prepare` and poisons the editor.
-    s.graph().set_sample_rate(SampleRate::SR_96K).unwrap();
+    s.set_sample_rate(SampleRate::SR_96K).unwrap();
     let refused = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))));
@@ -996,7 +964,7 @@ fn move_feeds_moves_every_feeders_sources() {
         g.sources(old.event_input(0)).unwrap().is_empty(),
         "and the old's are gone"
     );
-    assert_eq!(s.update().len(), 0);
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     assert!(!s.graph_ref().has_uncommitted_edits(), "it commits");
 }
 
@@ -1375,11 +1343,11 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
         .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
         .unwrap()
         .unfaded();
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     let mut out = [0.0f32];
     side.tick(InterleavedMut::one_frame(&mut out).unwrap());
 
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(node, Replacement::new(ForkByClone(Events::<0, 1>)))
         .expect("accepted: the shape is checked when it lands");

@@ -105,8 +105,8 @@ pub enum InletError {
     },
 }
 
-/// Why [`Graph::set_sample_rate`](crate::Graph::set_sample_rate) refused.
-/// The graph keeps its rate.
+/// Why [`Session::set_sample_rate`](crate::Session::set_sample_rate) refused.
+/// The session keeps its rate.
 #[derive(Clone, Debug, PartialEq, Error)]
 #[non_exhaustive]
 pub enum SetRateError {

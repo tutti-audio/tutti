@@ -425,7 +425,6 @@ pub(crate) fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
         let mut rig = S::rig();
         rig.render_to(2 * BLOCK);
         rig.session
-            .graph()
             .set_sample_rate(tutti_units::SampleRate::SR_44K1)
             .unwrap();
         rig.settle();
@@ -501,7 +500,6 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
         rig.block();
     }
     rig.session
-        .graph()
         .set_sample_rate(tutti_units::SampleRate::SR_44K1)
         .unwrap();
     rig.settle();

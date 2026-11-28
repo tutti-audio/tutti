@@ -120,10 +120,7 @@ fn session_with_probe_at(
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    session
-        .graph()
-        .set_sample_rate(SampleRate::of(RATE))
-        .unwrap();
+    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
     let probe = session
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
