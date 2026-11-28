@@ -22,7 +22,7 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
+    Committed, DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
     PluginHealth, PluginInstance, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState,
     SaveState, Session, SessionEvent, SetRateError, StateStartError, SwapPluginError,
 };
@@ -718,6 +718,7 @@ fn repreparing<
 ) -> tutti_session::AudioSide {
     let side = s.graph().take_audio_side();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
     side
 }
 

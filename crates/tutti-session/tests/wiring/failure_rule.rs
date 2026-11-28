@@ -6,8 +6,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DetachedSession, EventInputPort, EventOutputPort, Feeder, InputPort, MainOutput,
-    OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
+    Committed, ConnectError, DetachedSession, EventInputPort, EventOutputPort, Feeder, InputPort,
+    MainOutput, OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
 };
 use tutti_units::SampleRate;
 
@@ -124,6 +124,7 @@ fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
     let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
     let _ = s.update();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
 
     let refused = s
         .graph()
@@ -281,6 +282,11 @@ fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
         }
     );
     assert_eq!(s.sample_rate(), RATE, "unchanged");
+    assert_eq!(
+        s.commit(),
+        Committed::Sent,
+        "nothing was sent: no re-prepare pends"
+    );
 
     // Below the range is refused the same way, and both ends are accepted.
     assert!(matches!(

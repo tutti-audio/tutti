@@ -16,7 +16,9 @@ impl<K: AppKey, C: Stepped> Session<K, C> {
     /// MIDI's outputs and every open sampler stream follow, and the figures of
     /// the plan sent are published. With the executor local, both halves of
     /// the re-prepare run here, now; with it taken, the second half lands on
-    /// a later update. A session on a device re-rates with its restart.
+    /// a later update, which publishes the resumed plan's figures at its
+    /// commit (until then they are the old plan's). A session on a device
+    /// re-rates with its restart.
     ///
     /// # Errors
     ///

@@ -21,7 +21,7 @@ use tutti_buffers::MaxBlock;
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_types::{Locator, PluginId};
-use tutti_session::{PluginChange, Session, SessionEvent};
+use tutti_session::{Committed, PluginChange, Session, SessionEvent};
 use tutti_units::{SampleRate, Samples};
 
 use crate::support::clap_probe;
@@ -630,13 +630,15 @@ fn the_predecessor_still_renders_the_plugin_while_the_commit_that_carries_its_su
             .any(|e| matches!(e, SessionEvent::CommitRefused(_))),
         "the graph cannot commit: {events:?}"
     );
+    let mut sent = 0;
     for round in 0..16 {
-        let _ = r.s.update();
+        sent += committed(&r.s.update());
         assert!(
             r.renders_lead(),
             "round {round}: the plugin went silent before a commit carried its successor"
         );
     }
+    assert_eq!(sent, 0, "no commit");
     assert_eq!(
         r.s.graph_ref().testing().rebuild_settling(node),
         Some(true),
@@ -891,6 +893,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     let _ = s.update();
     side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
     probe().set(ClapSwitch::PortLayout, 1);
     probe().set(ClapSwitch::RequestPortsRescan, 0x24);
     let mut events = Vec::new();
