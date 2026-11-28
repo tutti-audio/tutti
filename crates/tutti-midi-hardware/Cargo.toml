@@ -20,8 +20,9 @@ alsa = ["dep:tutti-alsa-ffi"]
 # CoreMIDI on macOS.
 coremidi = ["dep:tutti-coremidi-ffi"]
 # Windows MIDI Services on Windows 11 25H2 and later (or with the API's DLL beside the
-# executable): UMP end to end. A PC without the service fails to open with
-# `MidiHardwareError::MidiServicesNotRunning` or `MidiServicesApiMissing`.
+# executable): UMP end to end, with virtual endpoints and scheduled sends. A PC without
+# the service fails to open with `MidiHardwareError::MidiServicesNotRunning` or
+# `MidiServicesApiMissing`.
 midi-services = ["dep:tutti-winmidi2-ffi"]
 # Windows Multimedia on Windows, for a PC that has no MIDI Services: MIDI 1.0 bytes. It
 # replaces `midi-services` rather than joining it: with both on, the Windows backend is

@@ -193,6 +193,7 @@ fn a_published_endpoint_is_listed_once_under_its_name() {
 /// **A peer's Function Block Discovery is answered with the blocks as declared** (M2-104
 /// §7.1.9): each Function Block Info Notification is the declared block's fields, and each
 /// Function Block Name Notification its name, under the number declared.
+/// Spec: m2-104/7.1.8#1, m2-104/7.1.8#2
 #[test]
 fn a_peer_discovers_the_function_blocks_as_declared() {
     let published = publish("blocks");

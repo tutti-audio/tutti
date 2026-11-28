@@ -1,6 +1,6 @@
 # tutti-winmidi2-ffi
 
-This crate is a small wrapper that lets tutti call Windows MIDI Services (the `Windows.Devices.Midi2` API) from safe Rust, to list MIDI endpoints and to send and receive MIDI 2.0 Universal MIDI Packets through them.
+This crate is a small wrapper that lets tutti call Windows MIDI Services (the `Windows.Devices.Midi2` API) from safe Rust, to list MIDI endpoints with their properties and Function Blocks, to publish virtual devices, and to send and receive MIDI 2.0 Universal MIDI Packets through them.
 
 It is an internal building block of `tutti-midi-hardware` and is empty off Windows. Most people will use it through the `tutti` crate rather than directly.
 

@@ -126,6 +126,7 @@ fn buffered_changes_apply_in_order_after_the_list() {
 /// **An endpoint speaks the protocol the service and it agreed on, whatever it supports**,
 /// and MIDI 1.0 while none is agreed: an endpoint that supports MIDI 2.0 is not in it until
 /// they agree. Each supports what it declares.
+/// Spec: m2-104/7.1.6.2#2
 #[test]
 fn an_endpoint_speaks_the_protocol_it_agreed() {
     let agreed2 = described(Some(&declared(true, true, Some(Protocol::Midi2)))).endpoint;
