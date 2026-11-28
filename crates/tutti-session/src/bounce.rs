@@ -2272,9 +2272,6 @@ where
             normalize,
             edit,
         } = bounce;
-        if self.graph.outputs() == 0 {
-            return Err(BounceConfigError::GraphHasNoOutputs.into());
-        }
         // The width the main output has without being told: the graph's.
         let outputs = self.graph.outputs();
         let rate = sample_rate.unwrap_or_else(|| self.transport.sample_rate());
@@ -2460,9 +2457,13 @@ mod tests {
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01)))
     }
 
-    /// A detached session whose outputs hear a dc node: something to bounce.
-    fn session() -> crate::DetachedSession {
-        let mut session = Session::builder().build_detached(RATE).unwrap();
+    /// An offline session whose outputs hear a dc node: something to bounce.
+    fn session() -> crate::Session {
+        let mut session = Session::builder()
+            .sample_rate(RATE)
+            .block_dates(crate::BlockDates::Frames)
+            .build()
+            .unwrap();
         let dc = session
             .graph()
             .add(ForkByClone(tutti_nodes::testing::Const::mono(0.0)));
@@ -2472,7 +2473,7 @@ mod tests {
 
     /// Starts `bounce`, awaits it and applies the render.
     fn bounced<M: Destination<f32>>(
-        session: &mut crate::DetachedSession,
+        session: &mut crate::Session,
         bounce: Bounce<NodeKey, M, f32>,
     ) -> Result<Bounced<M>, BounceError> {
         let rendered = block_on(session.bounce(bounce)?);
@@ -2648,7 +2649,7 @@ mod tests {
     fn a_bounce_that_misses_what_it_needs_is_refused_before_it_forks() {
         let mut session = session();
         fn refused<M: Destination<f32>>(
-            session: &mut crate::DetachedSession,
+            session: &mut crate::Session,
             b: Bounce<NodeKey, M, f32>,
         ) -> BounceConfigError {
             match session.bounce(b) {
@@ -2926,7 +2927,7 @@ mod tests {
     #[test]
     fn a_leaked_bounce_is_warned_about_once() {
         let mut session = session();
-        let collect = |session: &mut crate::DetachedSession, at: Instant| {
+        let collect = |session: &mut crate::Session, at: Instant| {
             session.run_phase(Phase::Collect, PhaseCx::at(at), &mut Vec::new());
             session.bounce.stall_warnings
         };
@@ -2964,9 +2965,8 @@ mod tests {
         // Back to back, with no collect between: 50 minutes, then 59.
         let t2 = t1 + 4 * BOUNCE_STALL_WARNING;
         assert_eq!(collect(&mut session, t2), 2, "nothing in flight");
-        let start = |session: &mut crate::DetachedSession| {
-            session.bounce(short()).expect("a bounce starts")
-        };
+        let start =
+            |session: &mut crate::Session| session.bounce(short()).expect("a bounce starts");
         let first = start(&mut session);
         assert_eq!(collect(&mut session, t2), 2);
         assert_eq!(collect(&mut session, t2 + 50 * minute), 2);

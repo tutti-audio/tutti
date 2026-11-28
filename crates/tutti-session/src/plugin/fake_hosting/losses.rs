@@ -17,7 +17,7 @@ use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
 
 use super::{Inert, host};
-use crate::{DetachedSession, Session};
+use crate::Session;
 
 /// A plugin over the fake backend, and the control whose dropped edits a test
 /// sets.
@@ -100,13 +100,16 @@ impl Counters {
     }
 }
 
-/// A detached session with the fake plugin at a node, given a node's counters.
-fn hosted() -> (DetachedSession, NodeKey, Counters, FakePlugin) {
+/// An offline session with the fake plugin at a node, given a node's counters.
+fn hosted() -> (Session, NodeKey, Counters, FakePlugin) {
     let (handle, fake) = handle();
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .outputs(ChannelLayout::STEREO)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(&mut s, node, handle, plugin());
     s.commit();
@@ -120,7 +123,7 @@ fn hosted() -> (DetachedSession, NodeKey, Counters, FakePlugin) {
     (s, node, counters, fake)
 }
 
-fn losses(s: &DetachedSession, node: NodeKey) -> Losses {
+fn losses(s: &Session, node: NodeKey) -> Losses {
     s.plugin_view(node).expect("hosted").losses()
 }
 
@@ -243,7 +246,7 @@ fn leave_unlent(controls: &PluginControls, blocks: usize) {
     }
 }
 
-fn block_losses(s: &DetachedSession, node: NodeKey) -> tutti_plugin_host::BlockLosses {
+fn block_losses(s: &Session, node: NodeKey) -> tutti_plugin_host::BlockLosses {
     s.plugin_view(node)
         .expect("hosted")
         .diagnostics()
@@ -355,7 +358,7 @@ fn losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_lost() {
 fn refused_off_thread_calls_are_counted_per_plugin() {
     let (mut s, node, _counters, fake) = hosted();
     let (_other, _, _, other_fake) = hosted();
-    let read = |s: &DetachedSession, node: NodeKey| {
+    let read = |s: &Session, node: NodeKey| {
         s.plugin_view(node)
             .expect("hosted")
             .diagnostics()

@@ -30,10 +30,6 @@ use crate::{AppKey, Clock, Session, SessionFloat};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SamplerError {
-    /// The session holds no disk streamer: it was built without one (a
-    /// detached session, which only the `testing` feature builds).
-    #[error("the session has no disk streamer")]
-    NoStreamer,
     /// The streamer is thread work of tutti's, and this target starts none (the web):
     /// only an offline session that opens no stream runs there.
     #[error("{0} needs a thread of tutti's, and this target starts none")]
@@ -210,7 +206,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// # Errors
     ///
-    /// [`SamplerError::NoStreamer`] when the session holds no disk streamer, and
     /// [`SamplerError::NeedsThreads`] where the target starts no thread to run it.
     pub fn open_stream(
         &self,
@@ -221,11 +216,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             .sampler
             .streamer
             .as_ref()
-            .ok_or(if crate::background::THREADS {
-                SamplerError::NoStreamer
-            } else {
-                SamplerError::NeedsThreads(crate::BackgroundWork::Streamer)
-            })?;
+            .ok_or(SamplerError::NeedsThreads(crate::BackgroundWork::Streamer))?;
         Ok(OpenStream {
             cut: Cut::of(self),
             read: streamer.open_stream(asset, start),

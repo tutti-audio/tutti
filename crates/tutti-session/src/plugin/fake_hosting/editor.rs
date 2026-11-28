@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use dpi::PhysicalSize;
 
-use crate::{DetachedSession, EditorCallError, Opened, Session};
+use crate::{EditorCallError, Opened, Session};
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::StandInWindow;
 use tutti_graph::{ForkByClone, NodeKey};
@@ -23,18 +23,18 @@ use tutti_plugin_types::fake::{Call, FakePlugin};
 use tutti_plugin_types::{ContentScale, EditorError};
 use tutti_units::SampleRate;
 
-/// A detached session with a fake plugin (with an editor) at a node.
-fn session_with_editor() -> (DetachedSession, NodeKey, FakePlugin) {
+/// An offline session with a fake plugin (with an editor) at a node.
+fn session_with_editor() -> (Session, NodeKey, FakePlugin) {
     hosting(Inert::default())
 }
 
 /// [`session_with_editor`] over `backend`.
-fn hosting(backend: Inert) -> (DetachedSession, NodeKey, FakePlugin) {
+fn hosting(backend: Inert) -> (Session, NodeKey, FakePlugin) {
     hosting_as(backend, false)
 }
 
 /// [`hosting`], the plugin served from a plugin server or in process.
-fn hosting_as(backend: Inert, served: bool) -> (DetachedSession, NodeKey, FakePlugin) {
+fn hosting_as(backend: Inert, served: bool) -> (Session, NodeKey, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
     fake.with_editor(true);
     let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);
@@ -47,8 +47,11 @@ fn hosting_as(backend: Inert, served: bool) -> (DetachedSession, NodeKey, FakePl
     );
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .outputs(ChannelLayout::STEREO)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     let plugin = tutti_plugin_types::PluginRef::file("fake.clap");
     if served {

@@ -12,7 +12,7 @@ use crate::SessionFloat;
 pub(crate) struct SamplerPart<F: SessionFloat>(std::marker::PhantomData<F>);
 
 impl<F: SessionFloat> SamplerPart<F> {
-    pub(crate) fn new(_: bool, _: SampleRate, _: &Executor, _: &Bells) -> crate::Result<Self> {
+    pub(crate) fn new(_: SampleRate, _: &Executor, _: &Bells) -> crate::Result<Self> {
         Ok(Self(std::marker::PhantomData))
     }
 

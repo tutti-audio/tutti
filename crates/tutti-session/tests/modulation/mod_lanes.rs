@@ -4,9 +4,8 @@
 //! test here declares through [`Session::mods`],
 //! runs the session's updates, and asserts on what the graph renders: the
 //! nodes are [`ProbeUnit`]s, which write the value their param port reads to
-//! their output, so a render is the delivered value frame by frame. The audio
-//! side is taken (`Graph::take_audio_side`) and rendered between updates, as
-//! a device would.
+//! their output, so a render is the delivered value frame by frame. The
+//! session is rendered between updates, as a device would.
 //!
 //! Tests that exist in
 //! `modulation.rs` (the §8.1 render, a lane in the plan of its node's update
@@ -15,8 +14,8 @@
 
 use crate::committed::committed;
 use crate::common;
+use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_buffers::{InterleavedMut, PlanesMut};
 #[cfg(feature = "export")]
 use tutti_fixtures::WavePlanes;
 #[cfg(feature = "export")]
@@ -32,39 +31,39 @@ use tutti_modulation::{Adsr, Follower, Lfo, NoteEnvelope, Polarity};
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{ModDelayConfig, PhaserConfig, Stagger};
 use tutti_session::{
-    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModRouteId,
-    ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef, ParamTarget,
-    PolarityTarget, Problem, Replacement, RouteSpec, Scale, ScaleError, Session, SessionEvent,
-    SourceName, TargetName,
+    AutomationTake, DepthTarget, MainOutput, MixRef, ModRouteId, ModSourceId, ModTarget,
+    NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef, ParamTarget, PolarityTarget, Problem,
+    Replacement, RouteSpec, Scale, ScaleError, Session, SessionEvent, SourceName, TargetName,
 };
-use tutti_units::{
-    Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
-};
+use tutti_units::{Amplitude, Beat, Bipolar, Frame, Hz, SampleRate, Samples, Seconds, UnitParam};
+#[cfg(feature = "export")]
+use tutti_units::{Bpm, Drive};
 
 use common::probe::{ProbeUnit, Pulse};
 use tutti_ump::{Message, Voice1};
 
 const RATE: f64 = 48_000.0;
+#[cfg(feature = "export")]
 const TEMPO: Bpm = Bpm::of(120.0);
 /// A lane's control step (`tutti_modulation::CONTROL_GRID`).
 const STEP: usize = 32;
 /// A port's connect crossfade: `DECLICK` at 48 kHz.
 const DECLICK: usize = 240;
 
-/// A detached session of `outputs` channels at 48 kHz, its audio side taken:
-/// the executor on this side, played in device-sized blocks.
-pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
-    let mut s = Session::builder()
+/// An offline session of `outputs` channels at 48 kHz, rendered between updates
+/// in device-sized blocks.
+pub(crate) fn rig(outputs: usize) -> Session {
+    Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
-        .build_detached(SampleRate::DEFAULT)
-        .expect("builds");
-    s.set_sample_rate(SampleRate::of(RATE)).unwrap();
-    let side = s.graph().take_audio_side();
-    (s, side)
+        .outputs(ChannelLayout::clamped(outputs))
+        .sample_rate(SampleRate::of(RATE))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("builds")
 }
 
 /// Output channel `c` from `nodes[c]`'s port 0.
-pub(crate) fn main_output(s: &mut DetachedSession, nodes: &[NodeKey]) {
+pub(crate) fn main_output(s: &mut Session, nodes: &[NodeKey]) {
     for (c, &n) in nodes.iter().enumerate() {
         s.graph()
             .set_sources(MainOutput::channel(c), [OutputPort::new(n, 0)])
@@ -72,11 +71,18 @@ pub(crate) fn main_output(s: &mut DetachedSession, nodes: &[NodeKey]) {
     }
 }
 
-/// Updates until nothing is left to resolve: nodes committed, then lanes.
-pub(crate) fn settle(s: &mut DetachedSession) {
-    for _ in 0..4 {
-        let _ = s.update();
+/// Updates and renders until an update commits nothing: nodes committed, then
+/// lanes, each landing at the block after its update. The bound is a hang guard.
+pub(crate) fn settle(s: &mut Session) {
+    let mut quiet = false;
+    for _ in 0..16 {
+        quiet = committed(&s.update()) == 0;
+        render(s, 128, 128);
+        if quiet {
+            break;
+        }
     }
+    assert!(quiet, "the updates stopped committing");
     assert_eq!(
         s.mod_state().problems().next(),
         None,
@@ -84,22 +90,31 @@ pub(crate) fn settle(s: &mut DetachedSession) {
     );
 }
 
-/// `frames` frames of `channels` outputs, stopped, in `block`-frame blocks.
-fn render_n(side: &mut AudioSide, channels: usize, frames: usize, block: usize) -> Vec<Vec<f32>> {
-    let mut out = vec![vec![0.0; frames]; channels];
-    side.set_transport(tutti_graph::TransportPosition::new(
-        false,
-        TEMPO,
-        Beat::new(0.0),
-        None,
-    ));
-    side.render(block, PlanesMut::from_vecs(&mut out).unwrap());
+/// `frames` frames of every output, stopped, in `block`-frame blocks.
+fn render_n(s: &mut Session, frames: usize, block: usize) -> Vec<Vec<f32>> {
+    let channels = s.graph_ref().outputs();
+    let mut out = vec![Vec::with_capacity(frames); channels];
+    let mut interleaved = vec![0.0f32; block * channels];
+    let layout = ChannelLayout::clamped(channels);
+    let mut done = 0;
+    while done < frames {
+        let len = block.min(frames - done);
+        s.render(&mut InterleavedMut::new(&mut interleaved[..len * channels], layout).unwrap());
+        for frame in interleaved[..len * channels].chunks_exact(channels) {
+            for (plane, &v) in out.iter_mut().zip(frame) {
+                plane.push(v);
+            }
+        }
+        done += len;
+    }
     out
 }
 
-/// [`render_n`] of one output.
-pub(crate) fn render(side: &mut AudioSide, frames: usize, block: usize) -> Vec<Vec<f32>> {
-    render_n(side, 1, frames, block)
+/// [`render_n`] of the first output.
+pub(crate) fn render(s: &mut Session, frames: usize, block: usize) -> Vec<Vec<f32>> {
+    let mut planes = render_n(s, frames, block);
+    planes.truncate(1);
+    planes
 }
 
 /// Doc 014 §5.3's bound for a linear sine at `rate` on the 32-frame grid,
@@ -190,7 +205,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
-    let (mut s, mut side) = rig(2);
+    let mut s = rig(2);
     let a = s.graph().add(ProbeUnit::new(500.0));
     let b = s.graph().add(ProbeUnit::of(UnitParam::Volume, 0.5));
     main_output(&mut s, &[a.erase(), b.erase()]);
@@ -207,11 +222,11 @@ fn an_export_is_the_live_render_on_a_native_param() {
         .unwrap();
     settle(&mut s);
     // Past the connect's declick, stopped; then the knobs move.
-    render_n(&mut side, 2, 1_024, 128);
+    render_n(&mut s, 1_024, 128);
     s.set(a.cutoff().to(Hz::new(450.0))).unwrap();
     let _ = s.update();
     // The same write lands on the live side before it plays.
-    render_n(&mut side, 2, 128, 128);
+    render_n(&mut s, 128, 128);
 
     let total = 24_000;
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
@@ -241,6 +256,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
 
     // Live: rolling from beat 0 (the play clock restarts there), in
     // ragged blocks.
+    s.play().expect("queued");
     let mut live = [Vec::new(), Vec::new()];
     let mut done = 0;
     for n in [1usize, 128, 7, 64, 127, 33, 2, 100].iter().cycle() {
@@ -248,17 +264,11 @@ fn an_export_is_the_live_render_on_a_native_param() {
             break;
         }
         let n = (*n).min(total - done);
-        let beat = done as f64 * TEMPO.get() / 60.0 / RATE;
-        side.set_transport(tutti_graph::TransportPosition::new(
-            true,
-            TEMPO,
-            Beat::new(beat),
-            None,
-        ));
-        let mut out = vec![vec![0.0; n]; 2];
-        side.render(n, PlanesMut::from_vecs(&mut out).unwrap());
-        for (l, o) in live.iter_mut().zip(&out) {
-            l.extend_from_slice(o);
+        let mut out = vec![0.0f32; n * 2];
+        s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+        for frame in out.as_chunks::<2>().0 {
+            live[0].push(frame[0]);
+            live[1].push(frame[1]);
         }
         done += n;
     }
@@ -289,7 +299,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
 /// LFO's layer, and the session holds nothing for it.
 #[test]
 fn a_removed_source_leaves_no_node_and_no_layer() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let kick = s.graph().add(ForkByClone(Pulse {
         from: 0,
@@ -307,7 +317,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     m.route(RouteSpec::new(follower, cutoff, Bipolar::of(-0.2)))
         .unwrap();
     settle(&mut s);
-    render(&mut side, 1_024, 128);
+    render(&mut s, 1_024, 128);
     let node = s
         .mod_state()
         .source_node(follower)
@@ -327,7 +337,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
         "a removed source is not there"
     );
     settle(&mut s);
-    render(&mut side, 1_024, 128);
+    render(&mut s, 1_024, 128);
 
     assert_eq!(
         s.mod_state().source_node(follower),
@@ -352,7 +362,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
 /// removed keeps its node and reports nothing: it is fed nothing.
 #[test]
 fn a_removed_feed_node_leaves_its_source_unfed() {
-    let (mut s, mut side) = rig(2);
+    let mut s = rig(2);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let other = s.graph().add(ProbeUnit::new(0.1));
     let kick = s.graph().add(ForkByClone(Pulse {
@@ -376,14 +386,14 @@ fn a_removed_feed_node_leaves_its_source_unfed() {
     m.route(RouteSpec::new(one, steady, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
-    render_n(&mut side, 2, 1_024, 128);
+    render_n(&mut s, 1_024, 128);
     let node = s.mod_state().source_node(follower).expect("fed and built");
 
     s.remove(kick).unwrap();
     let mut events = Vec::new();
     for _ in 0..4 {
         events.extend(reported(s.update()));
-        render_n(&mut side, 2, 1_024, 128);
+        render_n(&mut s, 1_024, 128);
     }
     assert_eq!(events, [], "nothing is refused");
     let unfed = Problem::Unfed {
@@ -400,7 +410,7 @@ fn a_removed_feed_node_leaves_its_source_unfed() {
     );
     assert!(!s.graph_ref().contains(node), "its node is gone");
     assert!(s.mod_state().lane(cutoff.key()).is_some(), "the LFO's lane");
-    let got = render_n(&mut side, 2, 1_024, 128);
+    let got = render_n(&mut s, 1_024, 128);
     assert!(
         (got[1][1_023] - 0.6).abs() < 1e-6,
         "the other lane runs: {}",
@@ -408,7 +418,7 @@ fn a_removed_feed_node_leaves_its_source_unfed() {
     );
 
     // A note envelope whose MIDI feed node is removed keeps its node.
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(0.2));
     let clip = s.graph().add(ForkByClone(Held { on: 10 }));
     main_output(&mut s, &[probe.erase()]);
@@ -423,7 +433,7 @@ fn a_removed_feed_node_leaves_its_source_unfed() {
     let mut events = Vec::new();
     for _ in 0..4 {
         events.extend(reported(s.update()));
-        render(&mut side, 1_024, 128);
+        render(&mut s, 1_024, 128);
     }
     assert_eq!(events, [], "nothing is refused");
     assert!(
@@ -447,7 +457,7 @@ fn a_removed_feed_node_leaves_its_source_unfed() {
 /// the one written after it are each the base the LFO rides on.
 #[test]
 fn a_knob_written_after_a_route_edit_is_the_knob() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -457,24 +467,27 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.3)))
         .unwrap();
     settle(&mut s);
-    render(&mut side, 1_024, 128);
+    render(&mut s, 1_024, 128);
+    // The graph frame the next block starts at: the last block began at the
+    // playhead's frame and ran 128.
+    let from = usize::try_from(s.playhead().frame().get()).unwrap() + 128;
 
     s.set(probe.cutoff().to(Hz::new(300.0))).unwrap();
     let _ = s.update();
     s.set(DepthTarget::of(lfo, cutoff).to(Bipolar::of(0.2)))
         .unwrap();
     let _ = s.update();
-    let a = render(&mut side, 2_048, 128);
+    let a = render(&mut s, 2_048, 128);
     s.set(probe.cutoff().to(Hz::new(700.0))).unwrap();
     let _ = s.update();
-    let b = render(&mut side, 2_048, 128);
+    let b = render(&mut s, 2_048, 128);
 
     assert_eq!(
         s.mod_state().lane(cutoff.key()).expect("a lane").1.value(),
         Some(700.0)
     );
     let tol = lfo_tolerance(0.2, 2.0);
-    for (base, from, got) in [(300.0, 1_024, &a[0]), (700.0, 3_072, &b[0])] {
+    for (base, from, got) in [(300.0, from, &a[0]), (700.0, from + 2_048, &b[0])] {
         for (i, &v) in got.iter().enumerate().skip(STEP) {
             let p = (from + i) as f64;
             let want = base + 200.0 * (std::f64::consts::TAU * 2.0 * p / RATE).sin();
@@ -491,10 +504,9 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
 /// A note held from frame 10 into a note envelope (sustain 0.4) routed to
 /// probe 1 (`0..=1`, knob 0.2, depth 0.5); probe 2 (knob 0.1) has a lane
 /// reading a macro of 0. Rendered into the sustain: probe 1 reads 0.4, probe 2
-/// its knob. Returns the session, its audio side, the two cutoffs and the
-/// envelope.
-fn held_envelope_scene() -> (DetachedSession, AudioSide, ParamRef, ParamRef, ModSourceId) {
-    let (mut s, mut side) = rig(2);
+/// its knob. Returns the session, the two cutoffs and the envelope.
+fn held_envelope_scene() -> (Session, ParamRef, ParamRef, ModSourceId) {
+    let mut s = rig(2);
     let one = s.graph().add(ProbeUnit::new(0.2));
     let two = s.graph().add(ProbeUnit::new(0.1));
     let clip = s.graph().add(ForkByClone(Held { on: 10 }));
@@ -517,14 +529,14 @@ fn held_envelope_scene() -> (DetachedSession, AudioSide, ParamRef, ParamRef, Mod
     m.route(RouteSpec::new(env, c1, Bipolar::of(0.5))).unwrap();
     m.route(RouteSpec::new(zero, c2, Bipolar::of(0.5))).unwrap();
     settle(&mut s);
-    let got = render_n(&mut side, 2, 4_096, 128);
+    let got = render_n(&mut s, 4_096, 128);
     assert!(
         (got[0][4_095] - 0.4).abs() < 1e-6,
         "probe 1 in the sustain: {}",
         got[0][4_095]
     );
     assert!((got[1][4_095] - 0.1).abs() < 1e-7, "probe 2 at its knob");
-    (s, side, c1, c2, env)
+    (s, c1, c2, env)
 }
 
 /// **A held note envelope newly routed reads its level at once.** A route
@@ -533,7 +545,7 @@ fn held_envelope_scene() -> (DetachedSession, AudioSide, ParamRef, ParamRef, Mod
 /// knob until the next note.
 #[test]
 fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
-    let (mut s, mut side, _, c2, env) = held_envelope_scene();
+    let (mut s, _, c2, env) = held_envelope_scene();
     s.mods_mut()
         .route(RouteSpec::new(env, c2, Bipolar::of(0.5)))
         .unwrap();
@@ -543,7 +555,7 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
         0,
         "the resync went with the update's commit"
     );
-    let got = render_n(&mut side, 2, 512, 128);
+    let got = render_n(&mut s, 512, 128);
     for (f, &v) in got[1].iter().enumerate().skip(STEP) {
         assert!((v - 0.3).abs() < 1e-6, "frame {f}: {v}");
     }
@@ -557,13 +569,13 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
 /// next note.
 #[test]
 fn a_route_dropped_and_added_back_reads_the_held_envelope_at_once() {
-    let (mut s, mut side, _, c2, env) = held_envelope_scene();
+    let (mut s, _, c2, env) = held_envelope_scene();
     let route = s
         .mods_mut()
         .route(RouteSpec::new(env, c2, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
-    let got = render_n(&mut side, 2, 1_024, 128);
+    let got = render_n(&mut s, 1_024, 128);
     assert!(
         (got[1][1_023] - 0.3).abs() < 1e-6,
         "routed: {}",
@@ -572,7 +584,7 @@ fn a_route_dropped_and_added_back_reads_the_held_envelope_at_once() {
 
     s.mods_mut().remove_route(route).unwrap();
     settle(&mut s);
-    let got = render_n(&mut side, 2, 1_024, 128);
+    let got = render_n(&mut s, 1_024, 128);
     assert!(
         (got[1][1_023] - 0.1).abs() < 1e-7,
         "the lane dropped the input: {}",
@@ -584,7 +596,7 @@ fn a_route_dropped_and_added_back_reads_the_held_envelope_at_once() {
         .unwrap();
     let _ = s.update();
     assert_eq!(s.mod_state().pending_resyncs(), 0, "sent with the commit");
-    let got = render_n(&mut side, 2, 512, 128);
+    let got = render_n(&mut s, 512, 128);
     for (f, &v) in got[1].iter().enumerate().skip(STEP) {
         assert!((v - 0.3).abs() < 1e-6, "frame {f}: {v}");
     }
@@ -597,7 +609,7 @@ fn a_route_dropped_and_added_back_reads_the_held_envelope_at_once() {
 /// reads its knob from the first grid piece.
 #[test]
 fn a_rebuilt_source_resyncs_so_its_lane_does_not_hold_the_old_value() {
-    let (mut s, mut side, _, _, env) = held_envelope_scene();
+    let (mut s, _, _, env) = held_envelope_scene();
     let adsr = Adsr {
         attack: Seconds::new(0.004),
         decay: Seconds::new(0.003),
@@ -611,7 +623,7 @@ fn a_rebuilt_source_resyncs_so_its_lane_does_not_hold_the_old_value() {
     let _ = s.update();
     assert_eq!(s.mod_state().pending_resyncs(), 0, "sent with the commit");
     assert_eq!(s.mod_state().source_node(env), Some(before), "at its key");
-    let got = render_n(&mut side, 2, 512, 128);
+    let got = render_n(&mut s, 512, 128);
     for (f, &v) in got[0].iter().enumerate().skip(STEP) {
         assert!((v - 0.2).abs() < 1e-6, "frame {f}: {v}");
     }
@@ -621,7 +633,7 @@ fn a_rebuilt_source_resyncs_so_its_lane_does_not_hold_the_old_value() {
 /// not silent, so a route from one leaves nothing pending.
 #[test]
 fn a_follower_route_owes_no_resync() {
-    let (mut s, _side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let other = s.graph().add(ProbeUnit::new(0.1));
     main_output(&mut s, &[probe.erase()]);
@@ -654,7 +666,7 @@ fn reported(events: Vec<SessionEvent>) -> Vec<Problem> {
 /// One report, held while it lasts, nothing built.
 #[test]
 fn a_param_the_node_does_not_declare_is_refused_by_target() {
-    let (mut s, _side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let q = ParamRef::unit(probe, UnitParam::Q);
@@ -676,7 +688,7 @@ fn a_param_the_node_does_not_declare_is_refused_by_target() {
 /// the lane would feed an input the node does not have.
 #[test]
 fn a_plugin_parameter_on_a_node_with_no_event_input_is_refused() {
-    let (mut s, _side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let param = ParamRef::plugin(probe, tutti_units::ParamId::new(7));
@@ -698,7 +710,7 @@ fn a_plugin_parameter_on_a_node_with_no_event_input_is_refused() {
 /// refused by source**, naming the node it was declared on.
 #[test]
 fn a_note_envelope_fed_from_a_missing_event_output_is_refused() {
-    let (mut s, _side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -734,7 +746,7 @@ fn a_note_envelope_fed_from_a_missing_event_output_is_refused() {
 /// 650 plays.
 #[test]
 fn a_take_suspends_the_automation_then_restores_it() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(300.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -747,7 +759,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
     settle(&mut s);
     let last = |out: &[Vec<f32>]| *out[0].last().expect("rendered");
     assert_eq!(
-        last(&render(&mut side, 1_024, 128)),
+        last(&render(&mut s, 1_024, 128)),
         800.0,
         "the automation plays"
     );
@@ -764,7 +776,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
         .touch(Beat::new(0.0), Hz::new(650.0));
     let _ = s.update();
     assert_eq!(
-        last(&render(&mut side, 512, 128)),
+        last(&render(&mut s, 512, 128)),
         300.0,
         "the knob plays under the take"
     );
@@ -780,7 +792,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
         "the take closed"
     );
     assert_eq!(
-        last(&render(&mut side, 512, 128)),
+        last(&render(&mut s, 512, 128)),
         650.0,
         "the take's trajectory plays"
     );
@@ -792,7 +804,7 @@ fn a_take_suspends_the_automation_then_restores_it() {
 /// update, so 650 plays.
 #[test]
 fn a_latch_take_becomes_the_automation_when_stopped() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(300.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -819,7 +831,7 @@ fn a_latch_take_becomes_the_automation_when_stopped() {
     s.mods_mut().take_mut(cutoff_key).unwrap().stop();
     let _ = s.update();
     assert!(s.mods_mut().take_mut(cutoff_key).is_none(), "stopped");
-    let last = *render(&mut side, 512, 128)[0].last().expect("rendered");
+    let last = *render(&mut s, 512, 128)[0].last().expect("rendered");
     assert_eq!(last, 650.0, "the take's trajectory plays");
 }
 
@@ -844,7 +856,7 @@ fn refusals(events: Vec<SessionEvent>) -> Vec<Problem> {
 /// rest, and clears the refusal.
 #[test]
 fn a_follower_downstream_of_its_target_is_refused_by_route() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -884,7 +896,7 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
         .expect("the lane before the refusal");
     assert!(lane.program().inputs().is_empty(), "unchanged");
     // The macro's `+100` still plays.
-    let out = render(&mut side, 1_024, 128);
+    let out = render(&mut s, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 600.0);
 
     s.mods_mut().remove_route(route).unwrap();
@@ -907,7 +919,7 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
 /// sent, and the first block reads `500 + 0.25 * 1000`.
 #[test]
 fn a_route_onto_a_param_of_a_node_added_in_the_update_sends_one_plan() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     settle(&mut s);
 
     let probe = s.graph().add(ProbeUnit::new(500.0));
@@ -925,7 +937,7 @@ fn a_route_onto_a_param_of_a_node_added_in_the_update_sends_one_plan() {
     let events = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
     assert_eq!(committed(&events), 1, "one plan for the node and its lane");
-    let out = render(&mut side, 128, 128);
+    let out = render(&mut s, 128, 128);
     assert_eq!(out[0][0], 750.0, "the first frame");
     assert_eq!(out[0][127], 750.0);
 }
@@ -939,7 +951,7 @@ fn a_route_onto_a_param_of_a_node_added_in_the_update_sends_one_plan() {
 /// after it lands on the new node (`+500`).
 #[test]
 fn a_node_swapped_for_another_param_list_keeps_modulating() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -950,7 +962,7 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
     m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
-    let out = render(&mut side, 1_024, 128);
+    let out = render(&mut s, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 750.0, "precondition: modulated");
 
     s.graph()
@@ -969,16 +981,16 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
         1,
         "one plan for the swap and the rebound lane"
     );
-    let out = render(&mut side, 1_024, 128);
+    let out = render(&mut s, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 650.0, "the new node, modulated");
     settle(&mut s);
-    let out = render(&mut side, 4_096, 128);
+    let out = render(&mut s, 4_096, 128);
     assert_eq!(*out[0].last().unwrap(), 650.0, "the new node, modulated");
 
     s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(2_000.0)))
         .unwrap();
     let _ = s.update();
-    let out = render(&mut side, 1_024, 128);
+    let out = render(&mut s, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 900.0, "a later range edit lands");
 }
 
@@ -988,7 +1000,7 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
 /// `0 + 0.25 * 1 * 2` = 0.5 at the port.
 #[test]
 fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::of(UnitParam::Balance, 0.0));
     main_output(&mut s, &[probe.erase()]);
     let balance = ParamRef::unit(probe, UnitParam::Balance);
@@ -998,7 +1010,7 @@ fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
     m.route(RouteSpec::new(one, balance, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
-    let out = render(&mut side, 1_024, 128);
+    let out = render(&mut s, 1_024, 128);
     assert_holds(&out[0], 0.5, "balance at the analytic figure");
 }
 
@@ -1009,7 +1021,7 @@ fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
 /// and the new node renders its own knob.
 #[test]
 fn a_replace_that_drops_the_param_is_refused_and_leaves_the_knob() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -1019,7 +1031,7 @@ fn a_replace_that_drops_the_param_is_refused_and_leaves_the_knob() {
     m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
-    let out = render(&mut side, 1_024, 128);
+    let out = render(&mut s, 1_024, 128);
     assert_eq!(*out[0].last().unwrap(), 750.0, "precondition: modulated");
     assert!(s.mod_state().lane(cutoff.key()).is_some());
 
@@ -1032,14 +1044,14 @@ fn a_replace_that_drops_the_param_is_refused_and_leaves_the_knob() {
     let mut events = Vec::new();
     for _ in 0..4 {
         events.extend(reported(s.update()));
-        render(&mut side, 1_024, 128);
+        render(&mut s, 1_024, 128);
     }
     let refusal = Problem::NoSuchParam {
         target: TargetName::Own(cutoff.into()),
     };
     assert_eq!(events, std::slice::from_ref(&refusal), "reported once");
     assert_eq!(s.mod_state().problems().collect::<Vec<_>>(), [&refusal]);
-    let out = render(&mut side, 1_024, 128);
+    let out = render(&mut s, 1_024, 128);
     assert_eq!(
         *out[0].last().unwrap(),
         400.0,
@@ -1057,7 +1069,7 @@ fn a_replace_that_drops_the_param_is_refused_and_leaves_the_knob() {
 /// plan's on that update, which also carries the target's lane.
 #[test]
 fn a_host_edit_committed_for_a_target_publishes_its_latency() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     settle(&mut s);
     let late = s.graph().add(ForkByClone(Late));
     s.graph().connect(late, MainOutput).unwrap();
@@ -1075,7 +1087,7 @@ fn a_host_edit_committed_for_a_target_publishes_its_latency() {
         Samples::new(LATE),
         "the plan the update sent, published"
     );
-    render(&mut side, 128, 128);
+    render(&mut s, 128, 128);
     settle(&mut s);
     assert!(s.mod_state().lane(cutoff.key()).is_some());
 }
@@ -1090,7 +1102,7 @@ fn a_host_edit_committed_for_a_target_publishes_its_latency() {
 /// has no `enabled` flag: a disabled route declares nothing, which is this); declaring it again, 800.
 #[test]
 fn two_routes_on_one_param_sum_and_removing_one_takes_its_share() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -1104,17 +1116,17 @@ fn two_routes_on_one_param_sum_and_removing_one_takes_its_share() {
         .route(RouteSpec::new(b, cutoff, Bipolar::of(0.2)))
         .unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 800.0, "both routes");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 800.0, "both routes");
 
     s.mods_mut().remove_route(second).unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 600.0, "one removed");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 600.0, "one removed");
 
     s.mods_mut()
         .route(RouteSpec::new(b, cutoff, Bipolar::of(0.2)))
         .unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 800.0, "declared again");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 800.0, "declared again");
 }
 
 /// **Removing the last route returns the param to its knob.** A macro at
@@ -1123,7 +1135,7 @@ fn two_routes_on_one_param_sum_and_removing_one_takes_its_share() {
 /// and the probe reads the knob, 500, past the disconnect's declick.
 #[test]
 fn removing_the_last_route_returns_the_param_to_its_knob() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -1134,7 +1146,7 @@ fn removing_the_last_route_returns_the_param_to_its_knob() {
         .route(RouteSpec::new(offset, cutoff, Bipolar::of(0.1)))
         .unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 600.0, "the route");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 600.0, "the route");
     assert!(
         s.mod_state().lane(cutoff.key()).is_some(),
         "the route has its lane"
@@ -1142,7 +1154,7 @@ fn removing_the_last_route_returns_the_param_to_its_knob() {
 
     s.mods_mut().remove_route(route).unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 500.0, "no route left");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 500.0, "no route left");
     assert!(s.mod_state().lane(cutoff.key()).is_none(), "and no lane");
 }
 
@@ -1153,7 +1165,7 @@ fn removing_the_last_route_returns_the_param_to_its_knob() {
 /// and adds nothing. The edits reach the lane without a new route.
 #[test]
 fn a_routes_polarity_and_curve_reach_the_render() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -1164,12 +1176,12 @@ fn a_routes_polarity_and_curve_reach_the_render() {
         .route(RouteSpec::new(knob, cutoff, Bipolar::of(0.4)))
         .unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 700.0, "bipolar linear");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 700.0, "bipolar linear");
 
     s.set(route.polarity().to(tutti_modulation::Polarity::Unipolar))
         .unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 800.0, "unipolar");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 800.0, "unipolar");
 
     s.set((
         route.polarity().to(tutti_modulation::Polarity::Bipolar),
@@ -1177,7 +1189,7 @@ fn a_routes_polarity_and_curve_reach_the_render() {
     ))
     .unwrap();
     settle(&mut s);
-    assert_holds(&render(&mut side, 1_024, 128)[0], 500.0, "bipolar hold");
+    assert_holds(&render(&mut s, 1_024, 128)[0], 500.0, "bipolar hold");
 
     // Declared with them: a second route says unipolar at creation.
     s.mods_mut().remove_route(route).unwrap();
@@ -1188,11 +1200,7 @@ fn a_routes_polarity_and_curve_reach_the_render() {
         )
         .unwrap();
     settle(&mut s);
-    assert_holds(
-        &render(&mut side, 1_024, 128)[0],
-        800.0,
-        "declared unipolar",
-    );
+    assert_holds(&render(&mut s, 1_024, 128)[0], 800.0, "declared unipolar");
 }
 
 /// **A bus strip's volume and pan take lanes.** The strip declares its params
@@ -1200,7 +1208,7 @@ fn a_routes_polarity_and_curve_reach_the_render() {
 /// port, with nothing refused.
 #[test]
 fn a_bus_strips_volume_and_pan_take_lanes() {
-    let (mut s, _side) = rig(2);
+    let mut s = rig(2);
     let strip = s.graph().add(tutti_nodes::BusStripNode::from(
         tutti_nodes::BusStripConfig::new(ChannelTopology::STEREO),
     ));
@@ -1232,7 +1240,7 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
 /// `each_fed_param_is_the_one_the_dsp_reads`).
 #[test]
 fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
-    let (mut s, _side) = rig(2);
+    let mut s = rig(2);
     let chorus = s.graph().add(tutti_nodes::ModDelayNode::<f32>::from(
         ModDelayConfig::chorus(tutti_buffers::ChannelTopology::STEREO),
     ));
@@ -1273,7 +1281,7 @@ fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
 fn an_added_synth_is_a_modulation_target() {
     use tutti_polysynth::{PolySynth, SynthConfig};
 
-    let (mut s, _side) = rig(2);
+    let mut s = rig(2);
     let node = PolySynth::from(SynthConfig::new());
     let synth = s.graph().add(node);
     main_output(&mut s, &[synth.erase(), synth.erase()]);
@@ -1299,26 +1307,21 @@ fn an_added_synth_is_a_modulation_target() {
 // ----------------------------------------------- what an edit sends --
 
 /// Nothing is staged: the last update's commit took every edit.
-fn idle(s: &DetachedSession) -> bool {
+fn idle(s: &Session) -> bool {
     !s.graph_ref().has_uncommitted_edits()
 }
 
 /// One update, then a block rendered, as a device would between updates.
-pub(crate) fn frame(s: &mut DetachedSession, side: &mut AudioSide) -> usize {
+pub(crate) fn frame(s: &mut Session) -> usize {
     let plans = committed(&s.update());
-    render(side, 128, 128);
+    render(s, 128, 128);
     plans
 }
 
 /// A cutoff probe (knob 500, range `0..=1000`) on output 0, a sine at `rate`
 /// Hz routed into it at `depth`, settled. Returns the probe's param, the
 /// source and the route's key.
-fn lfo_scene(
-    s: &mut DetachedSession,
-    side: &mut AudioSide,
-    rate: f64,
-    depth: f64,
-) -> (ParamTarget<Hz>, ModSourceId, ModRouteId) {
+fn lfo_scene(s: &mut Session, rate: f64, depth: f64) -> (ParamTarget<Hz>, ModSourceId, ModRouteId) {
     let filter = s.graph().add(ProbeUnit::new(500.0));
     main_output(s, &[filter.erase()]);
     let cutoff = filter.cutoff();
@@ -1329,7 +1332,7 @@ fn lfo_scene(
         .route(RouteSpec::new(lfo, cutoff, Bipolar::of(depth)))
         .unwrap();
     for _ in 0..4 {
-        frame(s, side);
+        frame(s);
     }
     assert_eq!(s.mod_state().problems().next(), None);
     assert!(
@@ -1348,19 +1351,19 @@ fn lfo_scene(
 /// edit that did nothing.
 #[test]
 fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     // A rate low enough that one block barely moves it: the render after an
     // edit is read against the edit, not the wave.
-    let (cutoff, lfo, _) = lfo_scene(&mut s, &mut side, 0.5, 0.3);
+    let (cutoff, lfo, _) = lfo_scene(&mut s, 0.5, 0.3);
 
     // The depth: 0.3 → 0.0, the knob alone.
     s.set(DepthTarget::of(lfo, cutoff).to(Bipolar::of(0.0)))
         .unwrap();
     for _ in 0..3 {
-        assert_eq!(frame(&mut s, &mut side), 0, "a depth edit sent a plan");
+        assert_eq!(frame(&mut s), 0, "a depth edit sent a plan");
         assert!(idle(&s), "a depth edit staged an edit");
     }
-    let v = render(&mut side, 128, 128);
+    let v = render(&mut s, 128, 128);
     assert!(
         v[0].iter().all(|&x| x == 500.0),
         "depth 0 is the knob: {v:?}"
@@ -1370,15 +1373,15 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     s.set(cutoff.range().to(Hz::new(600.0)..Hz::new(700.0)))
         .unwrap();
     for _ in 0..3 {
-        assert_eq!(frame(&mut s, &mut side), 0, "a range edit sent a plan");
+        assert_eq!(frame(&mut s), 0, "a range edit sent a plan");
         assert!(idle(&s), "a range edit staged an edit");
     }
-    let v = render(&mut side, 128, 128);
+    let v = render(&mut s, 128, 128);
     assert!(v[0].iter().all(|&x| x == 600.0), "the range clamps: {v:?}");
     // And back to 0..=1000 (a route's depth is a fraction of the span).
     s.set(cutoff.range().to(Hz::new(0.0)..Hz::new(1_000.0)))
         .unwrap();
-    assert_eq!(frame(&mut s, &mut side), 0, "a range edit sent a plan");
+    assert_eq!(frame(&mut s), 0, "a range edit sent a plan");
 
     // A follower on a pulse, routed in: the pulse node first, on its own.
     let pulse = s.graph().add(ForkByClone(Pulse {
@@ -1387,18 +1390,18 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
         level: 0.8,
     }));
     for _ in 0..3 {
-        frame(&mut s, &mut side);
+        frame(&mut s);
     }
     let mut m = s.mods_mut();
     let kick = m.follower(Follower::default(), pulse);
     m.route(RouteSpec::new(kick, cutoff, Bipolar::of(0.15)))
         .unwrap();
-    let plans: usize = (0..6).map(|_| frame(&mut s, &mut side)).sum();
+    let plans: usize = (0..6).map(|_| frame(&mut s)).sum();
     assert_eq!(plans, 1, "a follower route sends exactly one plan");
     assert!(idle(&s));
     // And it modulates: the knob 500 plus the follower's 0.8 · 0.15 · 1000,
     // 620, inside 600..=700.
-    let v = render(&mut side, 4_800, 128);
+    let v = render(&mut s, 4_800, 128);
     let last = *v[0].last().unwrap();
     assert!((last - 620.0).abs() < 0.5, "the follower raises it: {last}");
 }
@@ -1413,12 +1416,12 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
 /// the control grid's bound.
 #[test]
 fn a_depth_slider_keeps_phase() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let rate = 4.0;
-    let (cutoff, lfo, _) = lfo_scene(&mut s, &mut side, rate, 0.3);
+    let (cutoff, lfo, _) = lfo_scene(&mut s, rate, 0.3);
     // `lfo_scene` rendered its updates' blocks: the clock is past them.
     let start = 4 * 128;
-    let before = render(&mut side, 2 * DECLICK, 128).swap_remove(0);
+    let before = render(&mut s, 2 * DECLICK, 128).swap_remove(0);
     let value = |depth: f64, f: usize| {
         500.0 + 1000.0 * depth * (std::f64::consts::TAU * rate * f as f64 / RATE).sin()
     };
@@ -1437,7 +1440,7 @@ fn a_depth_slider_keeps_phase() {
         .unwrap();
     let events = s.update();
     assert_eq!(committed(&events), 0, "a depth edit sent a plan");
-    let after = render(&mut side, 12_000, 128).swap_remove(0);
+    let after = render(&mut s, 12_000, 128).swap_remove(0);
     let start = start + before.len();
     for (i, &v) in after.iter().enumerate().skip(STEP) {
         let f = start + i;
@@ -1452,15 +1455,9 @@ fn a_depth_slider_keeps_phase() {
 /// A macro of 1 at depth 0.2 on the cutoff probe's `0..=1000` (knob 500),
 /// scaled by a macro of 0.5 at depth 1:
 /// `1000 * 0.2 * (1 * 0.5)` = 100 over the knob, so 600. Settled; returns the
-/// session, its audio side and the two macros.
-fn scaled_scene() -> (
-    DetachedSession,
-    AudioSide,
-    ParamRef,
-    ModSourceId,
-    ModSourceId,
-) {
-    let (mut s, mut side) = rig(1);
+/// session and the two macros.
+fn scaled_scene() -> (Session, ParamRef, ModSourceId, ModSourceId) {
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -1474,9 +1471,9 @@ fn scaled_scene() -> (
     m.scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
         .unwrap();
     settle(&mut s);
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 600.0);
     let _ = s.update();
-    (s, side, cutoff, full, half)
+    (s, cutoff, full, half)
 }
 
 /// **A depth write to a route that another route scales lands from the
@@ -1485,12 +1482,12 @@ fn scaled_scene() -> (
 /// `1000 * 0.6 * 0.5` = 300 over the knob, so 800.
 #[test]
 fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
-    let (mut s, mut side, cutoff, full, _) = scaled_scene();
+    let (mut s, cutoff, full, _) = scaled_scene();
     s.set(DepthTarget::of(full, cutoff).to(Bipolar::of(0.6)))
         .unwrap();
     let events = s.update();
     assert_eq!(committed(&events), 0, "a depth write sent a plan");
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 800.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 800.0);
 }
 
 /// **A scale's own depth write is applied.** The scale's
@@ -1500,13 +1497,13 @@ fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
 /// 0.5)` = 50 over the knob, so 550.
 #[test]
 fn a_scales_own_depth_write_is_applied() {
-    let (mut s, mut side, _, full, _) = scaled_scene();
+    let (mut s, _, full, _) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
     s.set(DepthTarget::scale_of(scaled).to(Bipolar::of(0.5)))
         .unwrap();
     let events = s.update();
     assert_eq!(committed(&events), 0, "a depth write sent a plan");
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 550.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 550.0);
 }
 
 /// **One source can route into a target and scale a route into it.** A
@@ -1519,7 +1516,7 @@ fn a_scales_own_depth_write_is_applied() {
 /// first, with its depth.
 #[test]
 fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -1537,16 +1534,16 @@ fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
     m.scale(scaled, Some(Scale::new(half, Bipolar::of(1.0))))
         .expect("a scale is replaced");
     settle(&mut s);
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 650.0);
 
     s.set(DepthTarget::scale_of(scaled).to(Bipolar::of(0.5)))
         .unwrap();
     let _ = s.update();
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 600.0);
     s.set(DepthTarget::of(half, cutoff).to(Bipolar::of(0.3)))
         .unwrap();
     let _ = s.update();
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 700.0);
 }
 
 /// **Clearing a scale restores the unscaled figure, and so does removing the
@@ -1557,20 +1554,20 @@ fn a_source_routes_into_a_target_and_scales_a_route_into_it() {
 /// is refused at the call.
 #[test]
 fn clearing_a_scale_or_removing_its_source_restores_the_unscaled_figure() {
-    let (mut s, mut side, _, full, half) = scaled_scene();
+    let (mut s, _, full, half) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
     assert_eq!(s.mods().route(scaled).unwrap().scale, Some(half));
     s.mods_mut().scale(scaled, None).unwrap();
     let _ = s.update();
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 700.0);
     assert_eq!(s.mods().route(scaled).unwrap().scale, None);
     let scale = Some(Scale::new(half, Bipolar::of(1.0)));
     s.mods_mut().scale(scaled, scale).unwrap();
     let _ = s.update();
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 600.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 600.0);
     s.mods_mut().remove_source(half).unwrap();
     let _ = s.update();
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 700.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 700.0);
     assert_eq!(s.mods().route(scaled).unwrap().scale, None);
     assert_eq!(
         s.mods_mut().scale(scaled, scale),
@@ -1590,15 +1587,15 @@ fn clearing_a_scale_or_removing_its_source_restores_the_unscaled_figure() {
 /// 1 under unipolar, so writing it moves nothing.
 #[test]
 fn a_scales_polarity_shapes_the_scale_not_the_route() {
-    let (mut s, mut side, _, full, _) = scaled_scene();
+    let (mut s, _, full, _) = scaled_scene();
     let scaled = s.mods().routes().find(|r| r.source == full).unwrap().id;
     s.set(PolarityTarget::scale_of(scaled).to(Polarity::Unipolar))
         .unwrap();
     let _ = s.update();
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 650.0);
     s.set(scaled.polarity().to(Polarity::Unipolar)).unwrap();
     let _ = s.update();
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 650.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 650.0);
 }
 
 /// **A scale needs a time function on both sides.** A follower as the scale's
@@ -1606,7 +1603,7 @@ fn a_scales_polarity_shapes_the_scale_not_the_route() {
 /// nothing changes.
 #[test]
 fn a_scale_by_or_of_a_signal_source_is_refused() {
-    let (mut s, _side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -1642,11 +1639,15 @@ fn a_scale_by_or_of_a_signal_source_is_refused() {
 /// to 6 reads 8, the one built at 1 reads 3, live and forked.
 ///
 /// (The unmodulated paths are `graph.rs`' test of the same name).
+#[cfg(feature = "export")]
 #[test]
 fn a_fork_renders_a_modulated_param_as_live_does() {
+    use crate::bounced::{bounced, first_frames};
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::of(RATE))
+        .sample_rate(SampleRate::of(RATE))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let written = s.graph().add(ProbeUnit::of(UnitParam::Drive, 1.0));
     let built = s.graph().add(ProbeUnit::of(UnitParam::Drive, 1.0));
@@ -1666,17 +1667,14 @@ fn a_fork_renders_a_modulated_param_as_live_does() {
     // Past the lanes' connect declick (256 frames).
     let mut live = [0.0f32; 2];
     for _ in 0..512 {
-        s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut live).unwrap());
     }
-    let mut fork = s
-        .graph_ref()
-        .testing()
-        .fork_live()
-        .expect("every knob is forkable");
-    let mut forked = [0.0f32; 2];
-    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
+    let forked = bounced(&mut s, first_frames(1))
+        .expect("every knob is forkable")
+        .into_main_output()
+        .to_planes();
     assert_eq!(live[0], 8.0, "the knob written under its modulation, live");
-    assert_eq!(forked[0], 8.0, "and in the fork");
+    assert_eq!(forked[0], [8.0], "and in the fork");
     assert_eq!(live[1], 3.0, "the knob built under its modulation, live");
-    assert_eq!(forked[1], 3.0, "and in the fork");
+    assert_eq!(forked[1], [3.0], "and in the fork");
 }

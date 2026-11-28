@@ -93,6 +93,10 @@ impl Background {
     }
 
     /// The session's bells: a future that awaits the audio thread makes its bell here.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "the take's pump (feature `capture`) is its user")
+    )]
     pub(crate) fn bells(&self) -> &Bells {
         &self.bells
     }

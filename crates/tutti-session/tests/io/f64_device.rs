@@ -82,7 +82,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
     );
     system.play().expect("queued");
     let guard = Duration::from_secs(10);
-    let mut tap = system.open_heard_tap(Samples::new(2_048)).unwrap();
+    let mut tap = system.open_heard_tap(Samples::new(2_048));
     let mut heard = vec![0.0f64; 512];
     tutti_fixtures::wait_until("FINE never reached the tap", guard, || {
         let _ = system.update();

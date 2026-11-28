@@ -73,7 +73,7 @@ fn one_event_per_update_with_the_blocks_silenced_since_the_last() {
         refused_block(&mut s);
     }
     assert_eq!(silenced(&s.update()), [2]);
-    assert_eq!(s.blocks().expect("engine").get().silenced, 5);
+    assert_eq!(s.blocks().get().silenced, 5);
 }
 
 /// Blocks over their budget and none silenced: the reading rises, the
@@ -92,7 +92,7 @@ fn over_budget_alone_is_no_event() {
     assert!(silenced(&events).is_empty());
     good_block(&mut s);
     good_block(&mut s);
-    let r = s.blocks().expect("engine").get();
+    let r = s.blocks().get();
     assert!(r.over_budget >= 1, "the node outran its budget: {r:?}");
     assert_eq!(r.silenced, 0);
     assert!(silenced(&s.update()).is_empty());

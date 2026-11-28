@@ -58,9 +58,10 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
         SoundFontUnit::from(SoundFontConfig::new(font).expect("a font with a playable preset"));
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
-    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
+        .sample_rate(SampleRate::of(RATE))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let gm = session.add_general_midi(unit).expect("a SoundFont unit");
     for c in 0..2 {
         session

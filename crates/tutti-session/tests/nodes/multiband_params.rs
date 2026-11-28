@@ -10,11 +10,13 @@
 //! split, and `g0`, `g1` the bands' make-up gains. The left tone is band 0's
 //! (`hp` is 1e-4 of it) and the right tone band 1's (`lp` is 6e-4).
 
+#[cfg(feature = "export")]
+use crate::bounced::first_frames;
 use std::f64::consts::{PI, TAU};
-use tutti_buffers::PlanesMut;
-
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
+#[cfg(feature = "export")]
+use tutti_fixtures::{WavePlanes, block_on};
 use tutti_graph::ForkByClone;
 use tutti_modulation::Lfo;
 use tutti_nodes::testing::Osc;
@@ -284,19 +286,26 @@ fn a_route_to_band_1_modulates_band_1_only() {
 /// **A fork takes each index's value as it stands and shares no cell with
 /// the live graph at any index**: after the fork, the live make-ups are
 /// moved the other way (each band), and each render keeps its own figures.
+#[cfg(feature = "export")]
 #[test]
 fn a_fork_keeps_each_index_to_itself() {
     let (mut s, mb) = rig();
     s.set(mb.gain_db_at(0).to(Db::new(-6.0))).unwrap();
     s.set(mb.gain_db_at(1).to(Db::new(6.0))).unwrap();
     render(&mut s, 128);
-    let mut fork = s.graph_ref().testing().fork_live().expect("the node forks");
+    let fork = s
+        .bounce(first_frames(24_064 + 9_600))
+        .expect("the node forks");
     s.set(mb.gain_db_at(0).to(Db::new(12.0))).unwrap();
     s.set(mb.gain_db_at(1).to(Db::new(-12.0))).unwrap();
 
-    let mut out = [vec![0.0; 24_064 + 9_600], vec![0.0; 24_064 + 9_600]];
-    fork.render(128, PlanesMut::from_vecs(&mut out).unwrap());
-    let [l, r] = out;
+    let [l, r]: [Vec<f32>; 2] = s
+        .apply(block_on(fork))
+        .unwrap()
+        .into_main_output()
+        .to_planes()
+        .try_into()
+        .expect("two planes");
     let (l, r) = (amplitude(&l[24_064..], LOW), amplitude(&r[24_064..], HIGH));
     assert!((l - expected(LOW, -6.0, 6.0)).abs() < 1e-5, "fork left {l}");
     assert!(

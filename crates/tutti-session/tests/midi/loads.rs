@@ -15,9 +15,7 @@ use tutti_midi_file::{
     ClipFile, ClipHeader, ClipSequence, MidiFile, ReadRepair, StandardMidiFile, Tick, TimelineDrop,
 };
 use tutti_music::TimeSignature;
-use tutti_session::{
-    DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError, Unplayed,
-};
+use tutti_session::{LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError, Unplayed};
 use tutti_tempo::TempoMap;
 use tutti_ump::{
     Address, Flex, FlexTempo, FlexTimeSignature, Message, MidiChannel, MidiGroup, NoteNumber,
@@ -33,9 +31,11 @@ fn standard(loaded: &LoadedMidi) -> &StandardMidiFile {
     file
 }
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
-        .build_detached(SampleRate::SR_48K)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -102,7 +102,7 @@ fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 /// Loads the file at `path`.
-fn load(s: &mut DetachedSession, path: PathBuf) -> Result<LoadedMidi, LoadError> {
+fn load(s: &mut Session, path: PathBuf) -> Result<LoadedMidi, LoadError> {
     tutti_fixtures::block_on(s.midi().load_midi(path))
 }
 

@@ -26,21 +26,22 @@ use tutti_export::{Normalize, RenderError, TargetError};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, DetachedSession,
-    ExportClock, InputPort, MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemGain,
-    StemKey,
+    Bounce, BounceConfigError, BounceError, BounceLatency, BounceTail, ExportClock, InputPort,
+    MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemGain, StemKey,
 };
 use tutti_session::{Bounced, Destination};
 use tutti_units::{Db, SampleRate, Samples, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-/// A detached stereo session at the render's rate.
-fn session() -> DetachedSession {
+/// An offline stereo session at the render's rate.
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
-        .expect("a detached session builds")
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 /// The mix into memory for `seconds`: nothing trimmed, no tail, no musical
@@ -70,10 +71,7 @@ fn planes(out: Result<Bounced<ToMemory>, BounceError>) -> Vec<Vec<Vec<f32>>> {
 }
 
 /// What a bounce is refused with, started and run on this thread.
-fn refused<M: Destination<f32>>(
-    session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, M>,
-) -> BounceError {
+fn refused<M: Destination<f32>>(session: &mut Session, bounce: Bounce<NodeKey, M>) -> BounceError {
     match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!("expected a refusal, got {:?}", out.stems().len()),
@@ -434,7 +432,7 @@ fn shared_gain_keeps_the_balance_and_each_measures_its_own() {
     let target = Normalize::peak(Db::new(-6.0));
     let dir = tempfile::tempdir().unwrap();
     // The three files' samples, and the gain each reports.
-    let run = |session: &mut DetachedSession, tag: &str, gain: StemGain| {
+    let run = |session: &mut Session, tag: &str, gain: StemGain| {
         let paths =
             ["main_output", "loud", "quiet"].map(|n| dir.path().join(format!("{tag}-{n}.wav")));
         let done = bounced(
@@ -532,10 +530,7 @@ fn a_request_that_cannot_work_is_refused_by_name() {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap();
-    fn why<M: Destination<f32>>(
-        session: &mut DetachedSession,
-        b: Bounce<NodeKey, M>,
-    ) -> BounceConfigError {
+    fn why<M: Destination<f32>>(session: &mut Session, b: Bounce<NodeKey, M>) -> BounceConfigError {
         match refused(session, b) {
             BounceError::Config(why) => why,
             other => panic!("expected a refusal by name, got {other:?}"),

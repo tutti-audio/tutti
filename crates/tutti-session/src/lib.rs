@@ -210,10 +210,8 @@ pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]
 pub use clock::DeviceClock;
 pub use clock::{
-    Clock, Offline, OfflineSession, RealTime, SessionFloat, Stepped, SystemClock, SystemSession,
+    Clock, Offline, OfflineSession, RealTime, SessionFloat, SystemClock, SystemSession,
 };
-#[cfg(feature = "testing")]
-pub use clock::{Detached, DetachedSession};
 #[cfg(feature = "export")]
 pub use destination::{ToMemory, ToSink};
 #[cfg(feature = "device")]
@@ -225,14 +223,14 @@ pub use device::{
 pub use editor::{Editor, EditorCallError, Opened};
 pub use error::{
     BackgroundWork, ConnectError, DeclarationError, Error, InletError, NoSuchNode, RemoveError,
-    Result, SessionHeardTapError, SetRateError,
+    Result, SetRateError,
 };
 #[cfg(feature = "midi")]
 pub use error::{MidiError, RouteDeclarer};
 #[cfg(feature = "soundfont")]
 pub use general_midi::GeneralMidi;
 #[cfg(feature = "testing")]
-pub use graph::{AudioSide, Testing};
+pub use graph::Testing;
 pub use graph::{
     Committed, Feeder, Graph, LIVE_MAX_BLOCK, MainOutputReader, Meters, NotReopened, Reopened,
     ReplaceRefused, Replacement, Taps,

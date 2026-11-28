@@ -574,8 +574,8 @@ pub mod session {
         MainOutputTopologyStatus, MainSink, Meters, NotReopened, Outlet, OutputPlacement,
         OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent, PeerResourceId,
         Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError, Reopened,
-        ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError, SetRateError,
-        SetSources, Taps, Weighted, Wire, main_output_width,
+        ReplaceRefused, Replacement, Resource, ResourceFact, SetRateError, SetSources, Taps,
+        Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,

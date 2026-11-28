@@ -30,8 +30,10 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
 ) -> Vec<i32> {
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::SR_48K)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let dc = session.graph().add(node);
     session.graph().connect(dc, MainOutput).unwrap().unfaded();
     let dir = tempfile::tempdir().expect("dir");
@@ -143,8 +145,10 @@ fn the_files_of_a_bounce_are_dithered_with_different_noise() {
     use tutti_session::Stem;
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::SR_48K)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let silence = session
         .graph()
         .add(ForkByClone(Const::new(0.0, ChannelLayout::STEREO)));

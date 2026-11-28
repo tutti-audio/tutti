@@ -14,7 +14,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, declick_frames};
 use tutti_nodes::testing::Const;
-use tutti_session::{DetachedSession, MainOutput, OutputPort, Session};
+use tutti_session::{MainOutput, OutputPort, Session};
 use tutti_units::SampleRate;
 
 /// `DECLICK` at the session's 48 kHz.
@@ -26,19 +26,21 @@ fn smooth(j: usize) -> f64 {
     x * x * x * (6.0 * x * x - 15.0 * x + 10.0)
 }
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::SR_48K)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
 /// `n` frames of output channel 0, one render call each.
-fn frames(s: &mut DetachedSession, n: usize) -> Vec<f32> {
+fn frames(s: &mut Session, n: usize) -> Vec<f32> {
     (0..n)
         .map(|_| {
             let mut frame = [f32::NAN; 2];
-            s.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
+            s.render(&mut InterleavedMut::one_frame(&mut frame).unwrap());
             frame[0]
         })
         .collect()
@@ -223,6 +225,7 @@ fn a_reconnect_during_a_fade_out_rises_from_where_it_was() {
 #[test]
 fn set_sources_and_remove_fade_what_leaves() {
     let mut s = session();
+    let engine_nodes = s.graph_ref().node_count();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     let b = s.graph().add(ForkByClone(Const::mono(2.0)));
     let sink = MainOutput::channel(0);
@@ -253,5 +256,9 @@ fn set_sources_and_remove_fade_what_leaves() {
     assert!(tail[SPAN..].iter().all(|&x| x == 0.0));
     let _ = s.update();
     let _ = s.update();
-    assert_eq!(s.graph_ref().node_count(), 1, "only a is left");
+    assert_eq!(
+        s.graph_ref().node_count(),
+        engine_nodes + 1,
+        "only a is left"
+    );
 }

@@ -9,7 +9,6 @@
 
 use std::time::Duration;
 
-use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 
 use crate::loading::Perform as _;
@@ -22,9 +21,9 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    Committed, DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
-    PluginHealth, PluginInstance, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState,
-    SaveState, Session, SessionEvent, SetRateError, StateStartError, SwapPluginError,
+    Committed, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause, PluginHealth,
+    PluginInstance, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState, SaveState,
+    Session, SessionEvent, SetRateError, StateStartError, SwapPluginError,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -621,24 +620,6 @@ impl Node for Grenade {
     fn reset(&mut self) {}
 }
 
-/// A session with no output, whose audio side a test can take (a re-prepare
-/// then waits for it).
-fn detached() -> DetachedSession {
-    detached_with(Some(RecoveryPolicy::default()))
-}
-
-/// [`detached`] with `recovery` as its policy (`None`: recovery off).
-fn detached_with(recovery: Option<RecoveryPolicy>) -> DetachedSession {
-    servers();
-    let builder = Session::builder().max_block(MaxBlock::of(Samples::new(BLOCK)));
-    match recovery {
-        Some(policy) => builder.plugin_recovery(policy),
-        None => builder.no_plugin_recovery(),
-    }
-    .build_detached(SampleRate::SR_48K)
-    .expect("a detached session builds")
-}
-
 /// One session with the first plugin loaded and in a node.
 fn with_node(catalog: &Catalog) -> (Session, tutti_session::Key<tutti_session::AnyPlugin>) {
     with_node_in(session(true), catalog)
@@ -708,18 +689,17 @@ fn a_swap_to_the_same_totals_in_other_buses_is_refused() {
     );
 }
 
-/// What a graph that re-prepares does to a swap: it waits, with the executor
-/// taken, until the audio side has run and an update has collected.
-fn repreparing<
-    K: tutti_session::AppKey,
-    C: tutti_session::Stepped + tutti_session::Clock<Float = f32>,
->(
-    s: &mut Session<K, C>,
-) -> tutti_session::AudioSide {
-    let side = s.graph().take_audio_side();
+/// What a graph that re-prepares does to a swap: it waits until a block has
+/// run and an update has collected.
+fn repreparing(s: &mut Session) {
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
-    side
+}
+
+/// One block rendered into nothing: what the re-prepare waits for.
+fn block(s: &mut Session) {
+    let mut out = vec![0.0f32; BLOCK * 2];
+    s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
 }
 
 /// **A swap is `Busy` while the graph is re-preparing, and the plugin it
@@ -728,10 +708,10 @@ fn repreparing<
 #[test]
 fn a_swap_is_busy_while_the_graph_re_prepares_and_succeeds_after() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node_in(detached(), &catalog);
+    let (mut s, node) = with_node_in(session(true), &catalog);
     let main = tutti_fixtures::main_thread();
     let first = pid_of(&s, node);
-    let mut side = repreparing(&mut s);
+    repreparing(&mut s);
 
     let second = load(&s, &catalog, &second_id());
     let Err(SwapPluginError::Busy(second)) = s.swap_plugin(node, second, main) else {
@@ -743,10 +723,9 @@ fn a_swap_is_busy_while_the_graph_re_prepares_and_succeeds_after() {
         "the graph is re-preparing: the node keeps its plugin"
     );
 
-    let mut out = vec![vec![0.0; BLOCK]; 2];
     let mut waiting = Some(second);
     settle_until(&mut s, "the re-prepare to resume", |s| {
-        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
+        block(s);
         let Some(plugin) = waiting.take() else {
             return true;
         };
@@ -797,9 +776,9 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
     let (catalog, _dir) = catalog();
     let (mut s, node) = with_node(&catalog);
     s.graph().add(Unforkable(Grenade));
-    // The session's executor is local, so both halves of the re-prepare run
-    // here and the grenade's panic has poisoned the editor when this returns,
-    // with the poisoning as the refusal.
+    // The grenade is staged and not yet sent, so the re-prepare's first half
+    // prepares it: its panic has poisoned the editor when this returns, with
+    // the poisoning as the refusal.
     let poisoned = s.set_sample_rate(SampleRate::SR_96K);
     assert!(
         matches!(
@@ -835,13 +814,13 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
 #[test]
 fn a_plugin_that_dies_during_a_re_prepare_is_silenced_when_it_resumes() {
     let (catalog, _dir) = catalog();
-    let (mut s, node) = with_node_in(detached_with(None), &catalog);
+    let (mut s, node) = with_node_in(session(false), &catalog);
     let tail = s
         .graph_ref()
         .node_tail(node)
         .expect("the node is in the graph");
     assert!(matches!(tail, Tail::Finite(_)), "{tail:?}");
-    let mut side = repreparing(&mut s);
+    repreparing(&mut s);
 
     s.plugin_view(node)
         .unwrap()
@@ -866,9 +845,8 @@ fn a_plugin_that_dies_during_a_re_prepare_is_silenced_when_it_resumes() {
     );
     assert!(s.graph_ref().contains(node));
 
-    let mut out = vec![vec![0.0; BLOCK]; 2];
     settle_until(&mut s, "the stand-in", |s| {
-        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
+        block(s);
         s.graph_ref().node_tail(node) == Ok(Tail::None)
     });
 }

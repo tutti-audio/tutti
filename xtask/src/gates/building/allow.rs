@@ -603,7 +603,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a per-sample read, not a construction: the interpolation is the read's own kernel, chosen by the caller's bank at each call, and the line holds no mode a read could default to",
     ),
     ty("crates/tutti-graph/", "Direct", SETTER, TEST_SUPPORT),
-    ty("crates/tutti-session/", "AudioSide", SETTER, TEST_SUPPORT),
     ty(
         "crates/tutti-sampler/",
         "MockTransport",

@@ -3,15 +3,18 @@
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_nodes::{DelayConfig, DelayControls, DelayLayout, DelaySync, MaxDelay};
-use tutti_session::{DetachedSession, NodeDecl, Patched, Session};
+use tutti_session::{NodeDecl, Patched, Session};
 use tutti_units::{Feedback, SampleRate, Seconds};
 
 const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -24,7 +27,7 @@ fn delay(feedback: f64, sync: DelaySync) -> DelayConfig {
     })
 }
 
-fn declare(s: &mut DetachedSession, config: DelayConfig) -> Patched<&'static str> {
+fn declare(s: &mut Session, config: DelayConfig) -> Patched<&'static str> {
     s.patch(NodeDecl::new("delay", config)).expect("patches")
 }
 
