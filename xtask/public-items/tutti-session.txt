@@ -1094,6 +1094,7 @@ trait bounce::render_output::StemOutput
 trait clock::Clock
 trait clock::RealTime
 trait clock::SessionFloat
+trait clock::Stepped
 trait clock::sealed::Running
 trait clock::sealed::Sealed
 trait clock::sealed::Streaming

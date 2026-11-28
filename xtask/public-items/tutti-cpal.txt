@@ -5,11 +5,12 @@
 const driver_seam::PREFERRED_QUANTUM
 const mic::MONITOR_RING
 const poller::PollInterval::MIN
+enum audio_host::AudioHost
 enum error::DeviceError
-enum host::AudioHost
 enum host::DeviceSelector
 enum roster::DeviceChange
 enum roster::DeviceDirection
+fn driver::AudioEngine::start_resolved
 fn driver::TuttiDriver::graph_rate
 fn driver::TuttiDriver::into_host
 fn driver::TuttiDriver::move_to
@@ -52,7 +53,6 @@ fn output::AudioEngine::open
 fn output::AudioEngine::opened_name
 fn output::AudioEngine::resolve_device
 fn output::AudioEngine::start
-fn output::AudioEngine::start_resolved
 fn output::AudioEngine::start_with
 fn output::AudioEngine::stop
 fn output::AudioEngine::stream

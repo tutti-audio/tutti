@@ -3,6 +3,15 @@ use crate::map::{Cursor, TempoMap};
 use crate::segment::Law;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Seconds};
 
+impl TempoMap {
+    /// A [`TempoView`] over this map at `rate`: the frame queries, with a
+    /// lookup hint, for a reader that walks the map in order.
+    #[must_use]
+    pub fn view(&self, rate: SampleRate) -> TempoView<'_> {
+        TempoView::new(self, rate)
+    }
+}
+
 /// A [`TempoMap`] read at one sample rate, with the lookup hint a reader that
 /// walks the map in order wants.
 ///

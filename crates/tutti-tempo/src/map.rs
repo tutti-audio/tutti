@@ -1,8 +1,7 @@
-use crate::builder::TempoMapBuilder;
 use crate::error::TempoError;
 use crate::point::{TempoPoint, Transition};
 use crate::segment::Seg;
-use crate::view::TempoView;
+use alloc::vec;
 use alloc::vec::Vec;
 use tutti_music::first_frame_at_or_after;
 use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Seconds};
@@ -26,7 +25,7 @@ fn reached(transition: Transition, next: &TempoPoint) -> Bpm {
     }
 }
 
-/// A lookup hint, owned by a [`TempoView`]. Audio asks for
+/// A lookup hint, owned by a [`TempoView`](crate::TempoView). Audio asks for
 /// nearly monotone positions, so the segment found last time is nearly always
 /// right; a wrong hint costs one binary search and never changes a result.
 #[derive(Clone, Copy, Debug, Default)]
@@ -208,13 +207,6 @@ impl TempoMap {
             (Some(end), Some(_)) => end,
             _ => self.tempo_at(beat),
         }
-    }
-
-    /// A [`TempoView`] over this map at `rate`: the frame queries, with a
-    /// lookup hint, for a reader that walks the map in order.
-    #[must_use]
-    pub fn view(&self, rate: SampleRate) -> TempoView<'_> {
-        TempoView::new(self, rate)
     }
 
     /// The points, as built.
@@ -407,5 +399,119 @@ impl TempoMap {
             return Some(frame);
         }
         next.map(Frame::new)
+    }
+}
+
+/// A tempo map written left to right, where a trailing ramp cannot be written.
+///
+/// It starts with a tempo at beat 0 ([`TempoMap::builder`]). Each call after it
+/// names the next point and how the tempo gets *to* it from the last one: the
+/// point it adds is always a step, so the map's last point never ramps (the
+/// case [`TempoError::RampWithoutEnd`] refuses in a list of points).
+///
+/// ```
+/// use tutti_tempo::{TempoMap, Transition};
+/// use tutti_units::{Beat, Bpm};
+///
+/// let map = TempoMap::builder(Bpm::of(120.0))
+///     .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
+///     .step_to(Beat::new(8.0), Bpm::of(90.0))
+///     .build()?;
+/// assert_eq!(map.points()[0].transition, Transition::RampTime { end: None });
+/// assert_eq!(map.points().last().unwrap().transition, Transition::Step);
+/// # Ok::<(), tutti_tempo::TempoError>(())
+/// ```
+///
+/// A ramp with no point to ramp to has no spelling:
+///
+/// ```compile_fail,E0599
+/// use tutti_tempo::TempoMap;
+/// use tutti_units::{Beat, Bpm};
+///
+/// let _ = TempoMap::builder(Bpm::of(120.0)).ramp_time(Beat::new(4.0));
+/// ```
+#[derive(Clone, Debug)]
+#[must_use]
+pub struct TempoMapBuilder {
+    points: Vec<TempoPoint>,
+}
+
+impl TempoMapBuilder {
+    pub(crate) fn new(first: Bpm) -> Self {
+        Self {
+            points: vec![TempoPoint::step(Beat::new(0.0), first)],
+        }
+    }
+
+    /// Reach `tempo` at `beat` by `transition`: [`step_to`](Self::step_to),
+    /// [`ramp_time_to`](Self::ramp_time_to) or
+    /// [`ramp_beats_to`](Self::ramp_beats_to), chosen by a value.
+    pub fn transition_to(mut self, transition: Transition, beat: Beat, tempo: Bpm) -> Self {
+        if let Some(last) = self.points.last_mut() {
+            last.transition = transition;
+        }
+        self.points.push(TempoPoint::step(beat, tempo));
+        self
+    }
+
+    /// Hold the last tempo until `beat`, then take `tempo` there.
+    pub fn step_to(self, beat: Beat, tempo: Bpm) -> Self {
+        self.transition_to(Transition::Step, beat, tempo)
+    }
+
+    /// Move from the last tempo to `tempo`, reaching it at `beat`, with tempo
+    /// linear in time ([`Transition::RampTime`]).
+    pub fn ramp_time_to(self, beat: Beat, tempo: Bpm) -> Self {
+        self.transition_to(Transition::RampTime { end: None }, beat, tempo)
+    }
+
+    /// Move from the last tempo to `tempo`, reaching it at `beat`, with tempo
+    /// linear in beats ([`Transition::RampBeats`]).
+    pub fn ramp_beats_to(self, beat: Beat, tempo: Bpm) -> Self {
+        self.transition_to(Transition::RampBeats { end: None }, beat, tempo)
+    }
+
+    /// The last point departs with `tempo` at its own beat. When the ramp
+    /// before it has no `end`, that ramp's `end` becomes the last point's
+    /// current tempo (the arrival), so the ramp ends and the tempo steps at one
+    /// beat with no plateau between. When the ramp already has an `end`, only
+    /// the departure is replaced, so a second call keeps the arrival. After a
+    /// step (or on the first point) there is no ramp, and it replaces the last
+    /// point's tempo. Every beat before the last point keeps its time.
+    ///
+    /// ```
+    /// use tutti_tempo::TempoMap;
+    /// use tutti_units::{Beat, Bpm, Seconds};
+    ///
+    /// // 120 to 180 BPM over four beats lasts 1.6 s; the tempo is 90 from there.
+    /// let map = TempoMap::builder(Bpm::of(120.0))
+    ///     .ramp_time_to(Beat::new(4.0), Bpm::of(180.0))
+    ///     .then_step(Bpm::of(90.0))
+    ///     .build()?;
+    /// assert_eq!(map.tempo_at(Beat::new(4.0)), Bpm::of(90.0));
+    /// assert!((map.seconds_at(Beat::new(4.0)) - Seconds::new(1.6)).get().abs() < 1e-12);
+    /// # Ok::<(), tutti_tempo::TempoError>(())
+    /// ```
+    pub fn then_step(mut self, tempo: Bpm) -> Self {
+        if let Some(last) = self.points.pop() {
+            if let Some(Transition::RampTime { end } | Transition::RampBeats { end }) =
+                self.points.last_mut().map(|p| &mut p.transition)
+            {
+                end.get_or_insert(last.tempo);
+            }
+            self.points.push(TempoPoint { tempo, ..last });
+        }
+        self
+    }
+
+    /// The map.
+    ///
+    /// # Errors
+    ///
+    /// As [`TempoMap::new`], for what a builder can still get wrong: a beat
+    /// that is not finite or not after the last point's
+    /// ([`TempoError::BadOrder`]), or a segment an `f64` cannot hold.
+    pub fn build(self) -> Result<TempoMap, TempoError> {
+        TempoMap::new(self.points)
     }
 }

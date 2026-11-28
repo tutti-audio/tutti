@@ -15,6 +15,6 @@ pub(crate) mod driver;
 pub(crate) mod outputs;
 pub(crate) mod plan;
 pub(crate) mod sink;
-pub(crate) use driver::{FileChannels, REPLAY_BLOCK, Replay, check_loss, drive, with_source};
+pub(crate) use driver::{FileChannels, GraphSource, REPLAY_BLOCK, check_loss, drive, with_source};
 pub(crate) use plan::RenderPlan;
 pub(crate) use sink::BlockCursor;

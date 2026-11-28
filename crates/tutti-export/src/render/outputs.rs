@@ -26,15 +26,16 @@ use tutti_units::{Db, SampleRate, Samples};
 use crate::SinkTarget;
 use crate::control::{Control, Outcome, Stage, Weights};
 use crate::normalize::{Measurer, Normalize, Reading, chunk_frames};
-use crate::output::{BufferTarget, FileTarget, Gain, TargetError};
+use crate::output::{BufferTarget, FileTarget, Gain};
 use crate::outputs::{Parts, Placed};
 use crate::render::{
-    FileChannels, REPLAY_BLOCK, RenderPlan, Replay, check_loss, drive, with_source,
+    FileChannels, GraphSource, REPLAY_BLOCK, RenderPlan, check_loss, drive, with_source,
 };
 use crate::sink_target::DynSink;
-use crate::spill::{Spill, SpillBudget};
+use crate::spill::{Replay, Spill, SpillBudget};
 use crate::{
-    ConfigError, Done, Feed, Job, Outputs, RenderError, RenderGraph, Result, Unmeasured, Written,
+    ConfigError, Done, Feed, Job, Outputs, RenderError, RenderGraph, Result, TargetError,
+    Unmeasured, Written,
 };
 
 /// A tap an output reads: the reader, and the planes one block of its lanes
@@ -189,17 +190,9 @@ pub(crate) fn render_outputs<F: FftFloat>(
     control.weigh(Weights::of(parts.files.iter().map(|f| f.output.target())));
     let plan = RenderPlan::of(job);
     let (done, _lost) = with_source(graph, job.rate(), clock, |src| {
-        check_outputs(&parts, src.main_output())?;
-        let (mut files, mut buffers, mut sinks) = open_lanes(
-            parts.files,
-            parts.buffers,
-            parts.sinks,
-            job,
-            &plan,
-            src.outputs(),
-            src.main_output(),
-            src.max_block(),
-        )?;
+        check_outputs(&parts, src)?;
+        let (mut files, mut buffers, mut sinks) =
+            open_lanes(parts.files, parts.buffers, parts.sinks, job, &plan, src)?;
         let mut budget = SpillBudget::new(spill_budget);
 
         let driven = drive(
@@ -254,7 +247,7 @@ pub(crate) fn render_outputs<F: FftFloat>(
 /// zero width, a tap that is not as wide as its placement, a gain taken from an
 /// output that does not measure or from another `Outputs`, and two files with
 /// one path.
-fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result<()> {
+fn check_outputs<F: Float>(parts: &Parts<F>, src: &GraphSource<'_, F>) -> Result<()> {
     if parts.files.is_empty() && parts.buffers.is_empty() && parts.sinks.is_empty() {
         return Err(RenderError::NoOutputs);
     }
@@ -263,7 +256,7 @@ fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result
             output: placed.position,
             why,
         };
-        let feed = channels_of(placed.output.feed(), None, main_output);
+        let feed = src.channels_of(placed.output.feed(), None);
         check_feed(placed, &feed, target_error)?;
         let sink = placed.output.target().layout();
         if sink != feed.width() {
@@ -280,10 +273,9 @@ fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result
         };
         check_feed(
             placed,
-            &channels_of(
+            &src.channels_of(
                 placed.output.feed(),
                 Some(placed.output.target().channel_set()),
-                main_output,
             ),
             target_error,
         )?;
@@ -294,11 +286,7 @@ fn check_outputs<F: Float>(parts: &Parts<F>, main_output: &ChannelSet) -> Result
             output: placed.position,
             why,
         };
-        let channels = channels_of(
-            placed.output.feed(),
-            file.to_file().channel_set(),
-            main_output,
-        );
+        let channels = src.channels_of(placed.output.feed(), file.to_file().channel_set());
         check_feed(placed, &channels, target_error)?;
         if let Some(Gain::Own(Normalize::Lufs { .. })) = file.normalize {
             // Loudness is weighted by placement: refused here, not after the render.
@@ -360,18 +348,6 @@ fn check_feed<T, F: Float>(
     Ok(())
 }
 
-/// The channels of a target: the ones it states, else the feed's.
-fn channels_of<F: Float>(
-    feed: &Feed<F>,
-    stated: Option<ChannelSet>,
-    main_output: &ChannelSet,
-) -> ChannelSet {
-    stated.unwrap_or_else(|| match feed {
-        Feed::MainOutput => *main_output,
-        Feed::Tap { lanes, .. } => lanes.channel_set(),
-    })
-}
-
 /// Opens every output: its fold, its file (refused before it is touched when
 /// the format cannot hold the render) or its planes.
 fn open_lanes<F: FftFloat>(
@@ -380,23 +356,13 @@ fn open_lanes<F: FftFloat>(
     sink_outputs: Vec<Placed<SinkTarget<F>, F>>,
     job: &Job,
     plan: &RenderPlan,
-    graph_outputs: usize,
-    main_output: &ChannelSet,
-    max_block: usize,
+    src: &GraphSource<'_, F>,
 ) -> Result<(Vec<FileLane<F>>, Vec<BufferLane<F>>, Vec<SinkLane<F>>)> {
     let mut files = Vec::with_capacity(file_outputs.len());
     for Placed { position, output } in file_outputs {
         let (feed, file) = output.into_parts();
-        let set = channels_of(&feed, file.to_file().channel_set(), main_output);
-        let lane = open_lane(
-            position,
-            feed,
-            set,
-            file.to_file().placement(),
-            graph_outputs,
-            main_output,
-            max_block,
-        )?;
+        let set = src.channels_of(&feed, file.to_file().channel_set());
+        let lane = open_lane(position, feed, set, file.to_file().placement(), src)?;
         // The blocks the chain is given are folded onto the file's channels by the
         // lane, which also holds them for a normalize: its source is the file's.
         let chain = Box::new(Chain::new(
@@ -423,32 +389,16 @@ fn open_lanes<F: FftFloat>(
     let mut buffers = Vec::with_capacity(buffer_outputs.len());
     for Placed { position, output } in buffer_outputs {
         let (feed, target) = output.into_parts();
-        let set = channels_of(&feed, Some(target.channel_set()), main_output);
-        let lane = open_lane(
-            position,
-            feed,
-            set,
-            target.placement(),
-            graph_outputs,
-            main_output,
-            max_block,
-        )?;
+        let set = src.channels_of(&feed, Some(target.channel_set()));
+        let lane = open_lane(position, feed, set, target.placement(), src)?;
         let wave = reserve_wave(plan, set, target.placement(), job.rate())?;
         buffers.push(BufferLane { lane, wave });
     }
     let mut sinks = Vec::with_capacity(sink_outputs.len());
     for Placed { position, output } in sink_outputs {
         let (feed, target) = output.into_parts();
-        let set = channels_of(&feed, None, main_output);
-        let lane = open_lane(
-            position,
-            feed,
-            set,
-            ChannelPlacement::Default,
-            graph_outputs,
-            main_output,
-            max_block,
-        )?;
+        let set = src.channels_of(&feed, None);
+        let lane = open_lane(position, feed, set, ChannelPlacement::Default, src)?;
         sinks.push(SinkLane {
             lane,
             sink: Some(target.into_sink()),
@@ -463,14 +413,13 @@ fn open_lane<F: FftFloat>(
     feed: Feed<F>,
     set: ChannelSet,
     placement: ChannelPlacement,
-    graph_outputs: usize,
-    main_output: &ChannelSet,
-    max_block: usize,
+    src: &GraphSource<'_, F>,
 ) -> Result<Lane<F>> {
+    let max_block = src.max_block();
     let layout = set.width();
     let channels = FileChannels { channels: set };
     let (fold, tap) = match feed {
-        Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
+        Feed::MainOutput => (src.fold_onto(&channels)?, None),
         Feed::Tap { reader, lanes } => {
             let width = lanes.layout();
             let fold = channels
@@ -574,18 +523,17 @@ fn finish<F: FftFloat>(
                 .map(|&i| waiting_of(&files[i]).spill.frames().get())
                 .sum(),
         );
-        control.set_output(own.first().map_or(0, |&i| files[i].lane.position));
-        control.begin(Stage::Measuring, Some(total));
+        let first = own.first().map_or(0, |&i| files[i].lane.position);
+        control.begin(Stage::Measuring, Some(first), Some(total));
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
         let mut done = Samples::new(0);
         for &i in &own {
             let position = files[i].lane.position;
-            control.set_output(position);
             let w = waiting_of(&files[i]);
             let Gain::Own(mode) = &w.gain else { continue };
-            let normalize = mode.within(&w.target, rate);
+            let normalize = mode.within(w.target.to_file(), rate);
             let Outcome::Finished((reading, at)) = measure(
                 w,
                 position,
@@ -624,8 +572,8 @@ fn finish<F: FftFloat>(
                 .map(|&i| waiting_of(&files[i]).spill.frames().get())
                 .sum(),
         );
-        control.set_output(files[waiting[0]].lane.position);
-        control.begin(Stage::Writing, Some(total));
+        let first = files[waiting[0]].lane.position;
+        control.begin(Stage::Writing, Some(first), Some(total));
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
@@ -639,7 +587,6 @@ fn finish<F: FftFloat>(
             else {
                 continue;
             };
-            control.set_output(lane.position);
             if let Some(chosen) = chosen[i] {
                 chain.set_gain(chosen.gain);
             }
@@ -654,6 +601,7 @@ fn finish<F: FftFloat>(
                 chain,
                 block,
                 Stage::Writing,
+                lane.position,
                 done,
                 total,
                 control,
@@ -690,7 +638,6 @@ fn finish<F: FftFloat>(
         return Ok(Outcome::Cancelled);
     }
     for sink in sinks {
-        control.set_output(sink.lane.position);
         sink.finish()?;
     }
     let Outcome::Finished(landed) = finalize_files(pending, control)? else {
@@ -776,7 +723,7 @@ fn measure<F: FftFloat>(
             None => measurer.feed_interleaved(frames)?,
         }
         done += Samples::new(n);
-        control.advance(Stage::Measuring, done, total);
+        control.advance(Stage::Measuring, Some(output), done, total);
     }
     // The loop above ends on a read that found nothing left, after its check
     // at the top: a cancel on the last chunk's reading is seen there.
@@ -801,6 +748,7 @@ fn replay_through<F: FftFloat>(
     chain: &mut Chain<F>,
     block_frames: usize,
     stage: Stage,
+    output: usize,
     done: Samples,
     total: Samples,
     control: &mut Control<'_>,
@@ -819,7 +767,7 @@ fn replay_through<F: FftFloat>(
         }
         chain.block(block.as_interleaved().slice(Samples::ZERO..Samples::new(n)))?;
         at += n;
-        control.advance(stage, Samples::new(at), total);
+        control.advance(stage, Some(output), Samples::new(at), total);
     }
     Ok(Outcome::Finished(Samples::new(at)))
 }
@@ -848,8 +796,8 @@ pub(crate) fn finalize_files<F: FftFloat>(
     control: &mut Control<'_>,
 ) -> Result<Outcome<Vec<(PathBuf, Landed)>>> {
     let count = files.len();
-    control.set_output(files.first().map_or(0, |f| f.position));
-    control.begin(Stage::Finalizing, None);
+    let mut output = files.first().map_or(0, |f| f.position);
+    control.begin(Stage::Finalizing, Some(output), None);
     if control.is_cancelled() {
         return Ok(Outcome::Cancelled);
     }
@@ -858,16 +806,20 @@ pub(crate) fn finalize_files<F: FftFloat>(
         if k > 0 && control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
-        control.set_output(file.position);
+        output = file.position;
         // A chain keeps a file it could not close whole, and the render has no use
         // for it: it is removed here, so a failed render leaves nothing beside the paths.
         closed.push((file.path, file.chain.finalize().map_err(Kept::discard)?));
         if k + 1 < count {
-            control.at(Stage::Finalizing, 0.5 * (k + 1) as f32 / count as f32);
+            control.at(
+                Stage::Finalizing,
+                Some(output),
+                0.5 * (k + 1) as f32 / count as f32,
+            );
         }
     }
     if count > 0 {
-        control.at(Stage::Finalizing, 0.5);
+        control.at(Stage::Finalizing, Some(output), 0.5);
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
@@ -886,7 +838,7 @@ pub(crate) fn finalize_files<F: FftFloat>(
         }
     }
     // After the last rename: the only reading that is exactly 1.0.
-    control.at(Stage::Finalizing, 1.0);
+    control.at(Stage::Finalizing, Some(output), 1.0);
     Ok(Outcome::Finished(landed))
 }
 

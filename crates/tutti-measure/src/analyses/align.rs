@@ -249,8 +249,9 @@ impl<R: Float> AlignTo<R> {
             return Ok(widen(wave.channel(0).samples()));
         }
         let mono_topology = tutti_buffers::Bed::Mono.topology();
-        // A wave with no topology is unassigned channels, which no fold takes to one.
-        let fold = match wave.topology() {
+        // Unassigned channels, or a width with no topology, fold to no one channel.
+        let channels = wave.channel_set();
+        let fold = match channels.topology() {
             Some(topology) => Fold::<R>::between(topology, &mono_topology)?,
             None => {
                 return Err(FoldError::Unassigned {
