@@ -21,7 +21,8 @@ use crate::checks::read::{Declared, agreed_protocol, endpoint_info, function_blo
 ///
 /// `Error::Call` when a read fails, the block list's reads (its size and each block) and
 /// the stream configuration's included, and `Error::Refused` when the service answers with
-/// no object.
+/// no Endpoint Info, block list or block group. No stream configuration is no agreed
+/// protocol.
 pub(super) fn read(information: &MidiEndpointDeviceInformation) -> Result<Declared, Error> {
     let declared = call!(
         "GetDeclaredEndpointInfo",
@@ -82,15 +83,16 @@ pub(super) fn read(information: &MidiEndpointDeviceInformation) -> Result<Declar
         "GetDeclaredStreamConfiguration",
         *information,
         GetDeclaredStreamConfiguration() -> Option<MidiDeclaredStreamConfiguration>
-    )?
-    .ok_or(Error::Refused {
-        call: "GetDeclaredStreamConfiguration",
-    })?;
-    let protocol = call!("Protocol", stream, Protocol() -> MidiProtocol)?.0;
+    )?;
+    // An endpoint with no stream configuration has agreed no protocol.
+    let protocol = match stream {
+        Some(stream) => agreed_protocol(call!("Protocol", stream, Protocol() -> MidiProtocol)?.0),
+        None => None,
+    };
     Ok(Declared {
         info: endpoint_info(&info),
         blocks,
-        protocol: agreed_protocol(protocol),
+        protocol,
     })
 }
 
