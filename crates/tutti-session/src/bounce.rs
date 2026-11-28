@@ -328,6 +328,8 @@ pub(crate) type OutputOf<D, F> = <D as render_output::Sealed<F>>::Output;
 /// cancelled or failed bounce leaves what was at the path as it was, and nothing beside it. A
 /// take's file is written at its path from the start, so a take cut short by a crash is there
 /// to keep: a WAV's or AIFF's header describes the frames up to the last 2 s of audio written.
+/// A take that states `replace` truncates what was at its path when it is armed, not when it
+/// ends.
 /// The encoding's channels are the width of the file, and without them the output's own (a
 /// main output's, or the width of the tapped channels of a stem, or a take's input). The
 /// dither seed of an encoding that states none is mixed from the output's index (a take's
