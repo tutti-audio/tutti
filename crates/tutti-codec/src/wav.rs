@@ -8,7 +8,11 @@
 //! Layout: a 44-byte `PCMWAVEFORMAT` header for at most two channels of at most
 //! 16 bits, else a 68-byte `WAVE_FORMAT_EXTENSIBLE` one (which also names the
 //! speakers). The RIFF and `data` sizes are written as zero first and
-//! back-patched by [`finish`](FormatWriter::finish).
+//! back-patched by [`finish`](FormatWriter::finish) and, while the file is
+//! written, every 2 s of audio, so a process that dies without unwinding leaves a
+//! file that describes the frames up to the last refresh. A refresh flushes the
+//! sink to the OS and does not sync it: a power loss can still lose what the OS
+//! had not written.
 //!
 //! A WAV file's sizes are 32-bit, so a file holds at most [`max_data_frames`]
 //! frames (just under 4 GiB: about 62 minutes of 8-channel 24-bit audio at
@@ -21,7 +25,7 @@ mod mask;
 use crate::error::{EncodeError, Result};
 use crate::pcm::{IntDepth, Pcm};
 use crate::spec::Spec;
-use crate::writer::FormatWriter;
+use crate::writer::{FormatWriter, Refresh};
 use mask::channel_mask;
 use std::io::{Seek, SeekFrom, Write};
 use tutti_buffers::ChannelLayout;
@@ -136,6 +140,8 @@ pub(crate) struct WavWriter<W: Write + Seek> {
     max_frames: u64,
     /// One block's samples as bytes, reused.
     bytes: Vec<u8>,
+    /// When the sizes are next back-patched.
+    refresh: Refresh,
 }
 
 impl<W: Write + Seek> std::fmt::Debug for WavWriter<W> {
@@ -163,6 +169,7 @@ impl<W: Write + Seek> WavWriter<W> {
             frames: 0,
             max_frames: max_data_frames(spec.layout(), pcm),
             bytes: Vec::new(),
+            refresh: Refresh::new(spec.rate()),
         })
     }
 
@@ -265,6 +272,9 @@ impl<W: Write + Seek> FormatWriter for WavWriter<W> {
             return Err(EncodeError::WavTooLarge {
                 limit_frames: self.max_frames,
             });
+        }
+        if self.refresh.add(block.frames()) {
+            self.patch_sizes()?;
         }
         Ok(())
     }
