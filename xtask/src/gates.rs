@@ -474,42 +474,15 @@ fn write_regenerated<'a>(
 ) -> Result<(), String> {
     let file = root.join(path);
     fs::create_dir_all(file.parent().expect("a file path has a parent"))
-        .and_then(|()| fs::write(&file, &regen.text))
+        .and_then(|()| fs::write(&file, regen.text()))
         .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
     println!("wrote {path}: {rows} rows");
     let text_of: std::collections::BTreeMap<&str, &str> = texts.collect();
-    for id in &regen.added {
-        println!(
-            "added {id} (side todo, no paraphrase): {}",
-            text_of[id.as_str()]
-        );
+    let (lines, verdict) = regen.account(path, &text_of);
+    for line in lines {
+        println!("{line}");
     }
-    for id in &regen.removed {
-        println!("removed {id}: its row is gone from the file; check its tests' tags");
-    }
-    for (id, old) in &regen.changed {
-        println!(
-            "CHANGED {id}: requirement text changed under hand columns; they are blanked (side changed). New sentence: {}\n  was: side {} | {}",
-            text_of[id.as_str()],
-            old.side,
-            old.paraphrase
-        );
-    }
-    for old in &regen.orphans {
-        println!(
-            "ORPHAN {}: hand columns no sentence claims any more (side {} | {})",
-            old.id, old.side, old.paraphrase
-        );
-    }
-    if regen.changed.is_empty() && regen.orphans.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "{path}: {} rows changed under hand columns, {} orphaned; reread them and rewrite their hand columns",
-            regen.changed.len(),
-            regen.orphans.len()
-        ))
-    }
+    verdict
 }
 
 fn midi_inventory(root: &Path) -> Result<(), String> {

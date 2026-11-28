@@ -23,11 +23,11 @@ enum bed::Bed
 enum channels::LayoutError
 enum edge::Pull
 enum edge::Stop
+enum error::BlockSide
 enum error::BufferError
 enum fold::FoldEnd
 enum fold::FoldError
 enum fold::levels::FoldLevel
-enum input_output::BlockSide
 enum sample::ByWidth
 enum sample::FloatWidth
 enum sample::SampleFormat
@@ -48,6 +48,8 @@ fn bed::Bed::from_topology
 fn bed::Bed::label
 fn bed::Bed::topology
 fn bed::Bed::width
+fn bed::ChannelTopology::bed
+fn bed::ChannelTopology::default_for
 fn channel_set::ChannelSet::default_for
 fn channel_set::ChannelSet::topology
 fn channel_set::ChannelSet::unassigned
@@ -222,8 +224,6 @@ fn stereo::StereoPlanes::right
 fn stereo::StereoPlanes::slice
 fn stereo::StereoPlanes::split_at
 fn topology::ChannelTopology::ambisonic
-fn topology::ChannelTopology::bed
-fn topology::ChannelTopology::default_for
 fn topology::ChannelTopology::index_of
 fn topology::ChannelTopology::is_fully_named
 fn topology::ChannelTopology::is_unassigned

@@ -54,10 +54,11 @@ use tutti_rt::Drained;
 use tutti_units::Samples;
 use tutti_units::{SampleRate, Seconds};
 
+use crate::audio_host::AudioHost;
 use crate::driver_seam::{DeviceFormat, Fit, device_rate, fit};
 use crate::edge;
 use crate::error::{DeviceError, Result};
-use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
+use crate::host::{DeviceHost, DeviceSelector, device_name};
 use crate::owner::Owned;
 use crate::roster::DeviceDirection;
 use tutti_engine::{StreamFaults, StreamLatency};

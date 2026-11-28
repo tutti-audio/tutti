@@ -9,8 +9,9 @@
 
 use std::fmt;
 
+use crate::audio_host::AudioHost;
 use crate::error::Result;
-use crate::host::{AudioHost, DeviceHost};
+use crate::host::DeviceHost;
 use crate::roster::{DeviceDirection, DeviceId};
 
 type ListFn = Box<dyn FnOnce() -> Result<Vec<DeviceId>> + Send>;

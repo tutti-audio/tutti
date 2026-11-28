@@ -97,7 +97,7 @@ impl Format {
     pub fn max_frames(&self, layout: ChannelLayout) -> Option<u64> {
         match *self {
             #[cfg(feature = "encode-wav")]
-            Self::Wav(pcm) => Some(crate::wav::max_data_frames(layout, pcm)),
+            Self::Wav(pcm) => Some(crate::wav_size::max_data_frames(layout, pcm)),
             #[cfg(feature = "encode-aiff")]
             Self::Aiff(_) => None,
             #[cfg(feature = "encode-flac")]

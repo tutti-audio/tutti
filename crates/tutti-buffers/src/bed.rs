@@ -255,6 +255,51 @@ impl Bed {
     }
 }
 
+impl ChannelTopology {
+    /// What a bare width is taken to mean at an edge that cannot know (a
+    /// device, a node's outputs, a file whose container states a count and no
+    /// placement): 1 mono, 2 stereo, 4 quad, 6 5.1, 8 7.1, 12 7.1.4, and
+    /// [`unassigned`](Self::unassigned) channels at any other width.
+    ///
+    /// The one count-to-placement map: an edge that uses it reports
+    /// [`Placement::Default`], and an edge that knows better states its own
+    /// topology instead. The quad is a guess a four-channel device or main output
+    /// invites over B-format; an unlisted width names no speaker, so a fold
+    /// places each channel by index.
+    ///
+    /// For a node or a design built for a width and nothing more (a filter of
+    /// `n` channels): what its bus states is the engine's default layout, said
+    /// once here.
+    ///
+    /// `None` past [`MAX_CHANNELS`], where a signal has no topology.
+    #[must_use]
+    pub fn default_for(width: ChannelLayout) -> Option<Self> {
+        let bed = match width.count() {
+            1 => Bed::Mono,
+            2 => Bed::Stereo,
+            4 => Bed::Quad,
+            6 => Bed::Surround51,
+            8 => Bed::Surround71,
+            12 => Bed::Surround714,
+            _ => return Self::unassigned(width),
+        };
+        Some(bed.topology())
+    }
+
+    /// The [`Bed`] this is, up to a side/back counterpart, or `None`: see
+    /// [`Bed::from_topology`].
+    #[must_use]
+    pub fn bed(&self) -> Option<Bed> {
+        Bed::from_topology(self)
+    }
+}
+
+impl From<Bed> for ChannelTopology {
+    fn from(bed: Bed) -> Self {
+        bed.topology()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

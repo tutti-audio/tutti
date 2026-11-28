@@ -45,7 +45,7 @@ pub enum DeviceError {
     #[error("audio host {host} unavailable: {reason}")]
     HostUnavailable {
         /// The host that was asked for.
-        host: crate::host::AudioHost,
+        host: crate::AudioHost,
         /// Why it cannot be opened, as the backend or this crate put it.
         reason: String,
     },
