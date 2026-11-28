@@ -14,6 +14,8 @@ use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_codec::ToFile;
 use tutti_graph::TapReader;
 
+#[cfg(doc)]
+use crate::TargetError;
 use crate::normalize::Normalize;
 
 /// How a file output is normalized, and whose reading sets its gain.

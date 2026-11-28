@@ -9,6 +9,8 @@
 //! writer apart from the machine.
 
 use super::clock::{Control, TransportClock};
+#[cfg(doc)]
+use super::handle::Transport;
 use super::motion::{MotionAudio, MotionFsm};
 use super::settings::TransportSettings;
 use super::tempo_reader::TempoReader;

@@ -25,7 +25,7 @@ fn reached(transition: Transition, next: &TempoPoint) -> Bpm {
     }
 }
 
-/// A lookup hint, owned by a [`TempoView`]. Audio asks for
+/// A lookup hint, owned by a [`TempoView`](crate::TempoView). Audio asks for
 /// nearly monotone positions, so the segment found last time is nearly always
 /// right; a wrong hint costs one binary search and never changes a result.
 #[derive(Clone, Copy, Debug, Default)]
