@@ -129,6 +129,8 @@ impl<F: SamplerFloat> Seat<F> {
         let Self::Waiting { rt, .. } = self else {
             return false;
         };
+        // A waiting seat's audio end holds no reader, so `poll` never runs `last`
+        // on a held value and drops nothing on the audio thread.
         let Some(lent) = rt.poll(|_| {}) else {
             return false;
         };
