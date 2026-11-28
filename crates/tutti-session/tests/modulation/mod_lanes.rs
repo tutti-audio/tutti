@@ -17,6 +17,8 @@ use crate::common;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 #[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
+#[cfg(feature = "export")]
 use tutti_session::ToMemory;
 
 use std::sync::Arc;
@@ -234,7 +236,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
     let export = bounced(&mut s, request)
         .expect("the export runs")
         .into_main_output()
-        .into_planes();
+        .to_planes();
 
     // Live: rolling from beat 0 (the play clock restarts there), in
     // ragged blocks.

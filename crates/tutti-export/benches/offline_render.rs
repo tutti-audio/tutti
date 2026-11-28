@@ -25,7 +25,7 @@
 //! `--profile-time` plus samply.
 
 use std::hint::black_box;
-use tutti_buffers::ChannelSet;
+use tutti_buffers::{ChannelSet, Wave};
 use tutti_codec::Encoding;
 use tutti_codec::ToFile;
 use tutti_units::Seconds;
@@ -37,8 +37,8 @@ use tutti_codec::IntDepth;
 use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm, Resample};
 use tutti_export::{
-    BufferTarget, Control, FileTarget, Gain, Job, Normalize, Output, Outputs, RenderGraph,
-    Rendered, Setup, TailPolicy, Written, render,
+    BufferTarget, Control, FileTarget, Gain, Job, Normalize, Output, Outputs, RenderGraph, Setup,
+    TailPolicy, Written, render,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
@@ -131,7 +131,7 @@ fn config(seconds: f64, rate: f64, channels: ChannelLayout, format: Format) -> C
 }
 
 /// `cfg`'s render into memory.
-fn to_buffers(mut graph: RenderGraph, cfg: &Case) -> Rendered {
+fn to_buffers(mut graph: RenderGraph, cfg: &Case) -> Wave {
     let mut outputs = Outputs::new();
     let planes = outputs.buffers(Output::main_output(cfg.buffer_target()));
     let done = render(

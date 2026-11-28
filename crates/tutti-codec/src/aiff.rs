@@ -1,4 +1,8 @@
-//! AIFF (`aifc`). Streams; `finish` back-patches the COMM/SSND sizes.
+//! AIFF (`aifc`). Streams; `finish` back-patches the COMM/SSND sizes, and so does
+//! every 2 s of audio written, so a process that dies without unwinding leaves a
+//! file that describes the frames up to the last refresh. A refresh flushes the
+//! sink to the OS and does not sync it: a power loss can still lose what the OS
+//! had not written.
 //!
 //! AIFF does not require a total size up front: `aifc` takes samples
 //! incrementally and patches the sizes at `finalize`, the same way a WAV
@@ -12,7 +16,7 @@
 use crate::error::{Codec, EncodeError, Result, SpecError};
 use crate::pcm::{IntDepth, Pcm};
 use crate::spec::Spec;
-use crate::writer::FormatWriter;
+use crate::writer::{FormatWriter, Refresh};
 use aifc::{AifcWriteInfo, AifcWriter, FileFormat, SampleFormat};
 use std::io::{Read, Seek, SeekFrom, Write};
 use tutti_buffers::{FloatWidth, I24, Interleaved, Sample};
@@ -25,6 +29,8 @@ pub(crate) struct AiffWriter<W: Write + Seek> {
     shorts: Vec<i16>,
     floats: Vec<f32>,
     doubles: Vec<f64>,
+    /// When the sizes are next back-patched.
+    refresh: Refresh,
 }
 
 impl<W: Write + Seek> std::fmt::Debug for AiffWriter<W> {
@@ -74,6 +80,7 @@ impl<W: Write + Seek> AiffWriter<W> {
             shorts: Vec::new(),
             floats: Vec::new(),
             doubles: Vec::new(),
+            refresh: Refresh::new(spec.rate()),
         })
     }
 }
@@ -113,7 +120,15 @@ impl<W: Write + Seek> FormatWriter for AiffWriter<W> {
                 self.writer.write_samples_f64(&self.doubles)
             }
         }
-        .map_err(|e| EncodeError::encoding(Codec::Aiff, format!("write failed: {e:?}")))
+        .map_err(|e| EncodeError::encoding(Codec::Aiff, format!("write failed: {e:?}")))?;
+        if self.refresh.add(block.frames()) {
+            // `flush` back-patches the sizes for the frames written and flushes the
+            // sink, as a WAV refresh does.
+            self.writer.flush().map_err(|e| {
+                EncodeError::encoding(Codec::Aiff, format!("refresh failed: {e:?}"))
+            })?;
+        }
+        Ok(())
     }
 
     fn finish(mut self) -> Result<Self::Sink> {

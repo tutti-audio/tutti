@@ -137,7 +137,6 @@ field-leak tutti_clap_host::instance::table::ParamTable::listed
 field-leak tutti_clap_host::instance::table::ParamTable::ranges
 field-leak tutti_clap_host::types::PluginInfo::features
 field-leak tutti_codec::decode::file_in::FileIn::fault
-field-leak tutti_codec::decode::read::PacketDecoder::planes
 field-leak tutti_dsp::bit_crush::BitCrusher::controls
 field-leak tutti_dsp::comb::CombFilter::form
 field-leak tutti_dsp::comb::CombFilter::gain
@@ -184,7 +183,6 @@ field-leak tutti_engine::restart::StreamHost::stream
 field-leak tutti_engine::stream::OutputStream::spec
 field-leak tutti_export::control::Control::output
 field-leak tutti_export::render::driver::GraphSource::main_output
-field-leak tutti_export::rendered::Rendered::planes
 field-leak tutti_graph::compile::plan::NodePorts::borrows
 field-leak tutti_graph::compile::plan::NodePorts::event_assemble
 field-leak tutti_graph::compile::plan::NodePorts::event_borrows
@@ -270,8 +268,6 @@ field-leak tutti_midi_runtime::outbound::clock_master::ClockMaster::refused
 field-leak tutti_midi_runtime::outbound::machine_control_out::MachineControlSender::rate
 field-leak tutti_midi_runtime::outbound::machine_control_out::MachineControlSender::to
 field-leak tutti_midi_runtime::schedule::clip_node::ClipEvents::events
-field-leak tutti_music::meter::BarPosition::signature
-field-leak tutti_music::meter::MeterMap::changes
 field-leak tutti_nodes::convolution::node::ConvolverNode::gain
 field-leak tutti_nodes::dynamics::limiter::LimiterKernel::detection
 field-leak tutti_nodes::dynamics::multiband::Band::attack
@@ -358,8 +354,6 @@ field-leak tutti_polysynth::voice::VoiceSlot::envelope_level
 field-leak tutti_polysynth::voice::VoiceSlot::id
 field-leak tutti_polysynth::voice::VoiceSlot::note
 field-leak tutti_polysynth::voice::VoiceSlot::velocity
-field-leak tutti_rt::gauge::Shared::closed
-field-leak tutti_rt::gauge::Shared::value
 field-leak tutti_sampler::streamer::loops::RingLoop::span
 field-leak tutti_sampler::streamer::record::Record::cells
 field-leak tutti_sampler::streamer::record::Record::out
@@ -441,18 +435,6 @@ field-leak tutti_shared_plugin::transcript::Transcript::transports
 field-leak tutti_soundfont::player::Player::heard
 field-leak tutti_soundfont::region_pair::RegionPair::instrument
 field-leak tutti_soundfont::voice::Voice::block
-field-leak tutti_tempo::map::TempoMap::pts
-field-leak tutti_timeline::motion::MotionFsm::timed
-field-leak tutti_timeline::settings::TransportSettings::beat
-field-leak tutti_timeline::settings::TransportSettings::current_tempo
-field-leak tutti_timeline::settings::TransportSettings::meter
-field-leak tutti_timeline::settings::TransportSettings::paused
-field-leak tutti_timeline::settings::TransportSettings::segment_generation
-field-leak tutti_timeline::settings::TransportSettings::steady_time
-field-leak tutti_timeline::timed::CommandQueue::carry
-field-leak tutti_timeline::timed::CommandQueue::queue
-field-leak tutti_timeline::timed::CommandQueue::rescale_before
-field-leak tutti_timeline::timed::CommandQueueAudio::pending
 field-leak tutti_voicing::channel::ChannelState::bend
 field-leak tutti_voicing::channel::ChannelState::glide_from
 field-leak tutti_voicing::channel::ChannelState::last_key
@@ -495,10 +477,6 @@ field-leak tutti_vst3_host::events::output::OutputStream::translator
 field-leak tutti_vst3_host::host::controller::Vst3Controller::loaded
 field-leak tutti_vst3_host::host::loaded::Vst3Loaded::plugin
 field-leak tutti_vst3_host::host::midi_learn::MidiLearnConsumer::armed
-field-leak xtask::gates::conformance::Regen::added
-field-leak xtask::gates::conformance::Regen::changed
-field-leak xtask::gates::conformance::Regen::orphans
-field-leak xtask::gates::conformance::Regen::text
 shallow-module tutti_clap_ffi::gui
 shallow-module tutti_clap_ffi::types
 shallow-module tutti_dsp::stft
@@ -536,7 +514,6 @@ wide-directory crates/tutti-dsp/src/
 wide-directory crates/tutti-dsp/src/dynamics/
 wide-directory crates/tutti-dsp/src/sos/
 wide-directory crates/tutti-engine/src/
-wide-directory crates/tutti-export/src/
 wide-directory crates/tutti-graph/src/compile/
 wide-directory crates/tutti-graph/src/exec/
 wide-directory crates/tutti-graph/src/node/

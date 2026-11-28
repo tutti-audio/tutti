@@ -6,6 +6,7 @@
 use crate::common::OpenPorts as _;
 use crate::common::{Keyed, blocks, play, tap};
 use std::sync::Arc;
+use tutti_fixtures::WavePlanes;
 use tutti_platform::Instant;
 use tutti_session::ToMemory;
 
@@ -612,7 +613,7 @@ fn a_bounce_while_following_renders_the_base_tempo() {
     let planes = crate::bounced::bounced(&mut s, bounce)
         .expect("renders")
         .into_main_output()
-        .into_planes();
+        .to_planes();
     assert_eq!(planes[0].len(), 2 * RATE as usize);
 }
 

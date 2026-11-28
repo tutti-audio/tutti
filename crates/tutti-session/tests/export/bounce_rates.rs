@@ -2,6 +2,7 @@
 //! node, its rates and the rate asked for.
 
 use tutti_buffers::ChannelLayout;
+use tutti_fixtures::WavePlanes;
 use tutti_graph::{Cx, ForkByClone, ForkError, Io, Node, Prepare, SampleRates, Shape, Status};
 use tutti_session::ToMemory;
 use tutti_session::{Bounce, BounceError, DetachedSession, MainOutput, Range, Session};
@@ -31,7 +32,7 @@ fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, B
         .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.25)))
         .sample_rate(rate);
-    Ok(bounced(session, bounce)?.into_main_output().into_planes()[0].len())
+    Ok(bounced(session, bounce)?.into_main_output().to_planes()[0].len())
 }
 
 /// **A fork refuses a rate outside a node's declared rates and renders at one

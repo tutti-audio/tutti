@@ -839,3 +839,21 @@ fn then_step_on_a_map_with_earlier_points_changes_only_the_last_segment() {
     let below = stepped.tempo_at(Beat::new(6.0f64.next_down())).get();
     assert!((below - 180.0).abs() < 1e-9, "{below}");
 }
+
+/// **The next point is strictly after the beat**: a point on the beat is the one the beat is
+/// on, so it is not "after"; past the last point there is none.
+#[test]
+fn point_after_is_the_first_point_strictly_after_the_beat() {
+    let m = TempoMap::new([
+        pt(0.0, 120.0, Transition::Step),
+        pt(4.0, 240.0, Transition::Step),
+    ])
+    .unwrap();
+    assert_eq!(m.point_after(Beat::new(0.0)), Some(Beat::new(4.0)));
+    assert_eq!(m.point_after(Beat::new(3.5)), Some(Beat::new(4.0)));
+    assert_eq!(
+        m.point_after(Beat::new(4.0)),
+        None,
+        "a point on the beat is not after it"
+    );
+}

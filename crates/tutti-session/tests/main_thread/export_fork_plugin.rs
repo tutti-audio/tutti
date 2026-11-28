@@ -11,6 +11,7 @@
 use crate::bounced::bounced;
 use crate::loading::{LoadPlugin, Spec};
 use crate::support;
+use tutti_fixtures::WavePlanes;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
 
@@ -67,7 +68,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, ToMemory> {
 /// The planes `bounce` renders; panics with the refusal otherwise.
 fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     match bounced(session, bounce) {
-        Ok(out) => out.into_main_output().into_planes(),
+        Ok(out) => out.into_main_output().to_planes(),
         Err(e) => panic!("the bounce failed: {e:?}"),
     }
 }
@@ -79,9 +80,7 @@ fn stem_planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>)
         Ok(out) => {
             let (_, mut done, keys) = out.into_parts();
             match keys.as_slice() {
-                [StemKey::Buffers(key)] => {
-                    done.take_buffers(key).expect("its own key").into_planes()
-                }
+                [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").to_planes(),
                 other => panic!("expected one stem held in memory, got {other:?}"),
             }
         }

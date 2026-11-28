@@ -5,16 +5,16 @@
 //! distinction from [`MotionFsm`](super::MotionFsm), where the state machine
 //! decides whether a transition happens at all.
 //!
-//! Fields are public because there is nothing to encapsulate — each one is a
-//! lock-free cell shared between the UI thread and the audio thread, and a
-//! forwarding method would only rename it.
+//! Each field is a lock-free cell shared between the UI thread and the audio
+//! thread.
 
 use super::ProjectMeter;
 use super::TempoReader;
-use super::state::AtomicBpm;
+use super::state::{AtomicBpm, ClockLinks, PendingSeek};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tutti_rt::Publisher;
+use tutti_music::MeterMap;
+use tutti_rt::{Publisher, Reader};
 use tutti_tempo::TempoMap;
 
 use atomic_float::AtomicF64;
@@ -118,6 +118,27 @@ impl TransportSettings {
         &self.meter
     }
 
+    /// The meter as published now. Control thread: an owning handle, as
+    /// [`ProjectMeter::current`] gives.
+    #[must_use]
+    pub fn meter_map(&self) -> Arc<MeterMap> {
+        self.meter.current()
+    }
+
+    /// A reader of the project's meter, registered here on the control side
+    /// ([`ProjectMeter::reader`]), for the one engine that lends it once per
+    /// block.
+    pub(crate) fn meter_reader(&self) -> Reader<MeterMap> {
+        self.meter.reader()
+    }
+
+    /// Frees the meters no block holds any more, and returns how many are still
+    /// held ([`ProjectMeter::reclaim`]). Control thread, on a tick it already
+    /// has: the session's `Reclaim` phase.
+    pub fn reclaim_meter(&self) -> usize {
+        self.meter.reclaim()
+    }
+
     /// The tempo the clock is actually running at (see the field).
     #[must_use]
     pub fn current_tempo(&self) -> Bpm {
@@ -195,12 +216,37 @@ impl TransportSettings {
         self.segment_generation.load(Ordering::Acquire)
     }
 
-    /// Overwrite the published playhead: this crate's tests, which stand in
-    /// for the clock. Outside it, the writer is
+    /// A locate moves the published playhead at once, ahead of the clock's
+    /// own writeback. Outside this crate, the writer is
     /// [`TransportAudio::set_playhead`](super::TransportAudio::set_playhead).
-    #[cfg(test)]
-    pub(crate) fn set_beat(&self, beat: impl Into<Beat>) {
+    pub(crate) fn locate(&self, beat: impl Into<Beat>) {
         self.beat.store(beat.into().get(), Ordering::Release);
+    }
+
+    /// The clock holds position. Called by the motion machine, the one writer
+    /// of the flag.
+    pub(crate) fn pause(&self) {
+        self.paused.store(true, Ordering::Release);
+    }
+
+    /// The clock advances. Called by the motion machine, the one writer of
+    /// the flag.
+    pub(crate) fn resume(&self) {
+        self.paused.store(false, Ordering::Release);
+    }
+
+    /// The links a clock over these settings shares, writer half included,
+    /// with `seek` as the pending jump it consumes. Crate-private: the
+    /// transport's one audio side is the only caller.
+    pub(crate) fn clock_links(&self, seek: PendingSeek) -> ClockLinks {
+        ClockLinks {
+            paused: Arc::clone(&self.paused),
+            seek,
+            position_writeback: Some(Arc::clone(&self.beat)),
+            segment_generation: Some(Arc::clone(&self.segment_generation)),
+            steady_time: Some(Arc::clone(&self.steady_time)),
+            current_tempo: Some(Arc::clone(&self.current_tempo)),
+        }
     }
 
     /// Whether the clock is holding position.

@@ -122,7 +122,7 @@ impl TransportAudio {
         // would be.
         let (clock, tempo, stepped) = {
             let map = tempo_map.lend();
-            let tempo = map.points()[0].tempo;
+            let tempo = map.tempo_at(Beat::new(0.0));
             let mut clock = TransportClock::new(transport.links(), rate, tempo);
             let stepped = map.constant_tempo().is_none();
             if stepped {
@@ -135,9 +135,9 @@ impl TransportAudio {
             control: Control::read(&settings, loop_region, motion.recording(), tempo),
             tempo_map,
             seen,
-            meter: settings.project_meter().reader(),
+            meter: settings.meter_reader(),
             stepped,
-            schedule: CommandQueueAudio::new(transport.motion.timed().clone()),
+            schedule: transport.motion.queue_audio(),
             motion,
             settings,
         })
@@ -152,9 +152,28 @@ impl TransportAudio {
         self.schedule.drain_commands();
     }
 
+    /// The pending command that comes first, as of the last
+    /// [`drain_commands`](Self::drain_commands): `due` answers `Some((k, late))`
+    /// for a command due `k` frames into the block (or `late`) and `None` for
+    /// one not due in it. The least `k` wins, send order breaking ties.
+    /// Returns `(k, index, late)`, the index
+    /// [`apply_command`](Self::apply_command) takes.
+    pub fn earliest_due(
+        &self,
+        due: impl FnMut(&Scheduled) -> Option<(usize, bool)>,
+    ) -> Option<(usize, usize, bool)> {
+        self.schedule.earliest(due)
+    }
+
+    /// The least of what `read` makes of each pending command that it reads
+    /// one off, as of the last [`drain_commands`](Self::drain_commands).
+    pub fn least_pending<T: Ord>(&self, read: impl FnMut(&Scheduled) -> Option<T>) -> Option<T> {
+        self.schedule.least(read)
+    }
+
     /// The scheduled commands sent and not yet applied.
-    #[must_use]
-    pub fn pending(&self) -> &[Scheduled] {
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> &[Scheduled] {
         self.schedule.pending()
     }
 

@@ -91,10 +91,9 @@ mod tests {
             .apply(block_on(rendering.into_future()))
             .unwrap()
             .into_main_output();
-        let frames = rendered.interleaved();
-        let settled = &frames[frames.len() / 2..];
+        let half = rendered.len().get() / 2;
         for channel in 0..2 {
-            let x: Vec<f32> = settled.iter().skip(channel).step_by(2).copied().collect();
+            let x = &rendered.channel(channel).samples()[half..];
             let peak = x.iter().fold(0.0f32, |m, v| m.max(v.abs()));
             let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
             assert!((peak - 0.25).abs() < 1e-3, "channel {channel} peak {peak}");

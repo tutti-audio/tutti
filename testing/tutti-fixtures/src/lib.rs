@@ -90,6 +90,7 @@ mod vst3_cpp;
 #[cfg(feature = "vst3-sdk")]
 mod vst3_sdk;
 mod wait;
+mod wave;
 
 pub use alloc_count::{ThreadCounting, allocations};
 #[cfg(feature = "au")]
@@ -128,6 +129,7 @@ pub use vst3_cpp::{bundle_of, vst3_cpp_module};
 #[cfg(feature = "vst3-sdk")]
 pub use vst3_sdk::{SdkRecord, sdk_zeroed};
 pub use wait::{HANG_GUARD, wait_until};
+pub use wave::WavePlanes;
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;

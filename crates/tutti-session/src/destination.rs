@@ -3,9 +3,10 @@
 use tutti_buffers::{ChannelLayout, ChannelSet, Sink};
 use tutti_export::BufferTarget;
 
-/// Planes in memory: [`Bounced::main_output`](crate::Bounced::main_output) and a take's
+/// Audio in memory: [`Bounced::main_output`](crate::Bounced::main_output) and a take's
 /// [`Recorded::output`](crate::Recorded::output) are their
-/// [`Rendered`](tutti_export::Rendered), one plane per channel at the render's rate. Nothing
+/// [`Wave`](tutti_buffers::Wave), one channel per plane at the render's rate, placed as
+/// [`channels`](Self::channels) states (the engine's order for the width otherwise). Nothing
 /// is encoded, resampled, dithered or normalized, and a destination in memory has no way to
 /// ask for any of them.
 ///
@@ -50,8 +51,17 @@ impl ToMemory {
 
 #[cfg(feature = "capture")]
 impl ToMemory {
+    /// Whether the planes' speakers were stated (a set with a topology) or are the engine's
+    /// order for the width, which is what [`planes`](Self::planes) makes of the same choice.
+    pub(crate) fn placement(&self) -> tutti_buffers::Placement {
+        match self.channels.as_ref().and_then(ChannelSet::topology) {
+            Some(_) => tutti_buffers::Placement::Stated,
+            None => tutti_buffers::Placement::Default,
+        }
+    }
+
     /// The fold from `source`'s channels onto the planes', when they are not the same
-    /// channels, and the width of the planes. Built on the control side, so the pump only
+    /// channels, and the channels of the planes. Built on the control side, so the pump only
     /// applies it.
     ///
     /// # Errors
@@ -60,16 +70,16 @@ impl ToMemory {
     pub(crate) fn fold<F: tutti_buffers::Float>(
         &self,
         source: &ChannelSet,
-    ) -> Result<(ChannelLayout, Option<tutti_buffers::Fold<F>>), tutti_buffers::FoldError> {
+    ) -> Result<(ChannelSet, Option<tutti_buffers::Fold<F>>), tutti_buffers::FoldError> {
         let Some(planes) = &self.channels else {
-            return Ok((source.width(), None));
+            return Ok((*source, None));
         };
         let fold = if planes == source {
             None
         } else {
             Some(tutti_buffers::Fold::to_channels(source, planes).build()?)
         };
-        Ok((planes.width(), fold))
+        Ok((*planes, fold))
     }
 }
 

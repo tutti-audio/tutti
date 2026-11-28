@@ -13,6 +13,7 @@ use crate::bounced::bounced;
 use std::collections::HashMap;
 use std::path::Path;
 use tutti_codec::Encoding;
+use tutti_fixtures::WavePlanes;
 use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
@@ -60,9 +61,9 @@ fn bounce(seconds: f64) -> Bounce<NodeKey, ToMemory> {
 /// The planes of every target a finished bounce produced, main output first.
 fn planes(out: Result<Bounced<ToMemory>, BounceError>) -> Vec<Vec<Vec<f32>>> {
     let (main_output, mut done, keys) = out.expect("the bounce renders").into_parts();
-    std::iter::once(main_output.into_planes())
+    std::iter::once(main_output.to_planes())
         .chain(keys.iter().map(|key| match key {
-            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").into_planes(),
+            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").to_planes(),
             other => panic!("expected planes, got {other:?}"),
         }))
         .collect()

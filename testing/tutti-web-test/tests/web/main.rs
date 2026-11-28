@@ -59,14 +59,13 @@ async fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() 
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(RATE);
     let rendered = session.bounce(bounce).expect("the bounce starts").await;
-    let planes = session
+    let wave = session
         .apply(rendered)
         .expect("the bounce renders")
-        .into_main_output()
-        .into_planes();
-    assert_eq!(planes[0].len(), 48_000);
+        .into_main_output();
+    assert_eq!(wave.len().get(), 48_000);
     assert!(
-        planes[0].iter().all(|&s| s == 0.25),
+        wave.channel(0).samples().iter().all(|&s| s == 0.25),
         "a constant clip stays constant"
     );
 }

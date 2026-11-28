@@ -794,7 +794,8 @@ impl Kept {
 /// The unfinished file [`FileEncoder::finish_keeping`] kept.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unfinished {
-    /// Where the file is, beside the path it was meant for.
+    /// Where the file is: beside the path it was meant for, or the path itself for an
+    /// [`in_place`](FileOptions::in_place) file.
     pub path: PathBuf,
     /// Whether the file's header describes the frames kept: `true` when the
     /// header now states the lengths of the frames on disk (a WAV or AIFF that
