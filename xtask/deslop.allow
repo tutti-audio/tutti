@@ -15,8 +15,6 @@ module-cycle tutti_dsp::reverb::fdn::design,tutti_dsp::reverb::fdn::kind
 module-cycle tutti_dsp::reverb::network::queries,tutti_dsp::reverb::network::response
 module-cycle tutti_dsp::sos::analog,tutti_dsp::sos::butterworth
 module-cycle tutti_engine::callback,tutti_engine::callback_frames,tutti_engine::stream
-module-cycle tutti_export::control,tutti_export::error,tutti_export::normalize,tutti_export::output,tutti_export::outputs
-module-cycle tutti_export::render,tutti_export::spill
 module-cycle tutti_graph::compile,tutti_graph::edges,tutti_graph::edit,tutti_graph::event,tutti_graph::exec,tutti_graph::model,tutti_graph::node
 module-cycle tutti_graph::compile::carry,tutti_graph::compile::coarsen,tutti_graph::compile::colour,tutti_graph::compile::plan,tutti_graph::compile::program,tutti_graph::compile::timing,tutti_graph::compile::verify
 module-cycle tutti_graph::contract::drive,tutti_graph::contract::rig
@@ -58,9 +56,6 @@ module-cycle tutti_session::analyze,tutti_session::apply,tutti_session::backgrou
 module-cycle tutti_session::loaded,tutti_session::unblocked
 module-cycle tutti_session::modulation::derived,tutti_session::modulation::state
 module-cycle tutti_session::value::batch,tutti_session::value::controls,tutti_session::value::edit_log,tutti_session::value::error,tutti_session::value::gesture,tutti_session::value::saved,tutti_session::value::slot,tutti_session::value::state,tutti_session::value::target,tutti_session::value::watcher
-module-cycle tutti_tempo::builder,tutti_tempo::map,tutti_tempo::view
-module-cycle tutti_timeline::audio,tutti_timeline::handle
-module-cycle tutti_timeline::fsm,tutti_timeline::motion,tutti_timeline::timed
 module-cycle tutti_ump::articulation,tutti_ump::ci_version,tutti_ump::decode,tutti_ump::encode,tutti_ump::lanes,tutti_ump::manufacturer,tutti_ump::message,tutti_ump::mixed_data,tutti_ump::reserved,tutti_ump::sysex,tutti_ump::sysex8,tutti_ump::ump
 module-cycle tutti_ump::control_value,tutti_ump::field,tutti_ump::scale
 module-cycle tutti_ump::held_controllers,tutti_ump::held_keys
@@ -84,7 +79,6 @@ tangle tutti_clap_ffi::library::Bundle,tutti_clap_ffi::plugin::Plugin
 tangle tutti_clap_host::instance::ClapLoaded,tutti_clap_host::instance::controller::ClapController,tutti_clap_host::instance::editor_instance::ClapEditor,tutti_clap_host::support::active::Active,tutti_clap_host::support::active::Clap
 tangle tutti_cpal::driver::TuttiDriver,tutti_cpal::output::AudioEngine
 tangle tutti_cpal::host::DeviceHost,tutti_cpal::host::jack::open
-tangle tutti_export::control::Control,tutti_export::control::Weights,tutti_export::normalize::Measurer,tutti_export::normalize::Normalize,tutti_export::normalize::headroom_ceiling,tutti_export::output::FileTarget,tutti_export::output::Gain
 tangle tutti_graph::edit::editor::Editor,tutti_graph::node::fork::ForkRemains,tutti_graph::node::fork::PendingFork,tutti_graph::testing::declare_outputs
 tangle tutti_graph::exec::history::EMPTY,tutti_graph::exec::history::NONE,tutti_graph::exec::history::Piece,tutti_graph::exec::history::TransportHistory,tutti_graph::exec::history::roll,tutti_graph::node::time::BeatCrossings,tutti_graph::node::time::Env,tutti_graph::node::time::TransportChange,tutti_graph::node::time::TransportChanges,tutti_graph::node::time::TransportPosition
 tangle tutti_graph::model::bus_edge::Lowering,tutti_graph::model::spec::GraphSpec
@@ -109,8 +103,6 @@ tangle tutti_session::error::ConnectError,tutti_session::error::Error,tutti_sess
 tangle tutti_session::policy::OutputPolicy,tutti_session::value::slot::OutputPolicyTarget
 tangle tutti_session::value::edit_log::EditLog,tutti_session::value::edit_log::EditMark,tutti_session::value::gesture::Gesture,tutti_session::value::saved::SavedValues,tutti_session::value::state::ValueState,tutti_session::value::state::Values,tutti_session::value::watcher::Watcher
 tangle tutti_soundfont::SoundFontUnit,tutti_soundfont::config::SoundFontConfig,tutti_soundfont::fork::SoundFontFork,tutti_soundfont::player::Player
-tangle tutti_tempo::builder::TempoMapBuilder,tutti_tempo::map::TempoMap
-tangle tutti_timeline::audio::TransportAudio,tutti_timeline::handle::Transport
 tangle tutti_ump::decode::decode,tutti_ump::message::Message,tutti_ump::message::Unknown,tutti_ump::midi1::Midi1Parser,tutti_ump::midi1::parse_exact,tutti_ump::midi1::short,tutti_ump::ump::Ump
 tangle tutti_ump::message::BarAccents,tutti_ump::reserved::ReservedAccents
 tangle tutti_ump::message::PerNoteManagement,tutti_ump::message::Voice1,tutti_ump::message::Voice2
@@ -173,8 +165,6 @@ field-leak tutti_engine::output::OutputControl::routing_ended
 field-leak tutti_engine::output::OutputControl::stage
 field-leak tutti_engine::restart::StreamHost::stream
 field-leak tutti_engine::stream::OutputStream::spec
-field-leak tutti_export::control::Control::output
-field-leak tutti_export::render::driver::GraphSource::main_output
 field-leak tutti_graph::compile::plan::NodePorts::borrows
 field-leak tutti_graph::compile::plan::NodePorts::event_assemble
 field-leak tutti_graph::compile::plan::NodePorts::event_borrows

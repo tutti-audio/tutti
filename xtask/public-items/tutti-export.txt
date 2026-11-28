@@ -7,7 +7,9 @@ const job::MAX_FRAMES
 enum control::Outcome
 enum control::Stage
 enum error::ConfigError
+enum error::DoneError
 enum error::RenderError
+enum error::TargetError
 enum error::Unmeasured
 enum job::EventLossPolicy
 enum job::JobError
@@ -15,8 +17,6 @@ enum job::TailPolicy
 enum normalize::Normalize
 enum output::Feed
 enum output::Gain
-enum output::TargetError
-enum outputs::DoneError
 fn Written::new
 fn control::CancelToken::cancel
 fn control::CancelToken::is_cancelled
@@ -86,13 +86,13 @@ struct control::Progress
 struct graph::RenderGraph
 struct graph::Setup
 struct job::Job
+struct output::BufferKey
 struct output::BufferTarget
+struct output::FileKey
 struct output::FileTarget
 struct output::Output
 struct output::Placement
-struct outputs::BufferKey
 struct outputs::Done
-struct outputs::FileKey
 struct outputs::Outputs
 struct sink_target::SinkTarget
 trait graph::RtLogSink

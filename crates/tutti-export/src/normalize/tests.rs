@@ -68,12 +68,12 @@ mod headroom {
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
-    fn config(pcm: Pcm) -> FileTarget {
-        FileTarget::new(ToFile::new(
+    fn config(pcm: Pcm) -> ToFile {
+        ToFile::new(
             "unused.wav",
             Encoding::new(Format::Wav(pcm))
                 .channels(ChannelSet::default_for(ChannelLayout::STEREO)),
-        ))
+        )
     }
 
     /// An integer type of `depth`, dithered with `dither` (none for `None`) and noise-shaped
@@ -135,7 +135,7 @@ mod headroom {
             );
             assert!(got < headroom_ceiling(&plain, RATE).unwrap(), "{shape:?}");
         }
-        let resampled = FileTarget::new(ToFile::new(
+        let resampled = ToFile::new(
             "unused.wav",
             Encoding::new(Format::Wav(int(
                 IntDepth::Int16,
@@ -143,7 +143,7 @@ mod headroom {
                 true,
             )))
             .resample(tutti_codec::Resample::to(SampleRate::SR_96K)),
-        ));
+        );
         let want = NoiseShaping::new(SampleRate::SR_96K).feedback_gain().get();
         let lsbs = 2.0 + want * 1.5;
         let got = headroom_ceiling(&resampled, RATE).unwrap();
@@ -193,8 +193,6 @@ mod headroom {
 
 mod measurer {
     use super::*;
-    use crate::Outcome;
-    use crate::control::{CancelToken, Progress};
     use tutti_buffers::{Bed, ChannelTopology, Wave};
     use tutti_measure::{LoudnessConfig, measure_loudness};
     use tutti_units::{Amplitude, Hz, Samples};
@@ -220,30 +218,13 @@ mod measurer {
         )
     }
 
-    /// `measure` of `rendered` under a control that reports to `report`,
-    /// which may cancel `token`.
-    fn measure(
-        rendered: &Wave,
-        token: &CancelToken,
-        report: &mut dyn FnMut(&Progress),
-    ) -> Outcome<Loudness> {
-        let mut control = Control::new(token).on_progress(report);
-        control.weigh(Weights::Normalized);
-        let outcome = Normalize::peak(Db::new(-1.0))
-            .measure(
-                rendered,
-                &Bed::Stereo.topology(),
-                Samples::new(0),
-                rendered.len(),
-                &mut control,
-            )
-            .expect("a measurable sine");
-        match outcome {
-            Outcome::Finished(reading) => {
-                Outcome::Finished(reading.loudness().expect("stereo is placed"))
-            }
-            Outcome::Cancelled => Outcome::Cancelled,
-        }
+    /// The loudness `measure` reads off `rendered` as a stereo peak-normalizing output.
+    fn measure(rendered: &Wave) -> Loudness {
+        Normalize::peak(Db::new(-1.0))
+            .measure(rendered, &Bed::Stereo.topology())
+            .expect("a measurable sine")
+            .loudness()
+            .expect("stereo is placed")
     }
 
     /// The chunk is one second of audio, at least a frame.
@@ -271,9 +252,7 @@ mod measurer {
     #[test]
     fn the_chunked_reading_is_the_analytic_one_and_the_one_shot_one() {
         let rendered = sine(5, 0.1);
-        let chunked = measure(&rendered, &CancelToken::new(), &mut |_| {})
-            .into_finished()
-            .expect("not cancelled");
+        let chunked = measure(&rendered);
 
         let analytic_lufs =
             Db::from_amplitude(Amplitude::new(0.1)).get() + Db::from_power(0.625).get();
@@ -315,9 +294,7 @@ mod measurer {
     #[test]
     fn the_cut_does_not_move_the_reading() {
         let rendered = sine(3, 0.25);
-        let whole = measure(&rendered, &CancelToken::new(), &mut |_| {})
-            .into_finished()
-            .expect("not cancelled");
+        let whole = measure(&rendered);
         let mut fine = Measurer::new(
             RATE,
             &Bed::Stereo.topology(),
@@ -334,26 +311,6 @@ mod measurer {
         let fine = fine.finish().loudness().expect("stereo is placed");
         assert!((fine.lufs.get() - whole.lufs.get()).abs() < 0.01);
         assert!((fine.true_peak.get() - whole.true_peak.get()).abs() < 0.01);
-    }
-
-    /// A cancel between chunks stops the measurement there: the callback
-    /// cancels on the second chunk's reading, and no third chunk is fed.
-    #[test]
-    fn a_cancel_between_chunks_stops_the_measurement() {
-        let rendered = sine(5, 0.1);
-        let token = CancelToken::new();
-        let mut reported = 0;
-        let outcome = measure(&rendered, &token, &mut |p| {
-            reported += 1;
-            if p.frames().is_some_and(|(done, _)| done.get() >= 2 * 48_000) {
-                token.cancel();
-            }
-        });
-        assert_eq!(outcome, Outcome::Cancelled);
-        // The entry is `begin`'s, not `measure`'s; chunks 1 and 2 are the only
-        // readings that are, and the cadence delivers every 4096 frames, so a
-        // chunk is one reading.
-        assert_eq!(reported, 2, "two chunks were measured, then it stopped");
     }
 
     /// A topology of another width than the audio is a named error before any

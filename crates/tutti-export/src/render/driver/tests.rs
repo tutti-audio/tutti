@@ -3,7 +3,7 @@ use crate::control::{CancelToken, Progress, Stage};
 use crate::{GRAPH_MAX_BLOCK, Setup};
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet};
-use tutti_buffers::{Interleaved, Planes};
+use tutti_buffers::{Interleaved, InterleavedMut, Planes};
 use tutti_graph::GraphBuilder;
 use tutti_graph::testing::declare_outputs;
 use tutti_tempo::TempoMap;
@@ -38,7 +38,7 @@ fn render(
         let file = FileChannels {
             channels: ChannelSet::default_for(layout),
         };
-        let fold = file.fold_from(src.outputs(), src.main_output())?;
+        let fold = src.fold_onto(&file)?;
         let mut scratch = vec![0.0f32; src.max_block() * ch];
         drive(
             src,

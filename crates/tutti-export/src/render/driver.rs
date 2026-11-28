@@ -6,7 +6,7 @@
 //! and hands each block to the outputs (the fold onto each one's layout is
 //! theirs, [`FileChannels::fold_from`]), so the graph is stepped exactly once
 //! per block however many outputs there are. The audio a normalized output spilled
-//! is read back through a [`Replay`].
+//! is read back through a [`Replay`](crate::spill::Replay).
 //!
 //! The frame width is a runtime value carried by
 //! `Interleaved`, never a `const CH`. A width in the type can only carry one that is a property of the
@@ -20,11 +20,11 @@
 
 use crate::control::{Control, Outcome, Stage};
 use crate::render::BlockCursor;
-use crate::{ConfigError, RenderGraph, RtLogSink, TailPolicy};
+use crate::{ConfigError, Feed, RenderGraph, RtLogSink, TailPolicy};
 use std::ops::Range;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
-use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut, Sample};
+use tutti_buffers::{Float, Fold, Planes, PlanesMut};
 
 use tutti_graph::RtLogReaders;
 use tutti_timeline::RenderClock;
@@ -201,14 +201,23 @@ impl<F: Float> GraphSource<'_, F> {
         )
     }
 
-    /// The graph's main output channels: the planes of a block.
-    pub(crate) fn outputs(&self) -> usize {
-        self.outputs
+    /// The channels of a target: the ones it `stated`, else the feed's, which
+    /// for the graph's main output are those the render is placed from.
+    pub(crate) fn channels_of<G: Float>(
+        &self,
+        feed: &Feed<G>,
+        stated: Option<ChannelSet>,
+    ) -> ChannelSet {
+        stated.unwrap_or_else(|| match feed {
+            Feed::MainOutput => self.main_output,
+            Feed::Tap { lanes, .. } => lanes.channel_set(),
+        })
     }
 
-    /// What the file is placed from.
-    pub(crate) fn main_output(&self) -> &ChannelSet {
-        &self.main_output
+    /// The fold from the graph's main output onto `channels`
+    /// ([`FileChannels::fold_from`]).
+    pub(crate) fn fold_onto(&self, channels: &FileChannels) -> crate::Result<Fold<F>> {
+        channels.fold_from(self.outputs, &self.main_output)
     }
 
     /// The planes of the block last rendered: one per main output, the first
@@ -378,13 +387,6 @@ pub(crate) fn check_loss(policy: crate::EventLossPolicy, lost: u64) -> crate::Re
     Ok(())
 }
 
-/// Audio read back in blocks: what a normalized output spilled while the graph rendered.
-pub(crate) trait Replay<F: Sample = f32> {
-    /// Fills the leading frames of `out`, returning how many frames were
-    /// written; `0` is the end.
-    fn fill(&mut self, out: InterleavedMut<'_, F>) -> crate::Result<usize>;
-}
-
 /// The frames a replay hands out per block: 64, which only paces
 /// the encoder.
 ///
@@ -439,7 +441,7 @@ where
     // the flush fixes the true total.
     let mut phase = Phase::Programme;
     let mut total = plan.total;
-    control.begin(stage, Some(plan.total));
+    control.begin(stage, None, Some(plan.total));
     loop {
         // The frames the phase pulls next, and the phase after it: none left
         // moves the render on.
@@ -484,7 +486,7 @@ where
                 let end = pulled + plan.latency + kept_latency;
                 if left == Samples::ZERO {
                     total = end;
-                    control.advance(stage, pulled, total);
+                    control.advance(stage, None, pulled, total);
                 }
                 (Phase::Flush { end }, left)
             }
@@ -517,7 +519,7 @@ where
         let kept_now = window.len();
         consume(src, n, window)?;
         kept += Samples::new(kept_now);
-        control.advance(stage, src.produced(), total);
+        control.advance(stage, None, src.produced(), total);
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }

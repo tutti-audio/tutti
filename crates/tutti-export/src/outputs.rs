@@ -6,60 +6,13 @@
 //! comes back is typed by what went in. A key is branded by the `Outputs` that
 //! made it: another render's key is a named error where it is used.
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 use tutti_buffers::{Float, Wave};
 
-use crate::SinkTarget;
 use crate::Written;
-use crate::output::{BufferTarget, FileTarget, Output};
-
-/// The identity of one [`Outputs`], carried by its keys.
-///
-/// A key holds a weak count of the allocation its `Outputs` owns, so two
-/// brands are equal only when they came from one `Outputs`, and an address is
-/// never reused while a key of it lives.
-#[derive(Debug, Clone)]
-struct Brand(Weak<()>);
-
-impl PartialEq for Brand {
-    fn eq(&self, other: &Self) -> bool {
-        Weak::ptr_eq(&self.0, &other.0)
-    }
-}
-
-/// The key of a file output, from [`Outputs::file`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct FileKey {
-    brand: Brand,
-    index: usize,
-}
-
-/// The key of a buffer output, from [`Outputs::buffers`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct BufferKey {
-    brand: Brand,
-    index: usize,
-}
-
-/// Why a [`Done`] has no result for a key.
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum DoneError {
-    /// Another [`Outputs`] made the key.
-    #[error("the key belongs to another Outputs")]
-    Foreign,
-    /// The result was moved out by [`Done::take_file`] or [`Done::take_buffers`].
-    #[error("the result was already taken")]
-    Taken,
-}
-
-impl FileKey {
-    /// The index of the file among the file outputs, in the order they were added.
-    pub(crate) fn index(&self) -> usize {
-        self.index
-    }
-}
+use crate::output::{Brand, BufferKey, BufferTarget, FileKey, FileTarget, Output};
+use crate::{DoneError, SinkTarget};
 
 /// An output, and where it was added among all of the render's outputs.
 pub(crate) struct Placed<T, F: Float> {
@@ -114,10 +67,7 @@ impl<F: Float> Outputs<F> {
 
     /// Adds a file output; the key reads its [`Written`] from the finished render.
     pub fn file(&mut self, output: Output<FileTarget, F>) -> FileKey {
-        let key = FileKey {
-            brand: self.brand(),
-            index: self.files.len(),
-        };
+        let key = FileKey::new(self.brand(), self.files.len());
         let position = self.len();
         self.files.push(Placed { position, output });
         key
@@ -125,10 +75,7 @@ impl<F: Float> Outputs<F> {
 
     /// Adds a buffer output; the key reads its [`Wave`] from the finished render.
     pub fn buffers(&mut self, output: Output<BufferTarget, F>) -> BufferKey {
-        let key = BufferKey {
-            brand: self.brand(),
-            index: self.buffers.len(),
-        };
+        let key = BufferKey::new(self.brand(), self.buffers.len());
         let position = self.len();
         self.buffers.push(Placed { position, output });
         key
@@ -147,7 +94,7 @@ impl<F: Float> Outputs<F> {
     }
 
     fn brand(&self) -> Brand {
-        Brand(Arc::downgrade(&self.id))
+        Brand::of(&self.id)
     }
 
     /// The outputs, taken apart for the render.
@@ -175,7 +122,7 @@ pub(crate) struct Stamp(Brand);
 impl<F: Float> Parts<F> {
     /// Whether the outputs made `key`.
     pub(crate) fn owns(&self, key: &FileKey) -> bool {
-        key.brand == self.brand
+        key.issued_by(&self.brand)
     }
 
     pub(crate) fn stamp(&self) -> Stamp {
@@ -217,8 +164,8 @@ impl<F: Float> Done<F> {
     /// [`DoneError::Foreign`] when another [`Outputs`] made `key`;
     /// [`DoneError::Taken`] after [`take_file`](Self::take_file).
     pub fn file(&self, key: &FileKey) -> Result<&Written, DoneError> {
-        self.check(&key.brand)?;
-        self.files[key.index].as_ref().ok_or(DoneError::Taken)
+        self.check(key.issued_by(&self.brand))?;
+        self.files[key.index()].as_ref().ok_or(DoneError::Taken)
     }
 
     /// The audio `key` names.
@@ -228,8 +175,8 @@ impl<F: Float> Done<F> {
     /// [`DoneError::Foreign`] when another [`Outputs`] made `key`;
     /// [`DoneError::Taken`] after [`take_buffers`](Self::take_buffers).
     pub fn buffers(&self, key: &BufferKey) -> Result<&Wave<F>, DoneError> {
-        self.check(&key.brand)?;
-        self.buffers[key.index].as_ref().ok_or(DoneError::Taken)
+        self.check(key.issued_by(&self.brand))?;
+        self.buffers[key.index()].as_ref().ok_or(DoneError::Taken)
     }
 
     /// Moves the file `key` names out, so a caller who owns the result need not
@@ -239,8 +186,8 @@ impl<F: Float> Done<F> {
     ///
     /// As [`file`](Self::file); a second take is [`DoneError::Taken`].
     pub fn take_file(&mut self, key: &FileKey) -> Result<Written, DoneError> {
-        self.check(&key.brand)?;
-        self.files[key.index].take().ok_or(DoneError::Taken)
+        self.check(key.issued_by(&self.brand))?;
+        self.files[key.index()].take().ok_or(DoneError::Taken)
     }
 
     /// Moves the audio `key` names out; the other results stay.
@@ -249,8 +196,8 @@ impl<F: Float> Done<F> {
     ///
     /// As [`buffers`](Self::buffers); a second take is [`DoneError::Taken`].
     pub fn take_buffers(&mut self, key: &BufferKey) -> Result<Wave<F>, DoneError> {
-        self.check(&key.brand)?;
-        self.buffers[key.index].take().ok_or(DoneError::Taken)
+        self.check(key.issued_by(&self.brand))?;
+        self.buffers[key.index()].take().ok_or(DoneError::Taken)
     }
 
     /// Events the graph lost during the render (not a note-off it refused and
@@ -263,8 +210,8 @@ impl<F: Float> Done<F> {
         self.dropped_events
     }
 
-    fn check(&self, brand: &Brand) -> Result<(), DoneError> {
-        if *brand == self.brand {
+    fn check(&self, issued_here: bool) -> Result<(), DoneError> {
+        if issued_here {
             Ok(())
         } else {
             Err(DoneError::Foreign)
