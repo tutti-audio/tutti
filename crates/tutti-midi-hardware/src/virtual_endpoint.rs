@@ -206,7 +206,8 @@ pub(crate) trait SenderBackend: Send + Sync {
     any(
         midi_backend = "none",
         midi_backend = "winmm",
-        midi_backend = "midi_services"
+        midi_backend = "midi_services",
+        midi_backend = "web"
     ),
     allow(
         dead_code,
@@ -219,7 +220,8 @@ pub(crate) struct Live(Arc<tutti_rt::RwLock<bool>>);
     any(
         midi_backend = "none",
         midi_backend = "winmm",
-        midi_backend = "midi_services"
+        midi_backend = "midi_services",
+        midi_backend = "web"
     ),
     allow(
         dead_code,

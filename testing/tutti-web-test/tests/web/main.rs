@@ -17,6 +17,8 @@ use tutti::{
 };
 use wasm_bindgen_test::wasm_bindgen_test;
 
+mod web_midi;
+
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// An offline session at [`RATE`].

@@ -1,7 +1,8 @@
 #![doc = include_str!("../README.md")]
 //! OS MIDI I/O for the Tutti audio engine: enumerate endpoints, connect
 //! them, send MIDI out and receive it back, through CoreMIDI (macOS), the
-//! ALSA UMP sequencer (Linux) and Windows MIDI Services or Windows Multimedia (Windows). `tutti::midi` names its
+//! ALSA UMP sequencer (Linux), Windows MIDI Services or Windows Multimedia (Windows) and Web
+//! MIDI (browsers, `wasm32-unknown-unknown`). `tutti::midi` names its
 //! device and profile types (feature `midi-hardware`).
 //!
 //! Events reach the wire as UMP words, not MIDI 1.0 bytes, so MIDI-2-only messages
@@ -231,6 +232,7 @@
 //! | Linux | ALSA UMP sequencer | Needs alsa-lib ≥ 1.2.10. Kernel ≥ 6.5 converts UMP↔legacy at the port boundary, so it works against MIDI 1.0 hardware. |
 //! | Windows | Windows MIDI Services | UMP words end to end, each endpoint one duplex device. The service's endpoint watcher feeds the list, an output hands each packet to the service at its send time, and a PC without the service fails to open with a named error. No virtual endpoints. |
 //! | Windows (`winmm` feature) | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and translated as a legacy ALSA port is. Polled device watch, no virtual ports. An output holds each event until its send time on a thread of its own. Replaces Windows MIDI Services, for a PC that has none. |
+//! | Web (`wasm32-unknown-unknown`) | Web MIDI API | MIDI 1.0 ports. [`Start`] is the browser's permission request, made with SysEx, and fails with a named error when the user or the page's policy refuses it or the browser has no Web MIDI. Lists the connected ports and watches the browser's `statechange`. Opening a port is [`MidiHardwareError::Unsupported`]. No virtual ports. |
 //! | Elsewhere | stub | Enumerates nothing, [`MidiHardwareError::Unsupported`] on open. |
 //!
 //! [`MidiSession::open`] picks one, once, at construction; nothing downstream learns
@@ -303,7 +305,8 @@ mod backend_choice;
     any(
         midi_backend = "none",
         midi_backend = "winmm",
-        midi_backend = "midi_services"
+        midi_backend = "midi_services",
+        midi_backend = "web"
     ),
     allow(dead_code, reason = "only a UMP backend converts OS blocks")
 )]
@@ -316,7 +319,7 @@ mod fault;
 // Only the ALSA, Windows Multimedia and Windows MIDI Services callbacks run through it: the
 // stub has none, and CoreMIDI's port catches a panic in its own.
 #[cfg_attr(
-    any(midi_backend = "none", midi_backend = "coremidi"),
+    any(midi_backend = "none", midi_backend = "coremidi", midi_backend = "web"),
     allow(
         dead_code,
         reason = "only the ALSA, Windows Multimedia and Windows MIDI Services backends use it"
@@ -336,7 +339,8 @@ mod start;
     any(
         midi_backend = "none",
         midi_backend = "winmm",
-        midi_backend = "midi_services"
+        midi_backend = "midi_services",
+        midi_backend = "web"
     ),
     allow(
         dead_code,

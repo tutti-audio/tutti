@@ -22,3 +22,7 @@ wasm-bindgen-test = "0.3.80"
 tutti-platform = { path = "../../crates/tutti-platform" }
 futures-lite.workspace = true
 gloo-timers = { version = "0.4.1", features = ["futures"] }
+# The Web MIDI backend against a mock `navigator.requestMIDIAccess` (`js-sys` builds the mock).
+tutti-midi-hardware = { path = "../../crates/tutti-midi-hardware" }
+tutti-midi-device = { path = "../../crates/tutti-midi-device" }
+js-sys = "0.3.107"

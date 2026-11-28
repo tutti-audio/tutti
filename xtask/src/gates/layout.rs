@@ -23,7 +23,8 @@
 //! The codec libraries are `tutti-codec`'s alone, the WinRT runtime libraries are
 //! `tutti-winmidi2-ffi`'s alone, `coreaudio_sys` is named in
 //! [`COREAUDIO_HOMES`]'s library code alone, and `winnow` is named in
-//! [`WINNOW_HOMES`]'s parser modules alone; in `tutti-codec`'s manifest a
+//! [`WINNOW_HOMES`]'s parser modules alone, the browser bindings (`web-sys`, `js-sys`,
+//! `wasm-bindgen`) are named in [`WEB_HOMES`]'s one module alone; in `tutti-codec`'s manifest a
 //! `decode-*` feature enables no encoder library and an `encode-*` feature no
 //! `symphonia`.
 //!
@@ -326,6 +327,15 @@ const WINRT_LIBS: &[&str] = &[
     "windows-collections",
     "windows_collections",
 ];
+/// The browser bindings, in either spelling.
+const WEB_LIBS: &[&str] = &[
+    "web-sys",
+    "web_sys",
+    "js-sys",
+    "js_sys",
+    "wasm-bindgen",
+    "wasm_bindgen",
+];
 const ENCODERS: &[&str] = &["flacenc", "aifc", "md-5"];
 
 /// A crate that names `winnow`, and the parser modules that may.
@@ -352,6 +362,13 @@ pub(super) const WINNOW_HOMES: &[(&str, &[&str])] = &[
         ],
     ),
 ];
+
+/// A crate that names the browser bindings ([`WEB_LIBS`]), and the directory of its library
+/// code that may: Web MIDI's calls into the browser are `tutti-midi-hardware`'s `web` backend.
+pub(super) const WEB_HOMES: &[(&str, &str)] = &[(
+    "tutti-midi-hardware",
+    "crates/tutti-midi-hardware/src/backend/web/",
+)];
 
 /// A crate that names `coreaudio_sys`, and the paths of its library code (`src/`;
 /// a directory prefix or a file) that may. `tutti-au-ffi` is the binding's own
@@ -596,6 +613,36 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
                     "{path} names winnow outside {}",
                     modules.join(", ")
                 ));
+            }
+        }
+    }
+
+    // The browser bindings are a web module's alone: a dependency of a home crate only, named
+    // in the home's directory only.
+    let web_crates: Vec<&str> = WEB_HOMES.iter().map(|(c, _)| *c).collect();
+    for p in &pkgs {
+        for (dep, kind) in &p.deps {
+            if WEB_LIBS.contains(&dep.as_str())
+                && *kind != Kind::Dev
+                && !web_crates.contains(&p.name.as_str())
+            {
+                bad.push(format!(
+                    "{dep} is a {} dependency of {}; only {} may name the browser bindings, in their listed web module",
+                    kind.label(),
+                    p.name,
+                    web_crates.join(", ")
+                ));
+            }
+        }
+    }
+    for (krate, dir) in WEB_HOMES {
+        for path in tree.files(&format!("crates/{krate}/src"), &skipped) {
+            if !path.ends_with(".rs") || path.starts_with(dir) {
+                continue;
+            }
+            let text = blank(&tree.read(&path).unwrap_or_default());
+            if WEB_LIBS.iter().any(|lib| text.contains(lib)) {
+                bad.push(format!("{path} names the browser bindings outside {dir}"));
             }
         }
     }
@@ -1324,6 +1371,43 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("crates/tutti-midi-ci/src/lib.rs names winnow outside"))
         );
+    }
+
+    #[test]
+    fn the_browser_bindings_are_the_web_backends_alone() {
+        let r = with((
+            "crates/tutti-graph",
+            "tutti-graph",
+            "[dependencies]\nweb-sys = \"0.3\"\njs-sys = \"0.3\"\n",
+        ));
+        assert!(
+            r.findings
+                .iter()
+                .any(|l| l.contains("web-sys is a normal dependency of tutti-graph"))
+        );
+        let r = with((
+            "crates/tutti-graph",
+            "tutti-graph",
+            "[dev-dependencies]\njs-sys = \"0.3\"\n",
+        ));
+        assert!(r.passed());
+        let mut m = ws(&base());
+        let web = "crates/tutti-midi-hardware/src/backend/web/page.rs";
+        m.files
+            .insert(web.into(), "use web_sys::MidiAccess;\n".into());
+        assert!(check(&m).findings.iter().all(|l| !l.contains("browser")));
+        m.files.insert(
+            "crates/tutti-midi-hardware/src/backend/web_port/ports.rs".into(),
+            "use js_sys::Reflect;\n".into(),
+        );
+        assert!(check(&m).findings.iter().any(|l| {
+            l.contains("backend/web_port/ports.rs names the browser bindings outside")
+        }));
+        m.files.insert(
+            "crates/tutti-midi-hardware/src/backend/web_port/ports.rs".into(),
+            "// js_sys is the web module's\n".into(),
+        );
+        assert!(check(&m).findings.iter().all(|l| !l.contains("browser")));
     }
 
     #[test]

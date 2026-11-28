@@ -166,6 +166,33 @@ pub enum MidiHardwareError {
     #[error(transparent)]
     NoMidi1Form(#[from] tutti_ump::NoMidi1Form),
 
+    /// The browser refused Web MIDI access: the user declined the permission prompt, or
+    /// the page's permissions policy or secure-context rule forbids MIDI
+    /// (NotAllowedError, SecurityError). SysEx is always requested, so a user who
+    /// allows MIDI without SysEx is a denial too.
+    #[error(
+        "the browser denied Web MIDI access (the user or the page's permissions policy refused it)"
+    )]
+    WebMidiDenied,
+
+    /// The browser has no Web MIDI: `navigator.requestMIDIAccess` is missing, or the
+    /// browser answered NotSupportedError.
+    #[error("this browser has no Web MIDI (navigator.requestMIDIAccess is missing or unsupported)")]
+    WebMidiUnavailable,
+
+    /// The browser's MIDI system failed the request for a reason other than a denial:
+    /// `name` is the DOMException name (InvalidStateError, AbortError, or another).
+    #[error("the browser could not give Web MIDI access: {name}")]
+    WebMidiFailed {
+        /// The DOMException's name.
+        name: String,
+    },
+
+    /// A Web MIDI object is the page thread's alone and the call came from another
+    /// thread.
+    #[error("Web MIDI belongs to the thread that started it, and this call is on another")]
+    WebMidiOffPage,
+
     /// A virtual endpoint declared Function Blocks, and the platform cannot
     /// publish them: its endpoints carry a name and a protocol only (macOS before
     /// 15, which has no `MIDIUMPMutableEndpoint`). The same spec without blocks

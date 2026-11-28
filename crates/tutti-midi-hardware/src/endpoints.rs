@@ -1,7 +1,8 @@
 //! The backend seam: enumerate and open this OS's MIDI endpoints.
 //!
-//! One implementation per platform — CoreMIDI, ALSA seq-UMP, winmm, and a stub where
-//! none exists. [`MidiSession::open`](crate::MidiSession::open) picks one, and that is the
+//! One implementation per platform — CoreMIDI, ALSA seq-UMP, Windows MIDI Services, winmm,
+//! Web MIDI, and a stub where none exists. [`MidiSession::open`](crate::MidiSession::open)
+//! picks one, and that is the
 //! **only** place in the crate a `#[cfg(target_os)]` decides anything.
 //!
 //! # Why this trait, and why it stops here
@@ -99,8 +100,9 @@ pub trait MidiEndpoints: Send + Sync {
     /// The wait for the backend to be ready to open endpoints and ports.
     ///
     /// A backend that has something to start (CoreMIDI's client, made on a thread
-    /// of its own) returns a [`Start`] that resolves when it is made, or with the
-    /// error it failed with. The default is for a backend with nothing to start: a
+    /// of its own; Web MIDI's access, granted by the browser's permission prompt)
+    /// returns a [`Start`] that resolves when it is made, or with the error it failed
+    /// with. The default is for a backend with nothing to start: a
     /// start that is ready on its first poll. The [`Started`] it resolves to is what
     /// [`open_input`](Self::open_input) and [`open_output`](Self::open_output) take.
     fn start(&self) -> Start {
@@ -108,10 +110,10 @@ pub trait MidiEndpoints: Send + Sync {
     }
 
     /// Starts reporting the device list to `sink`: every device present, once the
-    /// backend can list them, then each change from a thread of the backend's own.
-    /// A backend with nothing to start (ALSA, winmm, the stub) lists them before this
-    /// returns; one that has a start to wait for (CoreMIDI) lists them when its
-    /// [`start`](Self::start) has resolved, and the watch stays registered if a start
+    /// backend can list them, then each change from a thread of the backend's own (the
+    /// web: the browser's callback). A backend with nothing to start (ALSA, Windows MIDI
+    /// Services, winmm, the stub) lists them before this returns; one that has a start to
+    /// wait for (CoreMIDI, Web MIDI) lists them when its [`start`](Self::start) has resolved, and the watch stays registered if a start
     /// fails and seeds when a later one succeeds. A reader of
     /// [`DeviceEvents::initial`](crate::DeviceEvents::initial) after the start has
     /// resolved sees the seeded list on every backend.

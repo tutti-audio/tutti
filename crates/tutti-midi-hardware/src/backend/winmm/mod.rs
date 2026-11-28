@@ -50,7 +50,8 @@ use tutti_midi_device::{EndpointId, OsDevice, WinMmDevice};
 use tutti_platform::Executor;
 
 use super::legacy_port::poll;
-use super::legacy_port::ports::{PortInfo, Side, endpoints, locate, slot_of};
+use super::legacy_port::ports::{PortInfo, endpoints, locate, slot_of};
+use super::side::Side;
 use tutti_winmm_ffi::{Input, InputPort, Output, OutputPort, Port, PortKind, ports};
 
 /// The Windows [`MidiEndpoints`] implementation. Holds nothing: winmm is

@@ -2980,6 +2980,7 @@ dependencies = [
  "futures-core",
  "futures-lite",
  "getrandom",
+ "js-sys",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
@@ -3001,6 +3002,8 @@ dependencies = [
  "tutti-voicing",
  "tutti-winmidi2-ffi",
  "tutti-winmm-ffi",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -3806,7 +3809,10 @@ version = "0.0.0"
 dependencies = [
  "futures-lite",
  "gloo-timers",
+ "js-sys",
  "tutti",
+ "tutti-midi-device",
+ "tutti-midi-hardware",
  "tutti-platform",
  "wasm-bindgen-test",
 ]

@@ -9,11 +9,12 @@ use super::anchor::Anchor;
 use super::bytes::{ByteIn, ByteOut, Wire};
 use super::poll;
 use super::ports::{
-    Listed, PortInfo, Side, distinct_names, endpoint, endpoint_id, endpoints, locate, slot_of,
+    Listed, PortInfo, distinct_names, endpoint, endpoint_id, endpoints, locate, slot_of,
 };
 use super::schedule::{Next, Outbox, Schedule};
 use super::sender::{Mailbox, run};
 use crate::Devices;
+use crate::backend::side::Side;
 use crate::capability::{OsEndpoint, legacy};
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};

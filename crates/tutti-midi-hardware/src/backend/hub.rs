@@ -93,6 +93,11 @@ impl HubState {
         (round, ended)
     }
 
+    /// Whether the client is made.
+    pub(crate) fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready)
+    }
+
     /// The client is made. Returns whether the state changed: `Ready` is terminal.
     pub(crate) fn ready(&mut self) -> bool {
         match self {
@@ -212,6 +217,11 @@ impl StartGate {
     /// A future is made. See [`HubState::begin`].
     pub(crate) fn begin(&self, client_made: bool) -> (Round, Wakers) {
         self.transition(|state| state.begin(client_made))
+    }
+
+    /// Whether the client is made.
+    pub(crate) fn is_ready(&self) -> bool {
+        self.cell.lock().0.is_ready()
     }
 
     /// The client is made.

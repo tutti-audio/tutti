@@ -24,6 +24,10 @@
 //!   in its API, so a port is listed as MIDI 1.0 and its bytes are carried as
 //!   MIDI 1.0 UMP, as a legacy ALSA port is: `legacy_port` holds that logic (it
 //!   runs on every platform, and its tests with it) and `winmm` the calls.
+//! - **The web** — Web MIDI on `wasm32-unknown-unknown` (`web`): MIDI 1.0 bytes through the
+//!   page's `MIDIAccess`, which a permission prompt grants, so its [`Start`](crate::Start) is
+//!   the request. A port is listed as MIDI 1.0, as a winmm port is: `web_port` holds that
+//!   logic and `web` the calls.
 //! - **Everything else** — [`stub`]: it enumerates nothing and returns
 //!   [`MidiHardwareError::Unsupported`](crate::MidiHardwareError::Unsupported).
 
@@ -41,20 +45,25 @@ mod winmm;
 #[cfg(midi_backend = "midi_services")]
 mod midi_services;
 
+// The browser calls of the Web MIDI backend (`wasm32-unknown-unknown`): the one module that
+// names the JavaScript bindings.
+#[cfg(midi_backend = "web")]
+mod web;
+
 // What a backend with a thread of its own to start shares (where its start stands,
 // the futures waiting on it, the registered watches): always compiled so its tests
-// run everywhere; only `coremidi` uses it as a backend.
+// run everywhere; only `coremidi` and `web` use it as a backend.
 #[cfg_attr(
     not(midi_backend = "coremidi"),
     allow(
         dead_code,
-        reason = "the backend with a thread to start is not this platform's, so only the tests use it"
+        reason = "the backend with a start to wait for is not this platform's, so only the tests use it"
     )
 )]
 mod hub;
 
 // What a backend over a MIDI 1.0 byte API decides, with no OS call in it:
-// always compiled so its tests run everywhere; only `winmm` uses it as a
+// always compiled so its tests run everywhere; only `winmm` and `web` use it as a
 // backend.
 #[cfg_attr(
     not(midi_backend = "winmm"),
@@ -65,8 +74,23 @@ mod hub;
 )]
 mod legacy_port;
 
-// The digest the Windows backends name a device by: always compiled, as `legacy_port`
-// (which uses it) is.
+// What the Web MIDI backend decides, with no browser call in it: always compiled so its
+// tests run everywhere; only `web` uses it as a backend.
+#[cfg_attr(
+    not(midi_backend = "web"),
+    allow(
+        dead_code,
+        reason = "the web backend is not this platform's, so only the tests use its logic"
+    )
+)]
+mod web_port;
+
+// Which way a byte port goes: always compiled, as `legacy_port` and `web_port` (which use it)
+// are.
+mod side;
+
+// The digest the Windows and web backends name a device by: always compiled, as
+// `legacy_port` and `web_port` (which use it) are.
 mod fnv1a;
 
 // The loop of a backend that sends one message at a time: always compiled so
@@ -109,6 +133,10 @@ mod platform;
 
 #[cfg(midi_backend = "midi_services")]
 #[path = "platform/midi_services.rs"]
+mod platform;
+
+#[cfg(midi_backend = "web")]
+#[path = "platform/web.rs"]
 mod platform;
 
 #[cfg(midi_backend = "none")]
