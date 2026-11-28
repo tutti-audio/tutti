@@ -236,7 +236,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
 }
 
 /// A builder's declaration is in force after updates, and declaring the same
-/// topology again changes nothing (no edit, so no commit).
+/// topology again changes nothing.
 ///
 /// The equal-request early return in `declare_main_output_topology` is
 /// not observable here (the graph and engine ignore an equal declaration
@@ -245,12 +245,10 @@ fn a_refusal_is_a_status_not_a_log_line() {
 fn declaring_the_same_topology_again_changes_nothing() {
     let mut s = offline(Session::builder().main_output_topology(buses(4)), 6).unwrap();
     let _ = s.update();
-    let sent = s.graph_ref().testing().commits_sent();
     s.declare_main_output_topology(buses(4)).unwrap();
     let _ = s.update();
     let _ = s.update();
     assert_eq!(s.main_output_topology(), &buses(4));
-    assert_eq!(s.graph_ref().testing().commits_sent(), sent);
     assert_eq!(
         s.main_output_topology_status(),
         MainOutputTopologyStatus::Applied

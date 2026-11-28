@@ -25,7 +25,7 @@ use tutti_platform::Instant;
 use tutti_buffers::ChannelLayout;
 use tutti_modulation::{Follower, Lfo};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
-use tutti_session::{InputPort, Key, MainOutput, OutputPort, RouteSpec, Session};
+use tutti_session::{InputPort, Key, MainOutput, OutputPort, RouteSpec, Session, SessionEvent};
 use tutti_units::Samples;
 use tutti_units::{BeatsPerCycle, Bipolar, Hz, Q};
 
@@ -84,7 +84,7 @@ fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
 
 fn measure(label: &str, n: usize, modulated: bool, edit: bool) {
     let (mut s, filters) = scene(n, modulated);
-    let commits = s.graph().testing().commits_sent();
+    let mut commits = 0;
     let mut times = Vec::with_capacity(UPDATES);
     for i in 0..UPDATES {
         if edit {
@@ -98,13 +98,12 @@ fn measure(label: &str, n: usize, modulated: bool, edit: bool) {
         let t = Instant::now();
         let events = s.update();
         times.push(t.elapsed());
-        drop(events);
+        commits += events
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::Committed))
+            .count();
     }
-    assert_eq!(
-        s.graph().testing().commits_sent(),
-        commits,
-        "a steady state commits nothing"
-    );
+    assert_eq!(commits, 0, "a steady state commits nothing");
     times.sort();
     let mean = times.iter().sum::<Duration>() / UPDATES as u32;
     let p99 = times[UPDATES * 99 / 100];

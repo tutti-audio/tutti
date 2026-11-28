@@ -218,11 +218,11 @@ fn a_parked_replace_seeds_the_same_way() {
     let mut s = detached();
     let mut side = s.graph().take_audio_side();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set((tone.cutoff().to(Hz::new(800.0)), tone.q().to(Q::new(2.0))))
         .unwrap();
 
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 3.0))))
@@ -255,8 +255,8 @@ fn a_replace_behind_a_waiting_one_seeds_from_it() {
     let mut s = detached();
     let _side = s.graph().take_audio_side();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
-    assert!(s.update().is_empty());
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
@@ -314,10 +314,10 @@ fn a_refused_parked_swap_gives_the_outgoing_params_back_whole() {
     let mut s = detached();
     let mut side = s.graph().take_audio_side();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set(tone.cutoff().to(Hz::new(800.0))).unwrap();
 
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(tone, Replacement::new(ForkByClone(Eventful)))
         .expect("accepted: the shapes are checked when it lands");

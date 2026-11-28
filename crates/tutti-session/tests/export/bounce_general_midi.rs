@@ -60,10 +60,7 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    session
-        .graph()
-        .set_sample_rate(SampleRate::of(RATE))
-        .unwrap();
+    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
     let gm = session.add_general_midi(unit).expect("a SoundFont unit");
     for c in 0..2 {
         session

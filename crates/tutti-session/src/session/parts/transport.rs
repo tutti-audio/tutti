@@ -1,11 +1,6 @@
 //! [`TransportPart`]: the session's transport, the handle that drives it, and the metronome
 //! that follows it.
 
-#![cfg_attr(
-    not(feature = "device"),
-    expect(dead_code, reason = "a device restart (feature `device`) is the user")
-)]
-
 use tutti_graph::NodeKey;
 use tutti_timeline::{Transport, TransportSettings};
 use tutti_units::SampleRate;

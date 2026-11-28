@@ -22,7 +22,7 @@
 //! ```rust
 //! use tutti::modulation::LfoShape;
 //! use tutti::nodes::{LfoConfig, LfoNode};
-//! use tutti::{ChannelLayout, Hz, InterleavedMut, MainOutput, SampleRate, Session};
+//! use tutti::{ChannelLayout, Hz, InterleavedMut, MainOutput, SampleRate, Session, SessionEvent};
 //!
 //! let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build().expect("a session builds");
 //!
@@ -34,8 +34,9 @@
 //! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
-//! // reports a fault or a dropout as an event.
-//! assert!(session.update().is_empty(), "the commit raised no event");
+//! // reports the plan it sent, and a fault or a dropout, as events.
+//! let events = session.update();
+//! assert!(matches!(events.as_slice(), [SessionEvent::Committed]), "one plan sent");
 //!
 //! // One interleaved stereo block.
 //! let mut out = vec![0.0f32; 256 * 2];

@@ -8,9 +8,56 @@ use tutti_platform::monotonic_ns;
 use tutti_timeline::{FadeOut, MotionCommand, TimedError};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
-use crate::{AppKey, Clock, Playhead, PrerollTable, Session};
+use crate::{AppKey, Clock, Playhead, PrerollTable, Session, SetRateError, Stepped};
+
+impl<K: AppKey, C: Stepped> Session<K, C> {
+    /// Re-prepares the graph for `rate`, and the rest of the session with it:
+    /// the transport converts frame-timed commands in the new rate's frames,
+    /// MIDI's outputs and every open sampler stream follow, and the figures of
+    /// the plan sent are published. With the executor local, both halves of
+    /// the re-prepare run here, now; with it taken, the second half lands on
+    /// a later update, which publishes the resumed plan's figures at its
+    /// commit (until then they are the old plan's). A session on a device
+    /// re-rates with its restart.
+    ///
+    /// # Errors
+    ///
+    /// [`SetRateError::RateUnsupported`] naming a node that does not run at
+    /// `rate` ([`Shape::with_rates`](tutti_graph::Shape::with_rates)), or
+    /// [`SetRateError::Commit`] when the graph would not re-prepare; the
+    /// session keeps its rate.
+    pub fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
+        self.graph.set_sample_rate(rate)?;
+        self.transport.set_sample_rate(rate);
+        self.follow_rerate(rate, |_| {});
+        Ok(())
+    }
+}
 
 impl<K: AppKey, C: Clock> Session<K, C> {
+    /// What the session follows once the graph has re-prepared for `rate` and
+    /// the transport was moved to it: MIDI's outputs reopen at it and commit,
+    /// then `resume` runs (a restart's reattempt and the executor's adoption of
+    /// the plan), then the figures of the plan sent are published and every
+    /// open sampler stream's ratio is re-derived. The one routine behind
+    /// [`set_sample_rate`](Session::set_sample_rate) and a device restart.
+    pub(crate) fn follow_rerate(&mut self, rate: SampleRate, resume: impl FnOnce(&mut Self)) {
+        // The outputs' taps read frames of one rate: reopened at the new one,
+        // committed with the rest.
+        if self
+            .midi
+            .follow_rate(&mut self.graph, tutti_platform::Instant::now())
+        {
+            self.commit();
+        }
+        resume(self);
+        // The figures the first block runs at, published before it.
+        self.graph.publish_sent();
+        // Every open stream's ratio (file rate / session rate) is
+        // re-derived, so it plays on at its pitch.
+        self.sampler.set_sample_rate(rate);
+    }
+
     /// The rate the graph is prepared at; it follows the device's.
     #[must_use]
     pub fn sample_rate(&self) -> SampleRate {

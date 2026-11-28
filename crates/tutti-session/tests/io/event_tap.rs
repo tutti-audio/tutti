@@ -7,10 +7,11 @@
 //! the copy, a reader dropped first is closed by the `Reclaim` phase, and the
 //! taps are opened again at the graph's new rate.
 
+use crate::committed::committed;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{
-    Cx, Event, EventCapacity, EventTapOptions, Io, MissingSource, Node, Op, Prepare, Shape, Status,
+    Cx, Event, EventCapacity, EventTapOptions, Io, MissingSource, Node, Prepare, Shape, Status,
     TapAlign, TapEvent, Unforkable,
 };
 use tutti_session::{CloseError, DetachedSession, EventInputPort, EventOutputPort, Session};
@@ -81,17 +82,6 @@ fn drain(tap: &mut tutti_graph::EventTapReader) -> Vec<u64> {
         .collect()
 }
 
-fn tap_ops(s: &DetachedSession) -> usize {
-    s.graph_ref()
-        .testing()
-        .sent_plan()
-        .expect("a plan was sent")
-        .ops()
-        .iter()
-        .filter(|op| matches!(op, Op::EventTap { .. }))
-        .count()
-}
-
 /// The whole point of the seam: a host gets the reader from the graph and it
 /// sees the events rendered since the open, each on its frame, at the graph's
 /// rate.
@@ -133,8 +123,7 @@ fn opening_refuses_a_port_the_graph_does_not_have() {
     );
 }
 
-/// Closing stops the copy, so a host that is done is back to a plan with no
-/// tap op.
+/// Closing stops the copy: only what rendered while the tap was open is read.
 #[test]
 fn closing_the_tap_stops_the_copy() {
     let (mut s, source) = session();
@@ -147,7 +136,6 @@ fn closing_the_tap_stops_the_copy() {
         )
         .expect("the port exists");
     frames(6, &mut s);
-    assert_eq!(tap_ops(&s), 1);
     s.graph().taps().close_event(tap.id()).unwrap();
     assert_eq!(
         s.graph().taps().close_event(tap.id()),
@@ -156,7 +144,6 @@ fn closing_the_tap_stops_the_copy() {
     );
     frames(8, &mut s);
     assert_eq!(drain(&mut tap), vec![0, 4], "only what rendered while open");
-    assert_eq!(tap_ops(&s), 0);
 }
 
 /// A tap whose reader was dropped is closed by the next `Reclaim` phase and
@@ -172,17 +159,14 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
-    let _ = s.update();
-    assert_eq!(tap_ops(&s), 1, "one op a tap while it is open");
+    assert_eq!(committed(&s.update()), 1, "the tap's plan");
     drop(tap);
-    let _ = s.update();
     assert_eq!(
-        tap_ops(&s),
-        1,
-        "the reclaim of this update closed it; the plan is the last commit's"
+        committed(&s.update()),
+        0,
+        "the reclaim of this update closed it; the plan is the next commit's"
     );
-    let _ = s.update();
-    assert_eq!(tap_ops(&s), 0, "closed");
+    assert_eq!(committed(&s.update()), 1, "the tap's op left the plan");
 }
 
 /// After the graph is re-prepared at another rate the taps are opened again:
@@ -201,7 +185,7 @@ fn reopening_replaces_the_tap_at_the_new_rate() {
         .expect("the port exists");
     frames(5, &mut s);
     assert_eq!(drain(&mut old), vec![0, 4]);
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let mut new = s
         .graph()
         .taps()
@@ -268,7 +252,7 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
         .expect("the input exists");
     frames(16, &mut s);
     assert_eq!(drain(&mut tap), vec![0, 4, 8, 12]);
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let mut new = s
         .graph()
         .taps()

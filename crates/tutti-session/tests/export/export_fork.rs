@@ -52,10 +52,7 @@ fn session_with_outputs(outputs: usize) -> DetachedSession {
         .outputs_floor(ChannelLayout::clamped(outputs))
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
-    session
-        .graph()
-        .set_sample_rate(SampleRate::of(RATE))
-        .unwrap();
+    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
     session
 }
 

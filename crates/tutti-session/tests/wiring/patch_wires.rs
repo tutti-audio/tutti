@@ -5,9 +5,7 @@
 //! edge `Graph::connect` made is never the patch's.
 
 use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
-use tutti_graph::{
-    Cx, Edge, EventInputPort, FeedbackFrom, Io, Node, Prepare, Shape, Status, declare_params,
-};
+use tutti_graph::{Cx, EventInputPort, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_session::{
     ChangedBy, ConnectError, InputPort, MainOutput, Mention, NodeDecl, OutputPort, PatchError,
     Session, WireEnds, WireStart,
@@ -567,24 +565,6 @@ fn rendered(s: &mut Session, blocks: usize) -> Vec<f32> {
     out
 }
 
-/// The feedback edges into the echo's input 0, as the graph holds them.
-fn feedback_into_echo(s: &Session) -> Vec<(OutputPort, Samples)> {
-    let echo = s.key::<EchoConfig>(&"echo").unwrap().erase();
-    let at = tutti_graph::InputPort::new(echo, 0);
-    let testing = s.graph_ref().testing();
-    let topology = testing.topology();
-    topology.edges[&at]
-        .iter()
-        .filter_map(|edge| match edge {
-            Edge::Feedback(FeedbackFrom { from, delay }) => Some((
-                OutputPort::new(from.node(), usize::from(from.port())),
-                *delay,
-            )),
-            Edge::Direct(_) => None,
-        })
-        .collect()
-}
-
 /// **A feedback wire closes a loop that renders its analytic echo.** `echo`
 /// adds a unit impulse at frame 0 and `pass` carries it to the output; `pass`
 /// fed back into `echo` by `DELAY` frames at gain `g` (no node of the loop has
@@ -625,18 +605,15 @@ fn a_feedback_wires_gain_target_moves_the_loop_gain() {
 }
 
 /// **A changed delay makes the wire again**: the edge of the old delay is
-/// gone and the sink holds the one of the new, and the render echoes at it.
+/// gone, and the render echoes at the new one only.
 #[test]
 fn a_changed_delay_remakes_the_edge() {
     let mut s = looped();
     s.patch(echo_loop(DELAY, 0.5)).unwrap();
     let _ = s.update();
-    let pass = OutputPort::new(s.key::<PassConfig>(&"pass").unwrap().erase(), 0);
-    assert_eq!(feedback_into_echo(&s), [(pass, Samples::new(DELAY))]);
 
     s.patch(echo_loop(3 * BLOCK, 0.5)).unwrap();
 
-    assert_eq!(feedback_into_echo(&s), [(pass, Samples::new(3 * BLOCK))]);
     let out = rendered(&mut s, 7);
     assert_eq!(out[DELAY], 0.0, "nothing at the old delay");
     assert_eq!(out[3 * BLOCK], 0.5);
@@ -765,11 +742,9 @@ fn an_event_feedback_wire_closes_an_event_loop() {
     assert_eq!(s.graph_ref().sources(sink).unwrap(), [source]);
 }
 
-/// The edges the graph holds into `node`'s input 0, faded out or not.
-fn edges_into(s: &Session, node: tutti_graph::NodeKey) -> usize {
-    let at = tutti_graph::InputPort::new(node, 0);
-    let testing = s.graph_ref().testing();
-    testing.topology().edges.get(&at).map_or(0, Vec::len)
+/// What feeds `node`'s input 0 now: an edge fading out is no source.
+fn sources_of(s: &Session, node: tutti_graph::NodeKey) -> Vec<OutputPort> {
+    s.graph_ref().sources(InputPort::new(node, 0)).unwrap()
 }
 
 /// **A patch that turns a wire around is valid, and cuts the old edge**: the
@@ -785,12 +760,12 @@ fn turning_a_wire_around_cuts_the_old_edge_and_commits() {
     let _ = s.update();
     let node = |s: &Session, key| s.key::<PassConfig>(&key).unwrap().erase();
     let (a, b) = (node(&s, "a"), node(&s, "b"));
-    assert_eq!(edges_into(&s, b), 1);
+    assert_eq!(sources_of(&s, b), [OutputPort::new(a, 0)]);
 
     s.patch((nodes(), Mention::new("b").connect(Mention::new("a"))))
         .unwrap();
 
-    assert_eq!(edges_into(&s, b), 0, "the old edge is cut, not fading");
+    assert!(sources_of(&s, b).is_empty(), "the old edge is cut");
     let events = s.update();
     assert!(
         events

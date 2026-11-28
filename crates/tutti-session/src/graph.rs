@@ -437,9 +437,6 @@ pub struct Graph<F: Float = f32> {
     /// The refusal reported last, until a commit is sent: a spec that keeps
     /// failing the same way is reported once.
     refused: Option<CommitError>,
-    /// Plans sent, for the test seam's `commits_sent`.
-    #[cfg(feature = "testing")]
-    commits: u64,
     /// Threads per block, the caller included (`0` for one per core).
     render_workers: crate::Workers,
     /// Run by each live helper on its own thread, before it takes work.
@@ -668,8 +665,6 @@ impl<F: Float> Graph<F> {
             nodes: BTreeMap::new(),
             values: ValueTable::new(),
             refused: None,
-            #[cfg(feature = "testing")]
-            commits: 0,
             render_workers: crate::Workers::SERIAL,
             render_worker_start: None,
             feeds: BTreeMap::new(),
@@ -798,18 +793,16 @@ impl<F: Float> Graph<F> {
     /// Re-prepare every node for `rate`, keeping the block and the quantum.
     /// With the executor local, both halves of the re-prepare run here, now;
     /// with it taken, the second half lands on a later collect (and commits
-    /// are `Retry` until it does).
-    ///
-    /// For a detached graph, which has no device to take a rate from. A
-    /// device's session re-rates with [`Session::restart`](crate::Session).
+    /// are `Retry` until it does). The session's
+    /// [`set_sample_rate`](crate::Session::set_sample_rate) follows it with
+    /// the rest of the session.
     ///
     /// # Errors
     ///
     /// [`SetRateError::RateUnsupported`] naming a node that does not run at
-    /// `rate` ([`Shape::with_rates`](tutti_graph::Shape::with_rates)), or
-    /// [`SetRateError::Commit`] when the editor would not re-prepare; the graph
-    /// keeps its rate.
-    pub fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
+    /// `rate`, or [`SetRateError::Commit`] when the editor would not
+    /// re-prepare; the graph keeps its rate.
+    pub(crate) fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
         if let Some((node, supported)) = self
             .editor
             .first_unsupported_rate(self.nodes.keys().copied(), rate)
@@ -1074,8 +1067,9 @@ impl<F: Float> Graph<F> {
     /// and its writer refuses whole frames, counting them; one behind leaves
     /// the ring empty and the node writes silence for the frames it lacks.
     /// Neither side blocks. A ring of a few blocks keeps both rare, at that
-    /// much latency. A later [`Graph::set_sample_rate`] to another rate is
-    /// refused, naming the inlet, as for any node whose rates leave it out.
+    /// much latency. A later
+    /// [`Session::set_sample_rate`](crate::Session::set_sample_rate) to another
+    /// rate is refused, naming the inlet, as for any node whose rates leave it out.
     ///
     /// The node is unforkable: an export of a graph that holds it is refused,
     /// naming its key.
@@ -3912,12 +3906,6 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// How many commits have sent a plan.
-    #[cfg(feature = "testing")]
-    pub(crate) fn commits(&self) -> u64 {
-        self.commits
-    }
-
     /// `Editor::commit`. `Sent` clears the edit flag; `Refused` and `Retry` keep it.
     pub(crate) fn commit(&mut self) -> Committed {
         if let Some(refused) = self.unplaceable() {
@@ -3927,10 +3915,6 @@ impl<F: Float> Graph<F> {
             Ok(rewired) => {
                 self.note_rewired(rewired);
                 self.refused = None;
-                #[cfg(feature = "testing")]
-                {
-                    self.commits += 1;
-                }
                 for node in std::mem::take(&mut self.gained) {
                     if !self.unapplied.contains(&node) {
                         self.unapplied.push(node);

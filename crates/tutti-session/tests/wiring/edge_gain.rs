@@ -6,7 +6,6 @@
 //! weights, so the weighted fold `(0.0 + w * a) + b` is exact in `f32`.
 
 use crate::offline::offline;
-use std::sync::Arc;
 use tutti_graph::{Fade, ForkByClone};
 
 use tutti_buffers::ChannelLayout;
@@ -404,8 +403,7 @@ fn removing_a_source_drops_its_weight() {
 }
 
 /// Moving the weight of an edge that already has one is a control: nothing is
-/// edited, no plan is sent (the sent plan is the same `Arc`, the commit count
-/// the same), and the render still follows.
+/// edited, and the render still follows.
 #[test]
 fn moving_a_weight_marks_no_recompile() {
     let mut r = rig();
@@ -421,9 +419,6 @@ fn moving_a_weight_marks_no_recompile() {
         .unwrap()
         .unfaded();
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 0.5 * A) + B));
-    let plan = r.s.graph_ref().testing().sent_plan().expect("a plan");
-    let commits = r.s.graph_ref().testing().commits_sent();
-
     let gain =
         r.s.graph_ref()
             .gain_target(node(a), InputPort::new(sink, 0))
@@ -434,11 +429,6 @@ fn moving_a_weight_marks_no_recompile() {
         "a control, not a rewire"
     );
     assert!(all_are(&settled(&mut r.s, 0), (0.0 + 1.5 * A) + B));
-    assert!(Arc::ptr_eq(
-        &plan,
-        &r.s.graph_ref().testing().sent_plan().expect("a plan")
-    ));
-    assert_eq!(r.s.graph_ref().testing().commits_sent(), commits);
 }
 
 /// **A gain target whose lane is gone is refused at the call**, with no

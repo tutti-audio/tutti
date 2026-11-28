@@ -2,14 +2,10 @@
 //! the plan the graph last sent. Behind the off-by-default `testing` feature,
 //! which this crate's own tests turn on through a dev-dependency on itself.
 
-use std::sync::Arc;
-
 use tutti_buffers::{Float, InterleavedMut, PlanesMut};
 use tutti_units::Samples;
 
-use tutti_graph::{
-    Compensation, Editor, Executor, NodeKey, Prepare, Topology, TransportPosition, fade_gains,
-};
+use tutti_graph::{Editor, Executor, NodeKey, TransportPosition, fade_gains};
 
 use super::{Graph, render};
 
@@ -39,58 +35,6 @@ pub struct Testing<'g, F: Float = f32> {
 }
 
 impl<F: Float> Testing<'_, F> {
-    /// What every node is prepared for: the rate, the largest block, and the
-    /// device's callback size when the session knows it.
-    pub fn prepared(&self) -> Prepare {
-        self.graph.prepared()
-    }
-
-    /// Whether a re-prepare is between its two commits.
-    pub fn is_repreparing(&self) -> bool {
-        self.graph.is_repreparing()
-    }
-
-    /// The plan last sent to the audio thread (`Editor::base`).
-    pub fn sent_plan(&self) -> Option<Arc<tutti_graph::Plan>> {
-        self.graph.editor.base().cloned()
-    }
-
-    /// How many commits have sent a plan.
-    pub fn commits_sent(&self) -> u64 {
-        self.graph.commits()
-    }
-
-    /// The audio wiring as it stands: the nodes, the edges into every input
-    /// port, the main output's output sources and its input width, including edits
-    /// no commit has sent yet ([`Graph::has_uncommitted_edits`]). A read-only
-    /// view of what [`Graph::connect`] and its kin write; the
-    /// graph's other declarations (event edges, params, modes) are not part
-    /// of it.
-    ///
-    /// An edge that is fading out stays here until its fade ends.
-    pub fn topology(&self) -> &Topology {
-        &self.graph.editor.spec().topology
-    }
-
-    /// What compensation this graph needs, folded over the graph as edited
-    /// (committed or not): audio edges plus each node's event and
-    /// param-modulation sources. Mutates nothing.
-    pub fn latency_plan(&self) -> Compensation {
-        // The bus edges as the lanes they commit to; a spec whose bus edges
-        // do not lower has none to fold (the commit will say why).
-        let rate = self.graph.editor.prepare().sample_rate();
-        match self.graph.editor.lowered() {
-            Ok(lowered) => tutti_graph::latency_plan(&lowered.spec, rate),
-            Err(_) => tutti_graph::latency_plan(self.graph.editor.spec(), rate),
-        }
-    }
-
-    /// The compensation of the plan sent last: what the session publishes,
-    /// since it is what the executor is handed.
-    pub fn sent_compensation(&self) -> Option<Compensation> {
-        self.graph.sent_compensation()
-    }
-
     /// Whether the graph keeps a reclaimer for `node`
     /// ([`NodeParts::reclaimer`](tutti_graph::NodeParts::reclaimer)): for a test that a path inserts a node
     /// through [`Graph::add`].
@@ -121,22 +65,6 @@ impl<F: Float> Testing<'_, F> {
     /// How many replacements wait for a re-prepare to resume.
     pub fn waiting_replacements(&self) -> usize {
         self.graph.parked.len()
-    }
-
-    /// The compensation the next commit's plan carries: the spec compiled
-    /// against the shapes, as the commit will compile it. Nothing is
-    /// inserted — PDC is the compiler's. `None` when the spec does not
-    /// compile (the commit will say why).
-    pub fn planned_compensation(&self) -> Option<Compensation> {
-        let valid = self.graph.editor.lowered().ok()?.spec.validate().ok()?;
-        let (plan, _) = tutti_graph::compile(
-            &valid,
-            self.graph.editor.shapes(),
-            self.graph.editor.prepare(),
-            self.graph.editor.base().map(|p| &**p),
-        )
-        .ok()?;
-        Some(super::compensation_of(&plan))
     }
 
     /// A live duplicate of the whole graph that shares no state with it

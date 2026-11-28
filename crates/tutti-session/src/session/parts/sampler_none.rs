@@ -1,11 +1,6 @@
 //! [`SamplerPart`] without the `sampler` feature: no stream is opened. `sampler` is this
 //! module's twin when the sampler is built.
 
-#![cfg_attr(
-    not(feature = "device"),
-    expect(dead_code, reason = "a device restart (feature `device`) is the user")
-)]
-
 use tutti_platform::Executor;
 use tutti_rt::Bells;
 use tutti_units::SampleRate;

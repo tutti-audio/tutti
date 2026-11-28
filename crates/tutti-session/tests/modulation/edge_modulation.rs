@@ -9,6 +9,7 @@
 //! route on a lane with no knob: its base is nothing, and the lane's value is
 //! the route's whole figure; the range clamps it).
 
+use crate::committed::committed;
 use crate::common;
 use crate::common::render;
 use crate::offline::offline_48k;
@@ -30,15 +31,18 @@ const BLOCK: usize = 128;
 const A: f32 = 0.5;
 const B: f32 = 0.25;
 
-fn settle(s: &mut Session) {
+/// Updates until the declarations apply: how many plans they sent.
+fn settle(s: &mut Session) -> usize {
+    let mut plans = 0;
     for _ in 0..6 {
-        let _ = s.update();
+        plans += committed(&s.update());
     }
     assert_eq!(
         s.mod_state().problems().next(),
         None,
         "the declarations apply"
     );
+    plans
 }
 
 /// The gain target of `edge`, which has a lane.
@@ -189,7 +193,6 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
 fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
     let mut s = offline_48k();
     settle(&mut s);
-    let plans = s.graph_ref().testing().commits_sent();
 
     let edge = mixer(&mut s);
     let mut m = s.mods_mut();
@@ -198,13 +201,9 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
     m.route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
 
-    let _ = s.update();
+    let events = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "the route resolved");
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        plans + 1,
-        "one plan for the wire and its lane"
-    );
+    assert_eq!(committed(&events), 1, "one plan for the wire and its lane");
     let got = render(&mut s, 1, BLOCK);
     let want = (0.0 + 1.5 * A) + B;
     assert_eq!(got[0].to_bits(), want.to_bits(), "the first frame");
@@ -286,16 +285,11 @@ fn a_lane_on_an_edge_without_a_gain_survives_an_unrelated_edit() {
     settle(&mut s);
     let lane = |s: &Session| s.mod_state().lane(key).expect("a lane").0;
     let built = lane(&s);
-    let plans = s.graph_ref().testing().commits_sent();
 
     let _ = s.graph().add(level());
-    settle(&mut s);
+    let plans = settle(&mut s);
     assert_eq!(lane(&s), built, "the lane's node is the one built");
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        plans + 1,
-        "the edit's own plan alone"
-    );
+    assert_eq!(plans, 1, "the edit's own plan alone");
 }
 
 /// **A route onto a feedback wire's gain moves the loop's echo.** `echo` adds

@@ -22,7 +22,7 @@ use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{PluginFailure, TerminationReason};
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
+    Committed, DetachedSession, LoadPreset, LoadedPlugin, OtherPeer, Peer, PeerState, PluginCause,
     PluginHealth, PluginInstance, Presence, RecoveryPolicy, ReplaceRefused, Resource, RestoreState,
     SaveState, Session, SessionEvent, SetRateError, StateStartError, SwapPluginError,
 };
@@ -710,12 +710,15 @@ fn a_swap_to_the_same_totals_in_other_buses_is_refused() {
 
 /// What a graph that re-prepares does to a swap: it waits, with the executor
 /// taken, until the audio side has run and an update has collected.
-fn repreparing<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
+fn repreparing<
+    K: tutti_session::AppKey,
+    C: tutti_session::Stepped + tutti_session::Clock<Float = f32>,
+>(
     s: &mut Session<K, C>,
 ) -> tutti_session::AudioSide {
     let side = s.graph().take_audio_side();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
     side
 }
 
@@ -741,12 +744,23 @@ fn a_swap_is_busy_while_the_graph_re_prepares_and_succeeds_after() {
     );
 
     let mut out = vec![vec![0.0; BLOCK]; 2];
+    let mut waiting = Some(second);
     settle_until(&mut s, "the re-prepare to resume", |s| {
         side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
-        !s.graph_ref().testing().is_repreparing()
+        let Some(plugin) = waiting.take() else {
+            return true;
+        };
+        match s.swap_plugin(node, plugin, main) {
+            Err(SwapPluginError::Busy(back)) => {
+                waiting = Some(back);
+                false
+            }
+            swapped => {
+                swapped.expect("the node the busy graph refused swaps in once it resumes");
+                true
+            }
+        }
     });
-    s.swap_plugin(node, second, main)
-        .expect("the node the busy graph refused swaps in once it resumes");
     assert_eq!(
         crate::loading::clap_id(s.plugin_view(node).unwrap().plugin()),
         tutti_clap_test_plugin::SECOND_PLUGIN_ID.to_str().unwrap(),
@@ -786,7 +800,7 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
     // The session's executor is local, so both halves of the re-prepare run
     // here and the grenade's panic has poisoned the editor when this returns,
     // with the poisoning as the refusal.
-    let poisoned = s.graph().set_sample_rate(SampleRate::SR_96K);
+    let poisoned = s.set_sample_rate(SampleRate::SR_96K);
     assert!(
         matches!(
             poisoned,
