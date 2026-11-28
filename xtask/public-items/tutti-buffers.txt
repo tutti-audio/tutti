@@ -79,6 +79,7 @@ fn fold::Fold::fold_planar_channel
 fn fold::Fold::fold_planar_to_interleaved
 fn fold::Fold::frame
 fn fold::Fold::is_identity
+fn fold::Fold::narrowed
 fn fold::Fold::select
 fn fold::Fold::spec
 fn fold::Fold::src_layout
