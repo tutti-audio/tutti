@@ -207,7 +207,7 @@ impl Default for BounceTail {
 pub struct NoMainOutput;
 
 pub(crate) mod render_output {
-    use super::{BounceConfigError, StemGain, StemKey};
+    use super::{StemGain, StemKey};
     use tutti_buffers::ChannelLayout;
     use tutti_dsp::FftFloat;
     use tutti_export::{
@@ -251,18 +251,13 @@ pub(crate) mod render_output {
 
         /// Adds the stem, reading `reader` placed as `placement`, to the render; `main` is
         /// the main output's file key, when it is a file.
-        ///
-        /// # Errors
-        ///
-        /// [`BounceConfigError::SharedGainWithoutMainOutput`] for a shared gain with no file
-        /// main output to take it from.
         fn add(
             self: Box<Self>,
             outputs: &mut Outputs<F>,
             reader: TapReader<F>,
             placement: Placement,
             main: Option<&FileKey>,
-        ) -> Result<StemKey, BounceConfigError>;
+        ) -> StemKey;
     }
 
     /// What turns a destination into the output of a render or the writer of a take, at the
@@ -386,12 +381,13 @@ fn file_target(to: ToFile, index: usize, width: ChannelLayout) -> FileTarget {
     }))
 }
 
-/// A file stem: its target, and whether it takes the main output's gain, which is known once
-/// the main output has its key.
+/// A file stem: its target, and how it is normalized, which [`add`](StemOutput::add)
+/// resolves: a [`StemGain::Shared`] gain names the main output's file, known once the main
+/// output has its key.
 #[derive(Debug)]
 struct FileStem {
     target: FileTarget,
-    shared: bool,
+    gain: StemGain,
 }
 
 impl<F: FftFloat> StemOutput<F> for FileStem {
@@ -405,19 +401,19 @@ impl<F: FftFloat> StemOutput<F> for FileStem {
         reader: tutti_graph::TapReader<F>,
         placement: Placement,
         main: Option<&FileKey>,
-    ) -> Result<StemKey, BounceConfigError> {
-        let Self { target, shared } = *self;
-        let target = if shared {
-            // Only a file main output is normalized, which is what the start checked a
-            // shared gain against.
-            let main = main.ok_or(BounceConfigError::SharedGainWithoutMainOutput)?;
-            target.normalize(Gain::Of(main.clone()))
-        } else {
-            target
+    ) -> StemKey {
+        let Self { target, gain } = *self;
+        let target = match gain {
+            StemGain::None => target,
+            StemGain::Each(normalize) => target.normalize(Gain::Own(normalize)),
+            StemGain::Shared => {
+                // The start refuses a shared gain unless the bounce normalizes its main
+                // output, and only a `ToFile` main output takes `normalize`.
+                let main = main.expect("a shared gain's bounce has a file main output");
+                target.normalize(Gain::Of(main.clone()))
+            }
         };
-        Ok(StemKey::File(
-            outputs.file(Output::tap(reader, placement, target)),
-        ))
+        StemKey::File(outputs.file(Output::tap(reader, placement, target)))
     }
 }
 
@@ -436,10 +432,8 @@ impl<F: FftFloat> StemOutput<F> for MemoryStem {
         reader: tutti_graph::TapReader<F>,
         placement: Placement,
         _main: Option<&FileKey>,
-    ) -> Result<StemKey, BounceConfigError> {
-        Ok(StemKey::Buffers(
-            outputs.buffers(Output::tap(reader, placement, self.0)),
-        ))
+    ) -> StemKey {
+        StemKey::Buffers(outputs.buffers(Output::tap(reader, placement, self.0)))
     }
 }
 
@@ -474,19 +468,9 @@ impl<F: FftFloat> render_output::Sealed<F> for ToFile {
 
     fn stem(self, shape: StemShape) -> Box<dyn StemOutput<F>> {
         let target = file_target(self, shape.index, shape.lanes);
-        Box::new(match shape.gain {
-            StemGain::None => FileStem {
-                target,
-                shared: false,
-            },
-            StemGain::Shared => FileStem {
-                target,
-                shared: true,
-            },
-            StemGain::Each(normalize) => FileStem {
-                target: target.normalize(Gain::Own(normalize)),
-                shared: false,
-            },
+        Box::new(FileStem {
+            target,
+            gain: shape.gain,
         })
     }
 
@@ -562,9 +546,9 @@ impl<F: FftFloat> StemOutput<F> for SinkStem<F> {
         reader: tutti_graph::TapReader<F>,
         placement: Placement,
         _main: Option<&FileKey>,
-    ) -> Result<StemKey, BounceConfigError> {
+    ) -> StemKey {
         outputs.sink(Output::tap(reader, placement, self.0));
-        Ok(StemKey::Sink)
+        StemKey::Sink
     }
 }
 
@@ -1882,13 +1866,10 @@ impl<D: Destination<F>, F: FftFloat> BounceJob<D, F> {
         let mut stem_keys = Vec::with_capacity(stems.len());
         let main_file = D::file_key(&main_key);
         for (reader, stem) in readers.into_iter().zip(stems) {
-            match stem
-                .output
-                .add(&mut outputs, reader, stem.placement, main_file)
-            {
-                Ok(key) => stem_keys.push(key),
-                Err(e) => return BounceRendered::failed(e.into(), Some(graph.erase()), token),
-            }
+            stem_keys.push(
+                stem.output
+                    .add(&mut outputs, reader, stem.placement, main_file),
+            );
         }
         let result = tutti_export::render(&mut graph, &job, clock.as_ref(), outputs, &mut control)
             .map_err(BounceError::from)

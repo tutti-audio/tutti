@@ -5,9 +5,11 @@
 //! and awaited on any thread for a plugin in a `plugin-server` process (an
 //! [`Op`] over a [`PluginOp`]).
 //!
-//! A plugin that declines ends the work as [`PresetError::Refused`] and one that
-//! is gone as [`PresetError::Lost`]. A preset the plugin took is a
-//! [`LoadedPreset`], which [`Session::apply`] takes back.
+//! A plugin that has no preset with the id ends the work as
+//! [`PresetError::Unlisted`], one that declines a preset it has as
+//! [`PresetError::Refused`], and one that is gone as [`PresetError::Lost`]. A
+//! preset the plugin took is a [`LoadedPreset`], which [`Session::apply`] takes
+//! back.
 
 use std::path::PathBuf;
 use std::task::Poll;
@@ -62,6 +64,7 @@ pub type LoadPreset = Op<LoadPresetOp>;
 /// [`PresetError::Lost`] when the node was removed or the plugin replaced since
 /// the value was made, or the plugin is gone; [`PresetError::Unsupported`] when
 /// the plugin has no such operation (a file for a plugin that lists);
+/// [`PresetError::Unlisted`] when no listed preset has the id;
 /// [`PresetError::Refused`] when it declined.
 pub type LoadPresetInProcess = InProcessOp<LoadPresetOp>;
 
@@ -81,10 +84,12 @@ pub type LoadPresetInProcess = InProcessOp<LoadPresetOp>;
 /// The output is [`PresetError::Lost`] when the node was removed or the plugin
 /// replaced since the value was made, or its bridge ended or its server died
 /// before it answered; [`PresetError::Unsupported`] when the plugin has no such
-/// operation; [`PresetError::Refused`] when it declined;
-/// [`PresetError::Busy`] when the bridge's queue was full (nothing was sent);
-/// [`PresetError::Stalled`] when the server did not answer in time (the preset
-/// may have loaded).
+/// operation; [`PresetError::Unlisted`] when no listed preset has the id;
+/// [`PresetError::Refused`] when it declined; [`PresetError::Busy`] when the
+/// bridge's queue was full (nothing was sent); [`PresetError::Stalled`] when the
+/// server did not answer in time (the preset may have loaded);
+/// [`PresetError::Server`] when the plugin server failed the request itself;
+/// [`PresetError::UnexpectedReply`] when it answered with another kind of reply.
 ///
 /// # Panics
 ///

@@ -13,10 +13,10 @@ use std::sync::Arc;
 use tutti_buffers::Wave;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Prepare, Renderer, TransportPosition};
-use tutti_sampler::testing::{free_source, wait_for_open};
+use tutti_sampler::testing::{free_source, voice_node, wait_for_open};
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, PlayDirection, Playback,
-    SlotId, StreamStart, VoiceNode, VoicePool, VoiceWindow,
+    SlotId, StreamStart, VoiceNode, VoiceNodeConfig, VoicePool, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -103,13 +103,15 @@ fn assert_plays(got: &[Vec<f64>], skip: usize, file: impl Fn(usize) -> usize, wh
 }
 
 /// A memory source over the file, read as `f64`.
-fn memory(path: &Path) -> MemorySource<f64> {
+fn memory_config(path: &Path) -> MemorySourceConfig<f64> {
     let wave = tutti_codec::read_wave::<f64>(path).expect("the file decodes");
-    MemorySource::<f64>::from(
-        MemorySourceConfig::new(Arc::new(wave), ChannelLayout::STEREO)
-            .expect("a stereo wave places")
-            .window(VoiceWindow::from(Beat::new(0.0))),
-    )
+    MemorySourceConfig::new(Arc::new(wave), ChannelLayout::STEREO)
+        .expect("a stereo wave places")
+        .window(VoiceWindow::from(Beat::new(0.0)))
+}
+
+fn memory(path: &Path) -> MemorySource<f64> {
+    MemorySource::from(memory_config(path))
 }
 
 /// **A free-running `MemorySource<f64>` is a node of an `f64` graph and plays
@@ -141,8 +143,7 @@ fn a_memory_source_in_an_f64_graph_plays_the_files_values_exactly() {
 #[test]
 fn a_placed_memory_voice_in_an_f64_graph_plays_forward() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let node = VoiceNode::new(memory(&write_file(dir.path())), Playback::default())
-        .expect("a finite gain and a nonempty width");
+    let node = voice_node(memory_config(&write_file(dir.path())), Playback::default());
     let (mut solo, ..) = Renderer::<f64>::alone(node, prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| i, "forward");
@@ -153,14 +154,13 @@ fn a_placed_memory_voice_in_an_f64_graph_plays_forward() {
 #[test]
 fn a_reversed_memory_voice_in_an_f64_graph_reads_the_mirrored_frames() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let node = VoiceNode::new(
-        memory(&write_file(dir.path())),
+    let node = voice_node(
+        memory_config(&write_file(dir.path())),
         Playback {
             direction: PlayDirection::Reverse,
             ..Playback::default()
         },
-    )
-    .expect("a finite gain and a nonempty width");
+    );
     let (mut solo, ..) = Renderer::<f64>::alone(node, prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| FRAMES - 1 - i, "reverse");
@@ -262,8 +262,16 @@ fn a_streamed_node_in_an_f64_graph_plays_the_files_values() {
     let opening = streamer.open_stream(&path, StreamStart::HEAD);
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
-    let node = VoiceNode::streaming(voice, stream, Playback::default())
-        .expect("a finite gain and a nonempty width");
+    let node = VoiceNode::from(
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            tutti_units::StretchFactor::UNITY,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
+    );
     let (mut solo, ..) = Renderer::<f64>::alone(node, prepare());
     roll(&mut solo);
     let got = render_stepped(&mut solo, &mut streamer, RENDERED);

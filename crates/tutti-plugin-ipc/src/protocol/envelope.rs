@@ -423,14 +423,14 @@ messages! {
         id: tutti_plugin_types::PresetId,
     }
     ->
-    /// Whether the plugin accepted a [`LoadPreset`](ControlRequest::LoadPreset).
-    ///
-    /// `false` is a refusal rather than an error, and is also the honest
-    /// answer for VST3: its programs are selected through the parameter path,
-    /// so there is no direct load to report on.
+    /// What the plugin's control answered to a
+    /// [`LoadPreset`](ControlRequest::LoadPreset): the answer of
+    /// `Control::load_preset`, as it was given.
     PresetLoaded {
-        /// Whether the plugin accepted the preset.
-        ok: bool,
+        /// `Ok` when the plugin took the preset, else the plugin's
+        /// [`PresetError`](tutti_plugin_types::PresetError). The bridge's own
+        /// answers (`Busy`, `Stalled`) are the client's and never sent.
+        result: Result<(), tutti_plugin_types::PresetError>,
     };
     /// Ask which preset the plugin considers current.
     GetCurrentPreset

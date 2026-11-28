@@ -5,7 +5,7 @@
 //! the one-participant one.
 
 use tutti_graph::testing::WireDeclared;
-use tutti_sampler::testing::{free_source, placed_source};
+use tutti_sampler::testing::{free_source, placed_config, placed_source, voice_node};
 
 use tutti_buffers::Interleaved;
 use tutti_graph::EdgeId;
@@ -49,14 +49,13 @@ fn tone(secs: f64) -> Arc<Wave> {
 }
 
 fn stretched(wave: &Arc<Wave>) -> VoiceNode<f32> {
-    VoiceNode::new(
-        placed_source(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0))),
+    voice_node(
+        placed_config(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0))),
         Playback {
             stretch: StretchFactor::new(0.5),
             ..Default::default()
         },
     )
-    .expect("a finite gain and a nonempty width")
 }
 
 /// `node` as a node that declares nothing: the cost model's default.
@@ -163,11 +162,10 @@ fn render(exec: &mut Executor, channels: usize) -> Vec<Vec<f32>> {
 #[test]
 fn each_node_declares_its_class() {
     let wave = tone(0.1);
-    let plain = VoiceNode::new(
-        placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0))),
+    let plain = voice_node(
+        placed_config(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0))),
         Playback::default(),
-    )
-    .expect("a finite gain and a nonempty width");
+    );
     assert_eq!(free_source(Arc::clone(&wave)).shape().cost, Cost::Moderate);
     assert_eq!(plain.shape().cost, Cost::Moderate);
     assert_eq!(stretched(&wave).shape().cost, Cost::Heavy);

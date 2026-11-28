@@ -3,7 +3,7 @@
 //! (`tutti-plugin`'s `PluginClient::fork_instance`) read and restore through
 //! this one type.
 
-use tutti_plugin_types::{PresetId, RenderMode, StateError};
+use tutti_plugin_types::{PresetError, PresetId, RenderMode, StateError};
 
 /// The live plugin's current preset (when it lists any), its saved state and
 /// the render mode it runs in, read on the control side when a node forks.
@@ -56,20 +56,20 @@ impl ForkState {
     ///
     /// # Errors
     ///
-    /// [`StateError::Rejected`] when `load_preset` refuses the live plugin's
-    /// preset, else what `load_state` answers.
+    /// [`StateError::Rejected`] (carrying the [`PresetError`]) when `load_preset`
+    /// fails the live plugin's preset, else what `load_state` answers.
     pub fn restore<T>(
         &self,
         fresh: &mut T,
-        load_preset: impl FnOnce(&mut T, &PresetId) -> bool,
+        load_preset: impl FnOnce(&mut T, &PresetId) -> Result<(), PresetError>,
         load_state: impl FnOnce(&mut T, &[u8]) -> Result<(), StateError>,
     ) -> Result<(), StateError> {
-        if let Some(preset) = &self.preset
-            && !load_preset(fresh, preset)
-        {
-            return Err(StateError::Rejected(format!(
-                "the live instance's preset {preset:?} is not in the fresh instance"
-            )));
+        if let Some(preset) = &self.preset {
+            load_preset(fresh, preset).map_err(|error| {
+                StateError::Rejected(format!(
+                    "the live instance's preset {preset:?} did not load in the fresh instance: {error}"
+                ))
+            })?;
         }
         load_state(fresh, &self.state)
     }
@@ -104,7 +104,7 @@ mod tests {
             &mut (),
             |(), id| {
                 log.borrow_mut().push(format!("preset {id:?}"));
-                true
+                Ok(())
             },
             |(), bytes| {
                 log.borrow_mut().push(format!("state {bytes:?}"));
@@ -126,11 +126,14 @@ mod tests {
         let err = fork
             .restore(
                 &mut (),
-                |(), _| false,
+                |(), _| Err(PresetError::Unlisted),
                 |(), _| panic!("the state follows an accepted preset"),
             )
             .expect_err("the preset is refused");
-        assert!(matches!(err, StateError::Rejected(_)), "{err:?}");
+        assert!(
+            matches!(&err, StateError::Rejected(why) if why.contains("no listed preset")),
+            "{err:?}"
+        );
     }
 
     /// A plugin with no current preset loads the state alone.

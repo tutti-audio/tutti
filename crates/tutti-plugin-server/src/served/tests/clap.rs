@@ -1019,8 +1019,10 @@ fn clap_refuses_an_id_that_is_not_a_path() {
     let mut instance = ClapInstance::load_first(main_thread(), path, 44100.0, 512, FloatWidth::F32)
         .expect("Failed to load CLAP plugin");
 
-    // And the whole path still refuses, which is what a caller sees.
-    assert!(!instance.load_preset(main_thread(), &PresetId::Number(0)));
+    assert_eq!(
+        instance.load_preset(main_thread(), &PresetId::Number(0)),
+        Err(PresetError::Unsupported)
+    );
 }
 
 #[test]

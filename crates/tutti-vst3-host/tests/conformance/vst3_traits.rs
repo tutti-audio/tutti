@@ -869,7 +869,7 @@ fn a_state_load_makes_the_queued_writes_stale() {
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
 }
 
-/// **A preset the format refuses up front voids no write, and keeps what a save
+/// **A preset the format cannot address voids no write, and keeps what a save
 /// adds.** A `Number` id is no VST3 program; the write queued before it still
 /// reaches the plugin.
 #[test]
@@ -889,11 +889,10 @@ fn a_refused_preset_keeps_the_queued_writes() {
     controller
         .set_parameter(main_thread(), id(PARAM_RAMP), Normalized::of(0.3))
         .expect("a declared, writable parameter");
-    assert!(!Control::load_preset(
-        &mut controller,
-        main_thread(),
-        &PresetId::Number(3)
-    ));
+    assert_eq!(
+        Control::load_preset(&mut controller, main_thread(), &PresetId::Number(3)),
+        Err(tutti_plugin_types::PresetError::Unsupported)
+    );
     let rendered = render_f32(&mut processor);
     assert!((rendered - 0.3).abs() < 1e-6, "{rendered}");
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");

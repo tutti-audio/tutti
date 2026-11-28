@@ -21,7 +21,7 @@
 //! non-allocation (steady state, a jump's scratch copy and fade) is guarded
 //! in-crate, in `voice::disk_voice`'s tests.
 
-use tutti_sampler::testing::{free_source, loop_frames, placed_source};
+use tutti_sampler::testing::{free_source, loop_frames, placed_config, placed_source, voice_node};
 
 use std::sync::Arc;
 
@@ -557,8 +557,11 @@ fn placed_parts(wave: &Arc<Wave>, stretch: f64) -> (MemorySource<f32>, Playback)
 
 /// [`placed_parts`] as a standalone voice node.
 fn placed_node(wave: &Arc<Wave>, stretch: f64) -> VoiceNode<f32> {
-    let (sampler, play) = placed_parts(wave, stretch);
-    VoiceNode::new(sampler, play).expect("a finite gain and a nonempty width")
+    let (_, play) = placed_parts(wave, stretch);
+    voice_node(
+        placed_config(wave.clone(), VoiceWindow::from(Beat::new(0.0))),
+        play,
+    )
 }
 
 /// Inserts `parts` in `pool` at `id`.
@@ -1335,16 +1338,16 @@ fn update_loop_drain_is_allocation_free_at_six_channels() {
 /// read that runs on every other block.
 #[test]
 fn voice_node_command_drain_does_not_allocate() {
-    let source = free_source(sine_wave(1.0, 48_000.0)).placed_at(VoiceWindow {
-        start: Beat::new(0.0),
-        duration: Some(BeatDuration::new(4.0)),
-    });
-    source.play();
-
-    let (node, handle) = tutti_sampler::testing::controlled(
-        tutti_sampler::VoiceNode::with_channels(source, Playback::default(), ChannelLayout::STEREO)
-            .expect("a finite gain and a nonempty width"),
+    let source = placed_config(
+        sine_wave(1.0, 48_000.0),
+        VoiceWindow {
+            start: Beat::new(0.0),
+            duration: Some(BeatDuration::new(4.0)),
+        },
     );
+
+    let (node, handle) =
+        tutti_sampler::testing::controlled(voice_node(source, Playback::default()));
     let mut rig = Rig::new(node, 64);
 
     // Warm-up outside the gate: the first blocks touch lazily-sized state, and

@@ -12,9 +12,9 @@ use tutti_plugin_types::{
     AutomationMode, BusRole, ChannelLayout, ClapFeature, ContentScale, Control, Delivered,
     EditorOpened, EditorPresence, EditorWindow, Features, Layout, ModeTold, OwnBypass, ParamAccess,
     ParamEdit, ParamFlags, ParamMapping, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
-    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PluginWiring, PresetId,
-    ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope, Samples, StateUse, TimerId,
-    TrackInfo, Widths, WindowHandle, Wraps, bypass_parameter,
+    PluginClass, PluginDescriptor, PluginError, PluginResult, PluginTail, PluginWiring,
+    PresetError, PresetId, ProcessWake, RenderMode, RenderModeSupport, Request, RescanScope,
+    Samples, StateUse, TimerId, TrackInfo, Widths, WindowHandle, Wraps, bypass_parameter,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -470,11 +470,9 @@ impl Control for ClapLoaded {
     /// preset-discovery extension, which this host does not bind, so `presets`
     /// keeps its empty default. That is not the same claim as an empty list from
     /// AU: `Features::PRESET_LIST` is *unprobed* for CLAP.
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-        match preset_path(id) {
-            Some(path) => self.load_preset_file(main, path).is_ok(),
-            None => false,
-        }
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
+        let path = preset_path(id).ok_or(PresetError::Unsupported)?;
+        self.load_preset_file(main, path)
     }
 
     /// A rescan of the parameters' info or of everything reads the table
@@ -708,11 +706,8 @@ impl EditorWindow for ClapLoaded {
 
 /// The filesystem path an id names, or `None` when it names none.
 ///
-/// A free function so the decision is testable on its own. Through
-/// `load_preset` it is not: a coerced non-path id produces a path that does not
-/// exist, the plugin refuses *that*, and the caller sees the same `false` the
-/// guard would have produced. The two refusals are indistinguishable from
-/// outside, so only the guard's own inputs can pin it.
+/// A free function so the decision is testable on its own: `load_preset` answers
+/// `Unsupported` for `None`, where a plugin that refuses a path answers `Refused`.
 fn preset_path(id: &PresetId) -> Option<&Path> {
     match id {
         PresetId::Location(p) => Some(p.as_path()),
@@ -746,9 +741,10 @@ impl Wraps for ClapController {
         self.queue_edit(id, value);
     }
 
-    /// A `Number` or `Program` id is refused without touching the plugin.
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-        preset_path(id).is_some() && self.restore_preset(main, id)
+    /// A `Number` or `Program` id is `Unsupported` without touching the plugin.
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
+        preset_path(id).ok_or(PresetError::Unsupported)?;
+        self.restore_preset(main, id)
     }
 
     /// The writes queued before the load are stale, voided before it runs.
@@ -870,9 +866,7 @@ mod tests {
     /// Only a filesystem location names a CLAP preset: the other ids address
     /// nothing here, and are refused rather than coerced.
     ///
-    /// Asserted on the guard, not through `load_preset`: a coerced id yields a
-    /// nonexistent path the plugin refuses anyway, so the two refusals look
-    /// identical from outside.
+    /// Asserted on the guard, so no loaded plugin is needed.
     #[test]
     fn only_a_location_is_a_clap_preset() {
         assert_eq!(

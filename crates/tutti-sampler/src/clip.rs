@@ -7,11 +7,11 @@ use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{HasParam, HasPublished, IntoNode, NodeParts, PublishedKind};
-use tutti_units::{Amplitude, Beat, PlaybackRate};
+use tutti_units::{Amplitude, Beat, Cents, PlaybackRate, StretchFactor};
 
 use crate::streamer::{StreamHandle, StreamReader};
 use crate::{
-    DiskVoice, GainError, Loop, MemorySource, MemorySourceConfig, PlaceError, Playback, VoiceNode,
+    DiskVoice, Drive, GainError, Loop, MemorySourceConfig, PlaceError, VoiceNode, VoiceNodeConfig,
     VoiceNodeControls, VoiceWindow, voice_width,
 };
 
@@ -41,7 +41,7 @@ use crate::{
 /// was loaded as: a wave, or a header to stream).
 ///
 /// A resident clip's width is the wave's own (placed by the wave's
-/// [`topology`](Wave::topology), as every [`MemorySource`] places it; at most
+/// [`topology`](Wave::topology), as every [`MemorySource`](crate::MemorySource) places it; at most
 /// the sampler's widest), until [`channels`](Self::channels) places it at
 /// another. A streamed clip's is its stream's, which its open chose.
 ///
@@ -187,27 +187,30 @@ impl<F: SamplerFloat> Clip<F> {
             speed,
             loop_,
         } = self;
-        let play = Playback {
-            gain,
-            speed,
-            loop_,
-            ..Playback::default()
-        };
-        match tier {
-            Tier::Resident { config } => {
-                let width = config.channels;
-                let mut config = config.gain(gain).speed(speed).window(window);
-                if let Some(looped) = loop_ {
-                    config = config.looped(looped);
-                }
-                VoiceNode::with_channels(MemorySource::from(config), play, width)
-            }
-            Tier::Streamed { reader, stream } => {
-                VoiceNode::streaming(DiskVoice::from_reader(*reader, window), stream, play)
+        fn looped<F: SamplerFloat, D: Drive>(
+            config: VoiceNodeConfig<F, D>,
+            setting: Option<Loop>,
+        ) -> VoiceNodeConfig<F, D> {
+            match setting {
+                Some(looped) => config.looped(looped),
+                None => config,
             }
         }
-        // The clip's gain was checked when set, and its width when it was made.
-        .expect("a clip's gain and width are checked at the call that sets them")
+        match tier {
+            Tier::Resident { config } => {
+                let source = config.window(window).gain(gain).speed(speed);
+                let config = VoiceNodeConfig::placed(source)
+                    .expect("a clip's gain is checked at the call that sets it");
+                VoiceNode::from(looped(config, loop_))
+            }
+            Tier::Streamed { reader, stream } => {
+                let voice = DiskVoice::from_reader(*reader, window);
+                let config = VoiceNodeConfig::streaming(voice, stream, gain, StretchFactor::UNITY, Cents::new(0.0))
+                    .expect("a clip's gain is checked at the call that sets it, and its width when it was opened")
+                    .speed(speed);
+                VoiceNode::from(looped(config, loop_))
+            }
+        }
     }
 }
 

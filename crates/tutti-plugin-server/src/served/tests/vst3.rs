@@ -530,7 +530,7 @@ fn a_vst3_program_keeps_its_list_id_and_bank() {
 /// have to find and drive that parameter itself.
 ///
 /// Round-tripped rather than merely accepted: `load_preset` returning
-/// `true` says the parameter was written, and only reading it back through
+/// `Ok` says the parameter was written, and only reading it back through
 /// `get_current_preset` shows the write landed on the program asked for.
 /// That is what catches the normalization off-by-one — `i / (N - 1)`, not
 /// `i / N` — which lands on a neighbour rather than failing.
@@ -551,8 +551,9 @@ fn a_vst3_program_loads_and_reads_back() {
 
     // Taken from the listing, never constructed.
     let wanted = presets[2].id.clone();
-    assert!(
+    assert_eq!(
         instance.load_preset(main_thread(), &wanted),
+        Ok(()),
         "a program the plugin listed must load"
     );
     assert_eq!(
@@ -601,7 +602,7 @@ fn a_save_after_a_vst3_program_load_states_the_program_write_pending() {
     )
     .expect("the multiple-program-changes sample loads");
     let wanted = instance.presets(main_thread())[2].id.clone();
-    assert!(instance.load_preset(main_thread(), &wanted));
+    assert_eq!(instance.load_preset(main_thread(), &wanted), Ok(()));
     let PresetId::Program { list_id, index } = &wanted else {
         unreachable!("VST3 ids are programs")
     };
@@ -639,12 +640,14 @@ fn a_vst3_load_refuses_an_id_from_another_format() {
     .expect("the multiple-program-changes sample loads");
 
     let before = instance.current_preset(main_thread());
-    assert!(
-        !instance.load_preset(main_thread(), &PresetId::Number(1)),
+    assert_eq!(
+        instance.load_preset(main_thread(), &PresetId::Number(1)),
+        Err(PresetError::Unsupported),
         "an AU selector / VST2 index addresses no VST3 program"
     );
-    assert!(
-        !instance.load_preset(main_thread(), &PresetId::Location("/x.clap-preset".into())),
+    assert_eq!(
+        instance.load_preset(main_thread(), &PresetId::Location("/x.clap-preset".into())),
+        Err(PresetError::Unsupported),
         "a CLAP path addresses no VST3 program"
     );
     assert_eq!(

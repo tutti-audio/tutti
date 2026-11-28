@@ -45,7 +45,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::{free_source, loop_frames, placed_source};
+use tutti_sampler::testing::{free_source, loop_frames, placed_config, placed_source, voice_node};
 
 use std::f32::consts::TAU;
 use std::path::Path;
@@ -56,7 +56,7 @@ use tutti_graph::contract::{self, Direct};
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, Manual, MemorySource, PlayDirection, Playback, SlotId,
-    StepOutcome, StreamHandle, VoiceNode, VoicePool,
+    StepOutcome, StreamHandle, VoicePool,
 };
 use tutti_units::{Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor};
 
@@ -285,8 +285,10 @@ fn memory_voices_render_the_same_frames_at_any_block_length() {
             pool
         });
         assert_block_invariant(&format!("voice node, {name}"), || {
-            let (source, play) = memory_parts(&wave, play);
-            VoiceNode::new(source, play).expect("a finite gain and a nonempty width")
+            voice_node(
+                placed_config(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0))),
+                play,
+            )
         });
     }
 }

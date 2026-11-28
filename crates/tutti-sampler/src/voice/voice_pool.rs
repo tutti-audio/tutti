@@ -7,12 +7,13 @@
 //! [`slot`](super::slot), [`command`](super::command), [`pool`](super::pool),
 //! [`node`](super::node).
 
-use crate::testing::{loop_frames, placed_source};
+use crate::testing::{loop_frames, placed_config, placed_source, source_config, voice_node};
 use tutti_buffers::Mono;
 
 use super::command::*;
 use super::memory_source::{MemorySource, VoiceWindow};
 use super::node::*;
+use super::node_config::VoiceNodeConfig;
 use super::pool::*;
 use super::types::*;
 use crate::PlaceError;
@@ -83,6 +84,15 @@ fn fork_of(source: &dyn tutti_graph::ForkSource, rate: f64) -> Box<dyn Node> {
     node
 }
 
+/// A mono source config over `wave`, placed from beat 0.
+fn mono_placed(wave: Arc<Wave>) -> MemorySourceConfig<f32> {
+    source_config(
+        wave,
+        ChannelLayout::MONO,
+        Some(VoiceWindow::from(Beat::new(0.0))),
+    )
+}
+
 fn make_wave(samples: usize) -> Arc<Wave> {
     let data: Vec<f32> = (0..samples)
         .map(|i| (i as f32 + 1.0) / samples as f32)
@@ -115,7 +125,7 @@ fn add_ram_clip(handle: &VoicePoolHandle<f32>, id: SlotId, sampler: MemorySource
 /// its state.
 ///
 /// This pins, at the node, what a shared filter would break: a fork's node builds its
-/// own filter (`VoiceNode::with_channels`), and a filter owns its vocoders by value, so
+/// own filter (`VoiceNode::from`), and a filter owns its vocoders by value, so
 /// the types rule a shared one out (see the test below).
 #[test]
 fn resetting_a_fork_leaves_the_live_voice_playing() {
@@ -126,16 +136,14 @@ fn resetting_a_fork_leaves_the_live_voice_playing() {
     // and the 2048-sample window needs 4096 ticks before anything is emitted.
     let wave = make_wave(48_000);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
-    let node = VoiceNode::with_channels(
+    let sampler = mono_placed(wave);
+    let node = voice_node(
         sampler,
         Playback {
             stretch: StretchFactor::new(2.0),
             ..Playback::default()
         },
-        1u16,
-    )
-    .expect("a finite gain and a nonempty width");
+    );
     assert!(node.slot.stretch.is_some(), "vacuous without a filter");
     let (mut live, source) = live_and_fork(node);
     live.prepare(&Prepare::new(
@@ -196,16 +204,14 @@ fn a_standalone_voices_fork_shares_no_stretch_state() {
     let wave = make_wave(48_000);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let node = || {
-        let sampler = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
-        VoiceNode::with_channels(
+        let sampler = mono_placed(Arc::clone(&wave));
+        voice_node(
             sampler,
             Playback {
                 stretch: StretchFactor::new(2.0),
                 ..Playback::default()
             },
-            1u16,
         )
-        .expect("a finite gain and a nonempty width")
     };
     let (live, mut twin) = (node(), node());
     assert!(
@@ -458,16 +464,14 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
     let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(SILENT_BEAT), Bpm::of(120.0));
-    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
-    let mut node = VoiceNode::with_channels(
+    let sampler = mono_placed(wave);
+    let mut node = voice_node(
         sampler,
         Playback {
             stretch: StretchFactor::new(2.0),
             ..Playback::default()
         },
-        1u16,
-    )
-    .expect("a finite gain and a nonempty width");
+    );
     assert!(
         node.slot.stretch.is_some(),
         "test is vacuous unless the stretch path is live"
@@ -521,16 +525,14 @@ fn continuous_playback_does_not_flush_a_standalone_voice_node() {
     let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
-    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
-    let mut node = VoiceNode::with_channels(
+    let sampler = mono_placed(wave);
+    let mut node = voice_node(
         sampler,
         Playback {
             stretch: StretchFactor::new(2.0),
             ..Playback::default()
         },
-        1u16,
-    )
-    .expect("a finite gain and a nonempty width");
+    );
 
     let mut out = [0.0f32; 1];
     for _ in 0..16_384 {
@@ -645,16 +647,14 @@ fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
     for direction in [PlayDirection::Forward, PlayDirection::Reverse] {
         for via_tick in [false, true] {
             let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-            let sampler = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
-            let mut node = VoiceNode::with_channels(
+            let sampler = mono_placed(Arc::clone(&wave));
+            let mut node = voice_node(
                 sampler,
                 Playback {
                     direction,
                     ..Playback::default()
                 },
-                1u16,
-            )
-            .expect("a finite gain and a nonempty width");
+            );
             node.prepare(&Prepare::new(
                 SampleRate::SR_48K,
                 MaxBlock::of(Samples::new(64)),
@@ -1250,10 +1250,9 @@ fn a_redundant_stretch_filter_is_retired_not_freed_on_the_audio_thread() {
 #[test]
 fn voice_node_is_a_standalone_graph_node() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let sampler = placed_source(make_wave(100), VoiceWindow::from(Beat::new(0.0)));
+    let sampler = placed_config(make_wave(100), VoiceWindow::from(Beat::new(0.0)));
 
-    let mut node =
-        VoiceNode::new(sampler, Playback::default()).expect("a finite gain and a nonempty width");
+    let mut node = voice_node(sampler, Playback::default());
     assert_eq!(node.shape().audio_in().count(), 0);
     assert_eq!(node.shape().audio_out().count(), 2);
 
@@ -1275,40 +1274,39 @@ fn voice_node_is_a_standalone_graph_node() {
 #[test]
 fn a_voices_fork_keeps_its_window_and_reads_the_renders_transport() {
     let wave = make_wave(44_100);
-    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(2.0)));
-    let voice = Voice {
-        source: VoiceSource::Memory(sampler),
-        play: Playback::default(),
-    };
-    let fork = voice
-        .fork_copy(tutti_graph::RenderMode::Realtime)
-        .expect("a memory voice forks");
-    let Voice {
-        source: VoiceSource::Memory(forked),
-        play,
-    } = fork
-    else {
-        panic!("expected a Memory source");
-    };
-    assert_eq!(forked.window().map(|w| w.start), Some(Beat::new(2.0)));
-    let mut node =
-        VoiceNode::with_channels(forked, play, 1u16).expect("a finite gain and a nonempty width");
+    let sampler = source_config(
+        wave,
+        ChannelLayout::MONO,
+        Some(VoiceWindow::from(Beat::new(2.0))),
+    );
+    let NodeParts { fork, .. } = voice_node(sampler, Playback::default()).into_parts();
+    let mut node = fork
+        .expect("a memory voice forks")
+        .fork(tutti_graph::RenderMode::Realtime)
+        .expect("a memory voice forks")
+        .node;
     node.prepare(&Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(64)),
     ));
     let at = |beat: f64| MockTransport::rolling(Beat::new(beat), Bpm::of(120.0));
     assert!(
-        run(&mut node, &at(1.0), SR, 8)[0].iter().all(|&s| s == 0.0),
+        run(&mut *node, &at(1.0), SR, 8)[0]
+            .iter()
+            .all(|&s| s == 0.0),
         "before the window"
     );
     assert!(
-        run(&mut node, &at(3.0), SR, 8)[0].iter().all(|&s| s != 0.0),
+        run(&mut *node, &at(3.0), SR, 8)[0]
+            .iter()
+            .all(|&s| s != 0.0),
         "inside the window"
     );
     let stopped = MockTransport::stopped(Beat::new(3.0), Bpm::of(120.0));
     assert!(
-        run(&mut node, &stopped, SR, 8)[0].iter().all(|&s| s == 0.0),
+        run(&mut *node, &stopped, SR, 8)[0]
+            .iter()
+            .all(|&s| s == 0.0),
         "a stopped render"
     );
 }
@@ -1711,48 +1709,57 @@ fn a_pool_wider_than_the_sampler_reads_is_refused() {
     );
 }
 
-/// A voice node's constructor refuses a width the sampler cannot run, and a
-/// gain that is not finite, by name: past `MAX_CHANNELS` it would declare
-/// outputs its read never writes, and no channels is a node nothing can be
-/// wired to.
+/// A voice node's config refuses a width the sampler cannot run (at its source
+/// config: past `MAX_CHANNELS` the node would declare outputs its read never
+/// writes, and no channels is a node nothing can be wired to), a gain that is not
+/// finite, and a source that does not say what the drive is, by name.
 #[test]
-fn a_voice_node_refuses_a_width_or_gain_the_sampler_cannot_run() {
-    let voice = |gain: f64| {
-        (
-            placed_source(make_wave(4096), VoiceWindow::from(Beat::new(0.0))),
-            Playback {
-                gain: Amplitude::new(gain),
-                ..Playback::default()
-            },
-        )
+fn a_voice_node_config_refuses_a_width_or_gain_the_sampler_cannot_run() {
+    let source = |channels: ChannelLayout, window: Option<VoiceWindow>| {
+        MemorySourceConfig::new(make_wave(4096), channels).map(|c| match window {
+            Some(window) => c.window(window),
+            None => c,
+        })
     };
-    let node = |gain: f64, channels: ChannelLayout| {
-        let (source, play) = voice(gain);
-        VoiceNode::with_channels(source, play, channels)
-    };
+    let at = Some(VoiceWindow::from(Beat::new(0.0)));
     let max = tutti_buffers::MAX_CHANNELS as u16;
-    assert_eq!(
-        node(1.0, ChannelLayout::from(max)).err(),
-        None,
+    assert!(
+        source(ChannelLayout::from(max), at).is_ok(),
         "the ceiling itself is carried"
     );
     assert_eq!(
-        node(1.0, ChannelLayout::from(max + 2)).err(),
-        Some(VoiceNodeError::Width(PlaceError::WidthTooWide {
+        source(ChannelLayout::from(max + 2), at).err(),
+        Some(PlaceError::WidthTooWide {
             channels: max + 2,
             max
-        }))
+        })
     );
     assert_eq!(
-        node(1.0, ChannelLayout::from(0u16)).err(),
-        Some(VoiceNodeError::Width(PlaceError::EmptyWidth))
+        source(ChannelLayout::from(0u16), at).err(),
+        Some(PlaceError::EmptyWidth)
     );
     for gain in [f64::NAN, f64::INFINITY] {
+        let placed = source(ChannelLayout::STEREO, at).expect("a placeable wave");
         assert_eq!(
-            node(gain, ChannelLayout::STEREO).err(),
+            VoiceNodeConfig::placed(placed.gain(Amplitude::new(gain))).err(),
+            Some(VoiceNodeError::Gain(GainError::NotFinite))
+        );
+        let free = source(ChannelLayout::STEREO, None).expect("a placeable wave");
+        assert_eq!(
+            VoiceNodeConfig::free(free.gain(Amplitude::new(gain))).err(),
             Some(VoiceNodeError::Gain(GainError::NotFinite))
         );
     }
+    let free = source(ChannelLayout::STEREO, None).expect("a placeable wave");
+    let placed = source(ChannelLayout::STEREO, at).expect("a placeable wave");
+    assert_eq!(
+        VoiceNodeConfig::free(placed.clone()).err(),
+        Some(VoiceNodeError::Placed)
+    );
+    assert_eq!(
+        VoiceNodeConfig::placed(free).err(),
+        Some(VoiceNodeError::Free)
+    );
 }
 
 /// Both nodes declare the width they were built at, as generators: no
@@ -1764,20 +1771,12 @@ fn both_nodes_declare_their_width() {
             ChannelLayout::try_from(w).expect("a test width is small"),
         )
         .expect("a width the sampler reads");
-        let sampler = MemorySource::from(
-            MemorySourceConfig::new(
-                indexed_wave(6, 64),
-                ChannelLayout::try_from(w).expect("a test width is small"),
-            )
-            .expect("a placeable wave")
-            .window(VoiceWindow::default()),
-        );
-        let vn = VoiceNode::with_channels(
-            sampler,
-            Playback::default(),
+        let sampler = source_config(
+            indexed_wave(6, 64),
             ChannelLayout::try_from(w).expect("a test width is small"),
-        )
-        .expect("a finite gain and a nonempty width");
+            Some(VoiceWindow::default()),
+        );
+        let vn = voice_node(sampler, Playback::default());
         // A pool takes voices while it plays, so it promises no ceiling; a
         // node over a placed voice is the programme, which has no ring-out.
         for (what, shape, tail) in [

@@ -120,6 +120,28 @@ pub enum PresetIds {
     Numbered,
 }
 
+/// Ids of the shapes `ids` names that no listed preset has: one past the
+/// last program, and for a named list, one program in a list the plugin does not
+/// have.
+#[must_use]
+pub fn unlisted_ids(ids: PresetIds) -> Vec<tutti_plugin_types::PresetId> {
+    use tutti_plugin_types::PresetId;
+    let past = PROGRAMS.names.len();
+    match ids {
+        PresetIds::Programs => vec![
+            PresetId::Program {
+                list_id: PROGRAMS.list_id,
+                index: past as u32,
+            },
+            PresetId::Program {
+                list_id: PROGRAMS.list_id + 1,
+                index: 0,
+            },
+        ],
+        PresetIds::Numbered => vec![PresetId::Number(past as i32)],
+    }
+}
+
 /// Where a format keeps the plugin's own bypass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bypass {
@@ -403,7 +425,7 @@ const AUTOMATION_VST3: [(AutomationMode, u32); 4] = [
 
 /// What a format's control surface answers for the shared plugin, the same in
 /// a loaded plugin and an active one. One row per format ([`Surface`]).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Surface {
     /// Whether the plugin's shell reads the state's editor byte: only the Rust
     /// VST3 shell does, offering a view once it says [`EDITOR_TIDY`]. Where
@@ -505,6 +527,12 @@ pub struct Surface {
     pub reports_automatable: bool,
     /// How the format names the presets it lists ([`PROGRAMS`]).
     pub preset_ids: PresetIds,
+    /// What a load of an id the plugin does not list ([`unlisted_ids`]) answers:
+    /// `Unlisted` where the format addresses presets of that shape and none has
+    /// the id (VST2 `effSetProgram`'s range, VST3 `IUnitInfo`'s program lists, AU's
+    /// `FactoryPresets`), `Unsupported` where it addresses none of that shape
+    /// (CLAP's `preset-load.from_location` takes a location only).
+    pub unlisted_preset: tutti_plugin_types::PresetError,
     /// The plain map the format declares for `level`, `aux`, `tone` and `meter`.
     pub plain_map: MapKind,
     /// The plain map the format declares for `mode`, the five-position selector.
@@ -610,6 +638,7 @@ pub const CLAP: Surface = Surface {
     reports_automatable: true,
     host_gesture: HostGesture::None,
     preset_ids: PresetIds::Numbered,
+    unlisted_preset: tutti_plugin_types::PresetError::Unsupported,
     plain_map: MapKind::Linear,
     mode_plain_map: MapKind::Stepped,
 };
@@ -642,6 +671,7 @@ pub const VST2: Surface = Surface {
     reports_automatable: false,
     host_gesture: HostGesture::None,
     preset_ids: PresetIds::Numbered,
+    unlisted_preset: tutti_plugin_types::PresetError::Unlisted,
     plain_map: MapKind::PluginDefined,
     mode_plain_map: MapKind::PluginDefined,
 };
@@ -675,6 +705,7 @@ pub const VST3: Surface = Surface {
     reports_automatable: true,
     host_gesture: HostGesture::Helper,
     preset_ids: PresetIds::Programs,
+    unlisted_preset: tutti_plugin_types::PresetError::Unlisted,
     plain_map: MapKind::PluginDefined,
     mode_plain_map: MapKind::PluginDefined,
 };
@@ -708,6 +739,7 @@ pub const VST3_CPP: Surface = Surface {
     reports_automatable: true,
     host_gesture: HostGesture::Helper,
     preset_ids: PresetIds::Programs,
+    unlisted_preset: tutti_plugin_types::PresetError::Unlisted,
     plain_map: MapKind::PluginDefined,
     mode_plain_map: MapKind::PluginDefined,
 };
@@ -744,6 +776,7 @@ pub const AU: Surface = Surface {
     reports_automatable: false,
     host_gesture: HostGesture::Notified,
     preset_ids: PresetIds::Numbered,
+    unlisted_preset: tutti_plugin_types::PresetError::Unlisted,
     plain_map: MapKind::Linear,
     mode_plain_map: MapKind::Linear,
 };
