@@ -212,8 +212,8 @@ impl DeviceTable {
     ///   port with both, `Ambiguous` (the unit's ports) when none or several
     ///   have.
     /// - A WinMM identity with a device interface path, a MIDI Services endpoint id or a
-    ///   Web MIDI port id names the device across a replug: `Exact` for the lone present device at ordinal 0 that still
-    ///   goes the saved way.
+    ///   Web MIDI port id names the device across a replug: `Exact` for the lone
+    ///   present device at ordinal 0 that still goes the saved way.
     /// - An ALSA identity, or a WinMM one with no path, is names alone (the
     ///   client and port name, or the driver's product name and ids): `SameName` for the lone
     ///   present device when the saved ordinal is 0 and it still goes the

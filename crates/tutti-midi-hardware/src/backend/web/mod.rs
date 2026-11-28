@@ -14,22 +14,21 @@
 //!   and the watch is seeded when it is.
 //! - **The watch** looks at the maps again on each `statechange` of the `MIDIAccess` and
 //!   reports the difference.
-//! - **Opening a port** is [`MidiHardwareError::Unsupported`]: the translation between MIDI
-//!   1.0 bytes and UMP words is not here yet.
+//! - **Opening a port** is [`MidiHardwareError::Unsupported`]: the backend does not translate
+//!   between MIDI 1.0 bytes and UMP words.
 //! - **Threads.** The `MIDIAccess` and the callbacks the browser calls back live in the
 //!   thread-local table of the thread that asked for access ([`page`]); a call on another
 //!   thread finds none, and [`MidiHardwareError::WebMidiOffPage`] says so.
 
 mod page;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use tutti_midi_device::{EndpointId, OsDevice};
 use tutti_rt::Mutex;
 
 use super::hub::{Registry, StartGate};
-use super::legacy_port::ports::Side;
+use super::side::Side;
 use super::web_port::ports::{devices, endpoints};
 use crate::InputProducerHandle;
 use crate::capability::OsEndpoint;
@@ -38,16 +37,14 @@ use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, Result};
 use crate::start::{Start, Started};
 
-/// Why a port cannot be opened yet.
-const OPEN_REASON: &str = "opening a Web MIDI port is not supported yet";
+/// Why a port cannot be opened.
+const OPEN_REASON: &str = "opening a Web MIDI port is not supported: the backend does not translate between MIDI 1.0 bytes and UMP";
 
 /// What the page shares: where the request stands, and the watches registered with it.
 /// One per page, as the `MIDIAccess` is.
 struct Hub {
     gate: Arc<StartGate>,
     registry: Arc<Registry>,
-    /// Whether the `MIDIAccess` is granted.
-    ready: AtomicBool,
     /// The generation last requested, and the request under way, which keeps its callbacks.
     asked: Mutex<(Option<u64>, Option<page::Request>)>,
 }
@@ -57,7 +54,6 @@ fn hub() -> &'static Hub {
     HUB.get_or_init(|| Hub {
         gate: Arc::new(StartGate::new()),
         registry: Arc::new(Registry::new()),
-        ready: AtomicBool::new(false),
         asked: Mutex::new((None, None)),
     })
 }
@@ -71,7 +67,6 @@ const SETTLED: page::Settled = page::Settled {
 
 fn ready() {
     let hub = hub();
-    hub.ready.store(true, Ordering::Release);
     hub.registry.look_all();
     hub.gate.publish_ready().wake();
 }
@@ -120,7 +115,7 @@ fn listing(side: Side) -> Result<Vec<OsEndpoint>> {
                 Side::Output => &outputs,
             },
         )),
-        None if hub().ready.load(Ordering::Acquire) => Err(MidiHardwareError::WebMidiOffPage),
+        None if hub().gate.is_ready() => Err(MidiHardwareError::WebMidiOffPage),
         None => Ok(Vec::new()),
     }
 }
@@ -132,7 +127,7 @@ pub(super) struct WebEndpoints;
 impl MidiEndpoints for WebEndpoints {
     fn start(&self) -> Start {
         let hub = hub();
-        let (round, wakers) = hub.gate.begin(hub.ready.load(Ordering::Acquire));
+        let (round, wakers) = hub.gate.begin(false);
         wakers.wake();
         hub.ensure_requested();
         hub.gate.start(round)
@@ -140,12 +135,12 @@ impl MidiEndpoints for WebEndpoints {
 
     fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
         let hub = hub();
-        if hub.ready.load(Ordering::Acquire) && !page::on_page() {
+        if hub.gate.is_ready() && !page::on_page() {
             return Err(MidiHardwareError::WebMidiOffPage);
         }
         Ok(hub
             .registry
-            .register(sink, snapshot, || hub.ready.load(Ordering::Acquire)))
+            .register(sink, snapshot, || hub.gate.is_ready()))
     }
 
     fn inputs(&self) -> Result<Vec<OsEndpoint>> {

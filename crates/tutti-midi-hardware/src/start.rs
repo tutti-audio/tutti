@@ -60,17 +60,20 @@ impl Waiting for Done {
 }
 
 /// The wait for the backend to be ready: a `Send` future fed by the backend's
-/// start, with nothing for the caller to drive. Off macOS it is ready on the first
-/// poll; on macOS the device watch's thread wakes it.
+/// start, with nothing for the caller to drive. Where the backend has nothing to
+/// start it is ready on the first poll; on macOS the device watch's thread wakes it,
+/// and on the web the browser's answer to the permission prompt does.
 /// [`MidiEndpoints::start`](crate::MidiEndpoints::start),
 /// [`Devices::start`](crate::Devices::start) and
 /// [`MidiSession::start`](crate::MidiSession::start) make one.
 ///
 /// It resolves to [`Started`], or to the error the backend failed to start with. A
-/// backend with nothing to start (ALSA, Windows Multimedia, the stub) is ready on
-/// the first poll. On macOS the process's one CoreMIDI client is made on the device
-/// watch's thread, which wakes this when it has made the client, or when it gave up
-/// ([`StartFailed`]). Making a `Start` after a failed one asks the backend to start
+/// backend with nothing to start (ALSA, Windows MIDI Services, Windows Multimedia, the
+/// stub) is ready on the first poll. On macOS the process's one CoreMIDI client is made on
+/// the device watch's thread, which wakes this when it has made the client, or when it gave
+/// up ([`StartFailed`]). On the web the start is the page's request for Web MIDI access:
+/// the browser's callback wakes it when the user answers the permission prompt, and a
+/// refusal is a [`StartFailed`]. Making a `Start` after a failed one asks the backend to start
 /// again.
 ///
 /// ```

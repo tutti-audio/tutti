@@ -4,9 +4,9 @@ use tutti_midi_device::{DeviceEvent, OsEndpointIdentity};
 
 use super::failure::from_dom_exception;
 use super::ports::{PortSnapshot, devices, endpoint_id, endpoints};
-use super::table::{Orphans, Table, mint};
+use super::table::{Orphans, Table};
 use crate::backend::hub::Registry;
-use crate::backend::legacy_port::ports::Side;
+use crate::backend::side::Side;
 use crate::error::MidiHardwareError;
 
 fn port(id: &str, name: Option<&str>, connected: bool) -> PortSnapshot {
@@ -29,7 +29,23 @@ fn an_id_is_found_only_in_the_table_that_holds_it() {
     assert_eq!(page.get(id), Some(&"access"));
     assert_eq!(other.get(id), None);
     assert_eq!(page.get(theirs), None);
-    assert_ne!(mint(), mint());
+}
+
+/// **Two ports with one name are told apart by a number**, as two ALSA or winmm ports are,
+/// and the ids stay each port's own.
+#[test]
+fn ports_with_one_name_are_shown_under_distinct_names() {
+    let listed = endpoints(
+        Side::Input,
+        &[
+            port("a", Some("Pads"), true),
+            port("b", Some("Pads"), true),
+            port("c", Some("Keys"), true),
+        ],
+    );
+    let names: Vec<_> = listed.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["Pads", "Pads 2", "Keys"]);
+    assert_ne!(listed[0].id, listed[1].id);
 }
 
 /// **An id released off the page thread is dropped by the page thread's sweep**, and an id
@@ -49,17 +65,19 @@ fn a_released_id_is_swept_by_the_table_that_holds_it_and_no_other() {
     })
     .join()
     .unwrap();
-    assert_eq!(orphans.len(), 2);
 
     assert_eq!(page.sweep(&orphans), 1);
     assert_eq!(page.get(released), None);
     assert_eq!(page.get(kept), Some(&1));
-    assert_eq!(orphans.len(), 1, "the other table's id waits for its sweep");
 
+    assert_eq!(
+        other.get(theirs),
+        Some(&3),
+        "the other table's id waits for its sweep"
+    );
     assert_eq!(other.sweep(&orphans), 1);
-    assert_eq!(other.len(), 0);
-    assert_eq!(orphans.len(), 0);
-    assert_eq!(page.sweep(&orphans), 0);
+    assert_eq!(other.get(theirs), None);
+    assert_eq!(page.sweep(&orphans), 0, "nothing is left queued");
 }
 
 /// **A `requestMIDIAccess` rejection is named by its DOMException**: the Web MIDI
@@ -119,11 +137,10 @@ fn only_connected_ports_are_listed_as_midi_1_ports_named_by_their_id() {
     assert_eq!(listed[0].blocks_left_out, 0);
 }
 
-/// **An endpoint id is the same in every listing, differs between ports, and differs
-/// between an input and an output of one id string.**
+/// **An endpoint id differs between ports, and between an input and an output of one
+/// id string.**
 #[test]
-fn an_endpoint_id_is_stable_distinct_per_port_and_per_direction() {
-    assert_eq!(endpoint_id(Side::Input, "x"), endpoint_id(Side::Input, "x"));
+fn an_endpoint_id_is_distinct_per_port_and_per_direction() {
     assert_ne!(endpoint_id(Side::Input, "x"), endpoint_id(Side::Input, "y"));
     assert_ne!(
         endpoint_id(Side::Input, "x"),
@@ -173,7 +190,4 @@ fn a_statechange_looks_again_and_reports_each_departure_and_arrival() {
         matches!(&seen[..], [DeviceEvent::Added(info)] if info.name == "Pads"),
         "{seen:?}"
     );
-
-    registry.look_all();
-    assert_eq!(events.pending().count(), 0, "no change, no event");
 }

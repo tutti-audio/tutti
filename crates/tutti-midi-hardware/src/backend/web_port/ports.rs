@@ -13,7 +13,8 @@ use crate::capability::{OsEndpoint, legacy};
 use crate::devices::reporter::os_devices;
 
 use super::super::fnv1a::fnv1a;
-use super::super::legacy_port::ports::Side;
+use super::super::legacy_port::ports::{Listed, distinct_names};
+use super::super::side::{OUTPUT_BIT, Side};
 
 /// What the page reads of one `MIDIPort`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,17 +27,11 @@ pub(in crate::backend) struct PortSnapshot {
     pub connected: bool,
 }
 
-const OUTPUT_BIT: u64 = 1 << 63;
-
 /// The id of the port `port_id` names on `side`: the 63-bit FNV-1a digest of the port
 /// id, with the direction in the top bit, the same in every listing. An input and an
 /// output are different ports even when a browser gave both one id string.
 pub(in crate::backend) fn endpoint_id(side: Side, port_id: &str) -> EndpointId {
-    let direction = match side {
-        Side::Input => 0,
-        Side::Output => OUTPUT_BIT,
-    };
-    EndpointId::from_raw(fnv1a(port_id.bytes()) & !OUTPUT_BIT | direction)
+    EndpointId::from_raw(fnv1a(port_id.bytes()) & !OUTPUT_BIT | side.bit())
 }
 
 /// The name shown for a port: the browser's name for it, else its id.
@@ -48,17 +43,29 @@ fn shown(port: &PortSnapshot) -> &str {
 }
 
 /// The endpoints of `side`'s connected ports, in the order `ports` lists them: each a
-/// MIDI 1.0 port with no Function Blocks. A port listed twice under one id is listed
-/// once (the first).
+/// MIDI 1.0 port with no Function Blocks, shown by its name or else its id, and told
+/// apart from a port of the same name by a number. A port listed twice under one id is
+/// listed once (the first).
 pub(in crate::backend) fn endpoints(side: Side, ports: &[PortSnapshot]) -> Vec<OsEndpoint> {
     let mut seen = BTreeSet::new();
-    ports
+    let connected: Vec<&PortSnapshot> = ports
         .iter()
         .filter(|port| port.connected && seen.insert(&port.id))
-        .map(|port| OsEndpoint {
+        .collect();
+    let listed: Vec<Listed<'_>> = connected
+        .iter()
+        .map(|port| Listed {
+            shown: shown(port),
+            driver_name: "",
+        })
+        .collect();
+    connected
+        .into_iter()
+        .zip(distinct_names(&listed))
+        .map(|(port, name)| OsEndpoint {
             id: endpoint_id(side, &port.id),
             identity: OsEndpointIdentity::WebMidi(port.id.clone()),
-            name: shown(port).to_owned(),
+            name,
             capability: legacy(),
             blocks_left_out: 0,
         })

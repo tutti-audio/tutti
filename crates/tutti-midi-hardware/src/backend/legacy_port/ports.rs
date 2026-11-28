@@ -5,15 +5,7 @@ use std::collections::BTreeMap;
 
 use tutti_midi_device::{EndpointId, OsEndpointIdentity, WinMmDevice};
 
-/// Which way a port goes. Inputs and outputs are numbered separately by such an
-/// API, so a position alone names neither.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::backend) enum Side {
-    /// A port that sends MIDI to this engine.
-    Input,
-    /// A port this engine sends MIDI to.
-    Output,
-}
+use crate::backend::side::{OUTPUT_BIT, Side};
 
 /// What a driver reports of one port.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -44,7 +36,6 @@ pub(in crate::backend) struct Slot {
     pub occurrence: u32,
 }
 
-const OUTPUT_BIT: u64 = 1 << 63;
 const FINGERPRINT_BITS: u32 = 31;
 const FINGERPRINT_SHIFT: u32 = 32;
 
@@ -63,12 +54,8 @@ pub(in crate::backend) fn endpoint_id(
     occurrence: u32,
     device: &WinMmDevice,
 ) -> EndpointId {
-    let side = match side {
-        Side::Input => 0,
-        Side::Output => OUTPUT_BIT,
-    };
     EndpointId::from_raw(
-        side | u64::from(fingerprint(device)) << FINGERPRINT_SHIFT | u64::from(occurrence),
+        side.bit() | u64::from(fingerprint(device)) << FINGERPRINT_SHIFT | u64::from(occurrence),
     )
 }
 

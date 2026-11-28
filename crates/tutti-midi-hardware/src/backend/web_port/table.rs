@@ -35,12 +35,6 @@ impl Orphans {
     pub(in crate::backend) fn push(&self, id: u32) {
         self.queue.lock().push(id);
     }
-
-    /// How many ids wait.
-    #[cfg(test)]
-    pub(in crate::backend) fn len(&self) -> usize {
-        self.queue.lock().len()
-    }
 }
 
 /// The values one thread holds, by id.
@@ -78,11 +72,5 @@ impl<T> Table<T> {
         let before = queue.len();
         queue.retain(|id| self.entries.remove(id).is_none());
         before - queue.len()
-    }
-
-    /// How many values the table holds.
-    #[cfg(test)]
-    pub(in crate::backend) fn len(&self) -> usize {
-        self.entries.len()
     }
 }

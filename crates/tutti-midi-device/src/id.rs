@@ -31,7 +31,8 @@ impl EndpointId {
 
 /// What an OS endpoint is known by across restarts: the UMP Product Instance Id,
 /// CoreMIDI's unique id, ALSA client and port names, a WinMM port with its
-/// direction, or a Web MIDI port's id. [`EndpointId`] is the OS's live handle to the same endpoint.
+/// direction, or a Web MIDI port's id. [`EndpointId`] is the OS's live handle to the same
+/// endpoint.
 ///
 /// With the `serde` feature the document names the variant, so renaming one
 /// breaks saved files.

@@ -57,13 +57,13 @@ mod web;
     not(midi_backend = "coremidi"),
     allow(
         dead_code,
-        reason = "the backend with a thread to start is not this platform's, so only the tests use it"
+        reason = "the backend with a start to wait for is not this platform's, so only the tests use it"
     )
 )]
 mod hub;
 
 // What a backend over a MIDI 1.0 byte API decides, with no OS call in it:
-// always compiled so its tests run everywhere; only `winmm` uses it as a
+// always compiled so its tests run everywhere; only `winmm` and `web` use it as a
 // backend.
 #[cfg_attr(
     not(midi_backend = "winmm"),
@@ -85,8 +85,12 @@ mod legacy_port;
 )]
 mod web_port;
 
-// The digest the Windows backends name a device by: always compiled, as `legacy_port`
-// (which uses it) is.
+// Which way a byte port goes: always compiled, as `legacy_port` and `web_port` (which use it)
+// are.
+mod side;
+
+// The digest the Windows and web backends name a device by: always compiled, as
+// `legacy_port` and `web_port` (which use it) are.
 mod fnv1a;
 
 // The loop of a backend that sends one message at a time: always compiled so
