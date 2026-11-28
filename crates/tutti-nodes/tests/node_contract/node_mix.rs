@@ -506,10 +506,17 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::from(
-        tutti_nodes::ConvolverConfig::new(
+        tutti_nodes::ConvolverConfig::matrix(
             tutti_buffers::ChannelTopology::STEREO,
-            tutti_nodes::IrLayout::TrueStereo,
-            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ll, lr, rl, rr])),
+            tutti_nodes::MatrixLayout::TrueStereo,
+            std::sync::Arc::new(
+                tutti_dsp::MatrixResponses::new(
+                    tutti_buffers::ChannelLayout::STEREO,
+                    tutti_buffers::ChannelLayout::STEREO,
+                    &[ll, lr, rl, rr],
+                )
+                .expect("four responses"),
+            ),
         )
         .expect("four responses on a stereo pair")
         .block_size(block_size),
