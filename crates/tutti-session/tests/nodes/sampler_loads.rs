@@ -232,40 +232,75 @@ fn a_clip_of_either_tier_plays_the_files_samples() {
     }
 }
 
-/// **A stream plays on at its pitch after a re-rate**: the 48 kHz ramp file a
-/// session opened streams on at the new rate of 44.1 kHz, so each output frame
-/// advances the file by `48 000 / 44 100` of its frames, and the ramp, which is
-/// linear, steps by that much of its own step.
+/// **A stream plays on at its pitch after a re-rate**: a 48 kHz ramp file
+/// streams in a session at 48 kHz, which then re-rates to 44.1 kHz. Each output
+/// frame advances the file by `48 000 / 44 100` of its frames, so the ramp, which
+/// is linear, steps by that much of its own step on the frames after the
+/// re-rate.
 #[test]
 fn a_stream_plays_on_at_its_pitch_after_a_rerate() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path);
     let (mut s, clip) = clip_of(&path, true);
-    assert!(clip.is_streamed());
+    let key = s.graph().add(clip.at(Beat::new(0.0)));
+    s.graph()
+        .set_sources(MainOutput::channel(0), [OutputPort::new(key, 0)])
+        .expect("the clip's channel into the main output's");
+    let _ = s.update();
+    // A streamed clip's ring is filled on the streamer's thread: wait for it.
+    tutti_fixtures::wait_until(
+        "the stream to be primed",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            s.graph_ref()
+                .handle(&key)
+                .and_then(|h| h.status())
+                .is_none_or(|status| status.phase != StreamPhase::Opening)
+        },
+    );
+    s.play().expect("room");
+    let mut block = vec![0.0f32; BLOCK * 2];
+    let mut render = |s: &mut Session, heard: &mut Vec<f32>| {
+        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        heard.extend(block.as_chunks::<2>().0.iter().map(|frame| frame[0]));
+    };
+    // Sounding at 48 kHz, past the start fade.
+    let mut before = Vec::new();
+    while before.len() < 1_024 {
+        render(&mut s, &mut before);
+    }
+    let first = before.iter().position(|&x| x != 0.0).expect("it sounds");
+    assert_eq!(
+        before[first + 900],
+        value(900),
+        "the file's own frames at 48 kHz"
+    );
+
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     // The re-prepare's second half lands once a block has run and an update
-    // has collected.
-    let mut block = vec![0.0f32; BLOCK * 2];
+    // has collected; the blocks rendered meanwhile are not pinned.
+    let mut meanwhile = Vec::new();
     for _ in 0..16 {
-        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+        render(&mut s, &mut meanwhile);
         let _ = s.update();
         if s.commit() != tutti_session::Committed::Retry {
             break;
         }
     }
     assert_eq!(s.sample_rate(), SampleRate::SR_44K1);
-    let heard = play_in(&mut s, clip.at(Beat::new(0.0)), 3_000);
-
-    // Past the start fade: consecutive frames of the ramp.
+    // Past any fade of the re-prepare and the ring's refill: the file has
+    // 4 800 frames, 4 410 output frames at the new rate.
+    let mut after = Vec::new();
+    while after.len() < 1_024 {
+        render(&mut s, &mut after);
+    }
     let step = f64::from(value(1) - value(0)) * RATE / 44_100.0;
-    let first = heard.iter().position(|&x| x != 0.0).expect("it sounds");
-    for k in 1_100..2_000 {
-        let got = f64::from(heard[first + k + 1] - heard[first + k]);
+    for k in 300..700 {
+        let got = f64::from(after[k + 1] - after[k]);
         assert!(
             (got - step).abs() <= step * 1e-3,
-            "output frame {}: a step of {got}, want {step}",
-            first + k
+            "output frame {k} after the re-rate: a step of {got}, want {step}"
         );
     }
 }
