@@ -20,7 +20,7 @@ pub(crate) mod wire;
 /// self-describing, a struct is positional and an enum is a varint over declaration
 /// order. Any change to a serialized type's shape, an appended field and an
 /// appended variant included, moves this.
-pub const PROTOCOL_VERSION: u32 = 73;
+pub const PROTOCOL_VERSION: u32 = 74;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -104,8 +104,8 @@ mod tests {
 
     use tutti_plugin_types::{
         ChordValue, MidiEventVec, NoteExpressionIntValue, NoteExpressionTextValue, ParameterInfo,
-        PluginFormat, PluginId, PluginPreset, PluginTail, PresetId, Samples, ScaleValue,
-        TransportInfo, Uid, WireMidi,
+        PluginFormat, PluginId, PluginPreset, PluginTail, PresetError, PresetId, Samples,
+        ScaleValue, TransportInfo, Uid, WireMidi,
     };
     use tutti_ump::{CCNumber, ControlValue, Message, MidiChannel, NoteVelocity, U7, Ump, Voice2};
     use tutti_units::{Normalized, ParamId, SampleRate};
@@ -178,8 +178,16 @@ mod tests {
                     ),
                 ],
             },
-            ControlReply::PresetLoaded { ok: true },
-            ControlReply::PresetLoaded { ok: false },
+            ControlReply::PresetLoaded { result: Ok(()) },
+            ControlReply::PresetLoaded {
+                result: Err(PresetError::Unsupported),
+            },
+            ControlReply::PresetLoaded {
+                result: Err(PresetError::Unlisted),
+            },
+            ControlReply::PresetLoaded {
+                result: Err(PresetError::Refused),
+            },
             ControlReply::CurrentPreset {
                 id: Some(PresetId::Number(4)),
             },
@@ -605,7 +613,7 @@ mod tests {
                 "GetPresetList",
                 ControlReply::PresetList { presets: vec![] },
             ),
-            ("LoadPreset", ControlReply::PresetLoaded { ok: true }),
+            ("LoadPreset", ControlReply::PresetLoaded { result: Ok(()) }),
             ("GetCurrentPreset", ControlReply::CurrentPreset { id: None }),
             (
                 "GetParameterText",

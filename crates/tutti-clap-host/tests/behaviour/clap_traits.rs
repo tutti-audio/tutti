@@ -626,11 +626,10 @@ fn a_refused_preset_keeps_the_queued_writes() {
     controller
         .set_parameter(main_thread(), id, Normalized::of(0.25))
         .expect("a declared, writable parameter");
-    assert!(!Control::load_preset(
-        &mut controller,
-        main_thread(),
-        &PresetId::Number(3)
-    ));
+    assert_eq!(
+        Control::load_preset(&mut controller, main_thread(), &PresetId::Number(3)),
+        Err(tutti_plugin_types::PresetError::Unsupported)
+    );
 
     render(&mut processor, FloatWidth::F32).expect("block");
     let cap = process_capture();
