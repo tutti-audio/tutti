@@ -8,6 +8,7 @@
 //! a cut shows as a step of the tone's amplitude.
 
 use crate::VoiceWindow;
+use crate::testing::{free_source, placed_source};
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
@@ -116,10 +117,7 @@ impl Rig {
             }
             // Placed by `place`.
             Host::Voice => Hosted::Voice(None),
-            Host::Node => Hosted::Node(
-                MemorySource::new(Arc::new(Wave::new(2, SampleRate::of(SR))))
-                    .expect("a placeable wave"),
-            ),
+            Host::Node => Hosted::Node(free_source(Arc::new(Wave::new(2, SampleRate::of(SR))))),
         };
         Self {
             host,
@@ -144,14 +142,13 @@ impl Rig {
         duration: Option<f64>,
         play: Playback,
     ) {
-        let mut source = MemorySource::placed(
+        let mut source = placed_source(
             Arc::clone(wave),
             match duration {
                 Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
                 None => VoiceWindow::from(Beat::new(start)),
             },
-        )
-        .expect("a placeable wave");
+        );
         match &mut self.host {
             Hosted::Pool(pool) => {
                 source.set_render_rate(SampleRate::of(SR));

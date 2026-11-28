@@ -289,6 +289,7 @@ pub(crate) fn scale<F: Float>(lane: &mut [F], gain: F) {
 mod tests {
     use super::*;
     use crate::VoiceWindow;
+    use crate::testing::placed_source;
     use tutti_buffers::Interleaved;
     use tutti_buffers::MaxBlock;
 
@@ -387,7 +388,7 @@ mod tests {
     /// `disk_voice::tests::a_disk_voice_sizes_its_positions_from_max_block`.)
     #[test]
     fn every_voice_node_sizes_its_scratch_from_max_block() {
-        use crate::voice::{MemorySource, VoiceNode, VoicePool};
+        use crate::voice::{VoiceNode, VoicePool};
         use tutti_graph::{Node, Prepare};
         use tutti_units::{Beat, SampleRate, Samples};
 
@@ -395,11 +396,10 @@ mod tests {
         wave.append(Interleaved::new(&[0.0, 0.0], wave.layout()).unwrap())
             .unwrap();
         let wave = std::sync::Arc::new(wave);
-        let source = MemorySource::placed(
+        let source = placed_source(
             std::sync::Arc::clone(&wave),
             VoiceWindow::from(Beat::new(0.0)),
-        )
-        .expect("a placeable wave");
+        );
         let mut pool = VoicePool::<f32>::new();
         let mut node = VoiceNode::new(source.clone(), Default::default())
             .expect("a finite gain and a nonempty width");

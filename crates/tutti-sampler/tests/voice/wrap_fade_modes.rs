@@ -13,6 +13,7 @@
 //! gives analytically.
 
 use tutti_graph::testing::WireDeclared;
+use tutti_sampler::testing::placed_source;
 
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
@@ -24,7 +25,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, WorkerPool};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, Wave};
+use tutti_sampler::{Playback, SlotId, VoicePool, Wave};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -73,8 +74,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
         let key = NodeKey(k + 1);
         // Placed before the loop's start, on it, and inside the fade.
         let at = [0.0, LOOP.0, LOOP.0 + 0.002][k as usize % 3] + k as f64 * 0.0001;
-        let source = MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(at)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::clone(wave), VoiceWindow::from(Beat::new(at)));
         match host {
             Host::Pool => {
                 let mut pool = VoicePool::new();

@@ -7,7 +7,7 @@
 //! [`slot`](super::slot), [`command`](super::command), [`pool`](super::pool),
 //! [`node`](super::node).
 
-use crate::testing::loop_frames;
+use crate::testing::{loop_frames, placed_source};
 use tutti_buffers::Mono;
 
 use super::command::*;
@@ -126,8 +126,7 @@ fn resetting_a_fork_leaves_the_live_voice_playing() {
     // and the 2048-sample window needs 4096 ticks before anything is emitted.
     let wave = make_wave(48_000);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     let node = VoiceNode::with_channels(
         sampler,
         Playback {
@@ -197,8 +196,7 @@ fn a_standalone_voices_fork_shares_no_stretch_state() {
     let wave = make_wave(48_000);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let node = || {
-        let sampler = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let sampler = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
         VoiceNode::with_channels(
             sampler,
             Playback {
@@ -265,10 +263,10 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
     pool.insert_voice(
         SlotId(1),
         Voice {
-            source: VoiceSource::Memory(
-                MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
-                    .expect("a placeable wave"),
-            ),
+            source: VoiceSource::Memory(placed_source(
+                make_wave(4096),
+                VoiceWindow::from(Beat::new(0.0)),
+            )),
             play: Playback::default(),
         },
     );
@@ -294,8 +292,7 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
     add_ram_clip(
         &handle,
         SlotId(2),
-        MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave"),
+        placed_source(make_wave(4096), VoiceWindow::from(Beat::new(0.0))),
     );
     let live_block = run(&mut *live, &transport, SR, 64);
     let fork_block = run(&mut *fork, &transport, SR, 64);
@@ -369,8 +366,7 @@ fn a_transport_seek_flushes_stretch_state() {
         .expect("a width the sampler reads")
         .with_handle();
 
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     handle
         .send(VoiceCommand::AddVoice {
             id: SlotId(1),
@@ -462,8 +458,7 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
     let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(SILENT_BEAT), Bpm::of(120.0));
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     let mut node = VoiceNode::with_channels(
         sampler,
         Playback {
@@ -526,8 +521,7 @@ fn continuous_playback_does_not_flush_a_standalone_voice_node() {
     let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
     let transport = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     let mut node = VoiceNode::with_channels(
         sampler,
         Playback {
@@ -601,8 +595,7 @@ fn a_stretched_placed_voice_holds_its_pitch_across_blocks() {
             .collect();
         let wave = Arc::new(Wave::from_mono(SampleRate::of(SR), Mono::new(&data)));
 
-        let source = MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let source = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
         let play = Playback {
             stretch: StretchFactor::new(factor),
             ..Default::default()
@@ -652,9 +645,7 @@ fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
     for direction in [PlayDirection::Forward, PlayDirection::Reverse] {
         for via_tick in [false, true] {
             let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-            let sampler =
-                MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-                    .expect("a placeable wave");
+            let sampler = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
             let mut node = VoiceNode::with_channels(
                 sampler,
                 Playback {
@@ -867,8 +858,7 @@ fn continuous_playback_does_not_flush_the_stretch_filter() {
         .expect("a width the sampler reads")
         .with_handle();
 
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     handle
         .send(VoiceCommand::AddVoice {
             id: SlotId(1),
@@ -922,8 +912,7 @@ fn add_and_remove_clips() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let wave = make_wave(100);
 
-    let sampler = MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let sampler = placed_source(wave.clone(), VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle, SlotId(1), sampler);
 
     let mut out = [0.0f32; 2];
@@ -944,8 +933,7 @@ fn silence_when_transport_stopped() {
     let transport = MockTransport::stopped(Beat::new(0.0), Bpm::of(120.0));
     let wave = make_wave(100);
 
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle, SlotId(1), sampler);
 
     let mut out = [0.0f32; 2];
@@ -961,8 +949,7 @@ fn clips_sum_together() {
     let wave = make_wave(100);
 
     for i in 0..3 {
-        let sampler = MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let sampler = placed_source(wave.clone(), VoiceWindow::from(Beat::new(0.0)));
         add_ram_clip(&handle, SlotId(i), sampler);
     }
 
@@ -970,8 +957,7 @@ fn clips_sum_together() {
     tick(&mut unit, &transport, SR, &mut out_3);
 
     let (mut unit2, handle2) = VoicePool::new().with_handle();
-    let sampler = MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let sampler = placed_source(wave.clone(), VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle2, SlotId(0), sampler);
     let mut out_1 = [0.0f32; 2];
     tick(&mut unit2, &transport, SR, &mut out_1);
@@ -987,8 +973,7 @@ fn clone_snapshots_clips() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let wave = make_wave(100);
 
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle, SlotId(1), sampler);
 
     let mut out = [0.0f32; 2];
@@ -1025,8 +1010,7 @@ fn a_pool_with_no_handle_has_no_channel_and_is_empty() {
     assert_eq!(out[1], 0.0);
 
     // But voices inserted directly (the Populate path) are audible.
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     unit.insert_voice(
         SlotId(1),
         Voice {
@@ -1051,8 +1035,7 @@ fn update_gain() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let wave = make_wave(100);
 
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle, SlotId(1), sampler);
 
     let mut out_before = [0.0f32; 2];
@@ -1096,8 +1079,7 @@ fn update_stretch_enables_processor() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let wave = make_wave(4096);
 
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle, SlotId(1), sampler);
 
     let mut out = [0.0f32; 2];
@@ -1158,8 +1140,7 @@ fn update_stretch_enables_processor() {
 fn enabling_stretch_mid_flight_changes_the_output() {
     let (mut unit, handle) = VoicePool::new().with_handle();
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let sampler = MemorySource::placed(make_wave(48_000), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let sampler = placed_source(make_wave(48_000), VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle, SlotId(1), sampler);
 
     // Settle the add, then collect a dry reference block.
@@ -1220,8 +1201,7 @@ fn enabling_stretch_mid_flight_changes_the_output() {
 fn a_redundant_stretch_filter_is_retired_not_freed_on_the_audio_thread() {
     let (mut unit, handle) = VoicePool::new().with_handle();
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let sampler = MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let sampler = placed_source(make_wave(4096), VoiceWindow::from(Beat::new(0.0)));
     add_ram_clip(&handle, SlotId(1), sampler);
 
     let mut out = [0.0f32; 2];
@@ -1270,8 +1250,7 @@ fn a_redundant_stretch_filter_is_retired_not_freed_on_the_audio_thread() {
 #[test]
 fn voice_node_is_a_standalone_graph_node() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let sampler = MemorySource::placed(make_wave(100), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let sampler = placed_source(make_wave(100), VoiceWindow::from(Beat::new(0.0)));
 
     let mut node =
         VoiceNode::new(sampler, Playback::default()).expect("a finite gain and a nonempty width");
@@ -1296,8 +1275,7 @@ fn voice_node_is_a_standalone_graph_node() {
 #[test]
 fn a_voices_fork_keeps_its_window_and_reads_the_renders_transport() {
     let wave = make_wave(44_100);
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(2.0))).expect("a placeable wave");
+    let sampler = placed_source(wave, VoiceWindow::from(Beat::new(2.0)));
     let voice = Voice {
         source: VoiceSource::Memory(sampler),
         play: Playback::default(),
@@ -1604,16 +1582,13 @@ fn a_voice_out_of_its_window_adds_nothing_at_any_gain() {
             ..Playback::default()
         };
         Voice {
-            source: VoiceSource::Memory(
-                MemorySource::placed(
-                    Arc::clone(&wave),
-                    match len {
-                        Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
-                        None => VoiceWindow::from(Beat::new(start)),
-                    },
-                )
-                .expect("a placeable wave"),
-            ),
+            source: VoiceSource::Memory(placed_source(
+                Arc::clone(&wave),
+                match len {
+                    Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
+                    None => VoiceWindow::from(Beat::new(start)),
+                },
+            )),
             play,
         }
     };
@@ -1744,8 +1719,7 @@ fn a_pool_wider_than_the_sampler_reads_is_refused() {
 fn a_voice_node_refuses_a_width_or_gain_the_sampler_cannot_run() {
     let voice = |gain: f64| {
         (
-            MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
+            placed_source(make_wave(4096), VoiceWindow::from(Beat::new(0.0))),
             Playback {
                 gain: Amplitude::new(gain),
                 ..Playback::default()
@@ -1790,15 +1764,14 @@ fn both_nodes_declare_their_width() {
             ChannelLayout::try_from(w).expect("a test width is small"),
         )
         .expect("a width the sampler reads");
-        let sampler = MemorySource::with_config(
-            indexed_wave(6, 64),
-            MemorySourceConfig {
-                channels: ChannelLayout::try_from(w).expect("a test width is small"),
-                placement: Some(VoiceWindow::default()),
-                ..Default::default()
-            },
-        )
-        .expect("a placeable wave");
+        let sampler = MemorySource::from(
+            MemorySourceConfig::new(
+                indexed_wave(6, 64),
+                ChannelLayout::try_from(w).expect("a test width is small"),
+            )
+            .expect("a placeable wave")
+            .window(VoiceWindow::default()),
+        );
         let vn = VoiceNode::with_channels(
             sampler,
             Playback::default(),
@@ -1831,18 +1804,14 @@ fn six_channel_clip_reaches_all_six_reader_outputs() {
     let (mut unit, _h) = VoicePool::with_channels(6u16)
         .expect("a width the sampler reads")
         .with_handle();
-    let sampler = MemorySource::with_config(
-        indexed_wave(6, 512),
-        MemorySourceConfig {
-            channels: ChannelLayout::from(6u16),
-            placement: Some(VoiceWindow {
+    let sampler = MemorySource::from(
+        MemorySourceConfig::new(indexed_wave(6, 512), ChannelLayout::from(6u16))
+            .expect("a placeable wave")
+            .window(VoiceWindow {
                 start: Beat::new(0.0),
                 duration: None,
             }),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    );
     unit.insert_voice(
         SlotId(1),
         Voice {
@@ -1876,18 +1845,14 @@ fn six_channel_clip_with_stretch_reaches_all_six_outputs() {
     let (mut unit, _h) = VoicePool::with_channels(6u16)
         .expect("a width the sampler reads")
         .with_handle();
-    let sampler = MemorySource::with_config(
-        indexed_wave(6, 4096),
-        MemorySourceConfig {
-            channels: ChannelLayout::from(6u16),
-            placement: Some(VoiceWindow {
+    let sampler = MemorySource::from(
+        MemorySourceConfig::new(indexed_wave(6, 4096), ChannelLayout::from(6u16))
+            .expect("a placeable wave")
+            .window(VoiceWindow {
                 start: Beat::new(0.0),
                 duration: None,
             }),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    );
     unit.insert_voice(
         SlotId(1),
         Voice {
@@ -1946,18 +1911,14 @@ fn send_builds_the_stretch_filter_not_the_drain() {
         .with_handle();
 
     let mk = |stretch: StretchFactor| {
-        let sampler = MemorySource::with_config(
-            indexed_wave(6, 128),
-            MemorySourceConfig {
-                channels: ChannelLayout::from(6u16),
-                placement: Some(VoiceWindow {
+        let sampler = MemorySource::from(
+            MemorySourceConfig::new(indexed_wave(6, 128), ChannelLayout::from(6u16))
+                .expect("a placeable wave")
+                .window(VoiceWindow {
                     start: Beat::new(0.0),
                     duration: None,
                 }),
-                ..Default::default()
-            },
-        )
-        .expect("a placeable wave");
+        );
         Voice {
             source: VoiceSource::Memory(sampler),
             play: Playback {
@@ -2059,18 +2020,14 @@ fn a_missing_stretch_filter_reads_dry_not_silent() {
         .expect("a width the sampler reads")
         .with_handle();
 
-    let sampler = MemorySource::with_config(
-        indexed_wave(6, 512),
-        MemorySourceConfig {
-            channels: ChannelLayout::from(6u16),
-            placement: Some(VoiceWindow {
+    let sampler = MemorySource::from(
+        MemorySourceConfig::new(indexed_wave(6, 512), ChannelLayout::from(6u16))
+            .expect("a placeable wave")
+            .window(VoiceWindow {
                 start: Beat::new(0.0),
                 duration: None,
             }),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    );
     // Insert DIRECTLY with no filter, simulating one that has not arrived.
     unit.insert_voice_inner(
         SlotId(1),

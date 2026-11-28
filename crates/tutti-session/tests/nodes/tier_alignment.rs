@@ -20,13 +20,14 @@
 
 use std::path::Path;
 use tutti_buffers::Interleaved;
+use tutti_sampler::testing::placed_source;
 
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_sampler::{DiskVoice, MemorySource, StreamPhase, StreamStart, VoiceWindow};
+use tutti_sampler::{DiskVoice, StreamPhase, StreamStart, VoiceWindow};
 use tutti_session::{InputPort, MainOutput, OutputPort, Session};
 use tutti_units::{Beat, Db, SampleRate, Samples};
 
@@ -117,8 +118,7 @@ fn render(tier: Tier) -> (Vec<f32>, Vec<f32>, Samples) {
                     .unwrap();
             }
             let source =
-                MemorySource::placed(std::sync::Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
-                    .expect("a placeable wave");
+                placed_source(std::sync::Arc::new(wave), VoiceWindow::from(Beat::new(1.0)));
             (s.graph().add(source).erase(), None)
         }
     };

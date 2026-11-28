@@ -23,7 +23,7 @@
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::loop_frames;
+use tutti_sampler::testing::{loop_frames, placed_source};
 
 use std::f64::consts::TAU;
 use std::hint::black_box;
@@ -115,8 +115,7 @@ fn pool_with(n: usize, stretch: f64, cents: f64) -> Rig {
     let wave = tone(440.0, 48_000 * 4);
 
     for i in 0..n {
-        let source = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
         handle
             .add(
                 SlotId(i as u128 + 1),
@@ -304,10 +303,10 @@ fn pool_knobs(
             let wave = Arc::new(wave);
             (0..n)
                 .map(|_| {
-                    Built::Memory(
-                        MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(knobs.start))
-                            .expect("a placeable wave"),
-                    )
+                    Built::Memory(placed_source(
+                        Arc::clone(&wave),
+                        VoiceWindow::from(knobs.start),
+                    ))
                 })
                 .collect()
         }
@@ -483,9 +482,7 @@ impl Clips {
         let wave = Arc::new(wave);
         let nodes = (0..n)
             .map(|_| {
-                let source =
-                    MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-                        .expect("a placeable wave");
+                let source = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
                 let node = VoiceNode::new(source, Playback::default())
                     .expect("a finite gain and a nonempty width");
                 Direct::new(node, SampleRate::of(SR), block)
@@ -545,8 +542,7 @@ fn bench_sources(c: &mut Criterion) {
     let wave = Arc::new(wave);
     let mut nodes: Vec<Direct<MemorySource<f32>>> = (0..64)
         .map(|_| {
-            let source = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave");
+            let source = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
             Direct::new(source, SampleRate::of(SR), BLOCK)
         })
         .collect();

@@ -465,11 +465,11 @@ impl SendError {
 /// vocoder) to drop on the audio thread.
 ///
 /// ```compile_fail
-/// # use tutti_sampler::{MemorySource, Playback, VoiceNode};
-/// # use tutti_buffers::{Mono, Wave};
+/// # use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode};
+/// # use tutti_buffers::{ChannelLayout, Mono, Wave};
 /// # use std::sync::Arc;
 /// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
-/// # let source = MemorySource::new(wave.clone()).expect("a placeable wave");
+/// # let source = MemorySource::from(MemorySourceConfig::new(wave.clone(), ChannelLayout::STEREO).expect("a placeable wave"));
 /// let (_node, handle) = VoiceNode::new(source, Playback::default()).expect("a finite gain and a nonempty width").with_handle();
 /// // A standalone voice node has no door for a pool's wave swap.
 /// let _ = handle.replace_wave(tutti_sampler::SlotId(0), wave);
@@ -478,11 +478,11 @@ impl SendError {
 /// The same setup with a control it does take compiles:
 ///
 /// ```
-/// # use tutti_sampler::{MemorySource, Playback, VoiceNode, VoiceWindow};
-/// # use tutti_buffers::{Mono, Wave};
+/// # use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode, VoiceWindow};
+/// # use tutti_buffers::{ChannelLayout, Mono, Wave};
 /// # use std::sync::Arc;
 /// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
-/// # let source = MemorySource::new(wave.clone()).expect("a placeable wave");
+/// # let source = MemorySource::from(MemorySourceConfig::new(wave.clone(), ChannelLayout::STEREO).expect("a placeable wave"));
 /// let (_node, handle) = VoiceNode::new(source, Playback::default()).expect("a finite gain and a nonempty width").with_handle();
 /// handle.window_cell().publish(Some(VoiceWindow::from(tutti_units::Beat::new(1.0))));
 /// ```
@@ -1516,6 +1516,7 @@ impl<F: SamplerFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::placed_source;
     use crate::voice::pool::VoicePool;
 
     /// A full retirement room refuses a spare on the control side: `SetSpare` reserves a
@@ -1526,8 +1527,7 @@ mod tests {
     fn a_full_retirement_room_defers_the_spare_and_the_next_tick_sends_it() {
         let (_pool, handle) = VoicePool::<f32>::new().with_handle();
         let wave = Arc::new(Wave::new(2, tutti_units::SampleRate::SR_48K));
-        let source = MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let source = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
         handle
             .add(
                 SlotId(1),
@@ -1560,7 +1560,7 @@ mod tests {
     /// A source for the tests' adds: a placed one-frame wave.
     fn source() -> MemorySource<f32> {
         let wave = Arc::new(Wave::new(2, tutti_units::SampleRate::SR_48K));
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave")
+        placed_source(wave, VoiceWindow::from(Beat::new(0.0)))
     }
 
     /// A full queue is reported to the caller, not logged and forgotten.

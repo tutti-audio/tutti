@@ -135,15 +135,11 @@ fn reversed_pool(wave: Arc<Wave>, direction: PlayDirection) -> (VoicePool<f32>, 
     // Placed, not free-running. `PlaybackSlot` reads `seated_position()`, which
     // needs a timeline; without one the slot returns early and emits silence, so
     // the reverse arm is never reached.
-    let source = MemorySource::with_config(
-        wave,
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            placement: Some(tutti_sampler::VoiceWindow::default()),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let source = MemorySource::from(
+        MemorySourceConfig::new(wave, ChannelLayout::STEREO)
+            .expect("a placeable wave")
+            .window(tutti_sampler::VoiceWindow::default()),
+    );
 
     let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
     pool.insert(
@@ -386,15 +382,11 @@ fn loop_is_continuous(len: usize, start: f64, end: f64, fade: usize) {
     };
     let placed = {
         let clock = Clock::new();
-        let mut source = MemorySource::with_config(
-            sine(len),
-            MemorySourceConfig {
-                channels: ChannelLayout::STEREO,
-                placement: Some(tutti_sampler::VoiceWindow::default()),
-                ..Default::default()
-            },
-        )
-        .expect("a placeable wave");
+        let mut source = MemorySource::from(
+            MemorySourceConfig::new(sine(len), ChannelLayout::STEREO)
+                .expect("a placeable wave")
+                .window(tutti_sampler::VoiceWindow::default()),
+        );
         source.set_loop(Some(loop_frames(start as usize, end as usize, fade)));
         let mut out = Vec::new();
         for _ in 0..150 {
@@ -422,14 +414,9 @@ fn loop_is_continuous(len: usize, start: f64, end: f64, fade: usize) {
 /// playhead — the wrap happens in `MemorySource`'s free-running arm. So this
 /// deliberately does *not* attach a timeline.
 fn looping_source(wave: Arc<Wave>, start: f64, end: f64, xfade: usize) -> MemorySource<f32> {
-    let mut source = MemorySource::with_config(
-        wave,
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let mut source = MemorySource::from(
+        MemorySourceConfig::new(wave, ChannelLayout::STEREO).expect("a placeable wave"),
+    );
     source.set_loop(Some(loop_frames(start as usize, end as usize, xfade)));
     source.trigger_at(SamplePosition::new(start));
     source.play();
@@ -593,15 +580,11 @@ fn a_zero_length_crossfade_is_a_hard_loop() {
 fn a_reversed_voice_with_a_loop_set_stays_bounded() {
     const LEN: usize = 4096;
     let clock = Clock::new();
-    let mut source = MemorySource::with_config(
-        ramp(LEN),
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            placement: Some(tutti_sampler::VoiceWindow::default()),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let mut source = MemorySource::from(
+        MemorySourceConfig::new(ramp(LEN), ChannelLayout::STEREO)
+            .expect("a placeable wave")
+            .window(tutti_sampler::VoiceWindow::default()),
+    );
     source.set_loop(Some(loop_frames(500, 2500, 0)));
 
     let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
@@ -639,14 +622,9 @@ fn a_reversed_voice_with_a_loop_set_stays_bounded() {
 #[test]
 fn a_one_shot_source_stops_at_the_end() {
     const LEN: usize = 2048;
-    let source = MemorySource::with_config(
-        ramp(LEN),
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let source = MemorySource::from(
+        MemorySourceConfig::new(ramp(LEN), ChannelLayout::STEREO).expect("a placeable wave"),
+    );
     source.trigger_at(SamplePosition::new(0.0));
     source.play();
     let mut source = source;
@@ -679,14 +657,9 @@ fn reverse_and_loop_work_at_mono_width() {
         w.append(Interleaved::new(&[i as f32 / LEN as f32], w.layout()).unwrap())
             .unwrap();
     }
-    let mut source = MemorySource::with_config(
-        Arc::new(w),
-        MemorySourceConfig {
-            channels: ChannelLayout::MONO,
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let mut source = MemorySource::from(
+        MemorySourceConfig::new(Arc::new(w), ChannelLayout::MONO).expect("a placeable wave"),
+    );
     source.set_loop(Some(loop_frames(200, 1200, 64)));
     source.trigger_at(SamplePosition::new(200.0));
     source.play();
