@@ -51,10 +51,9 @@ fn load_test_soundfont() -> Arc<SoundFont> {
 
 /// A unit at 44.1 kHz, prepared (outside any gate) and driven by hand.
 fn unit() -> Hand {
-    Hand::new(
-        SoundFontUnit::try_from(SoundFontConfig::new(load_test_soundfont()))
-            .expect("create SoundFontUnit"),
-    )
+    Hand::new(SoundFontUnit::from(
+        SoundFontConfig::new(load_test_soundfont()).expect("a font with a playable preset"),
+    ))
 }
 
 /// `offset` frames into a block of [`Hand`]'s length.
@@ -389,8 +388,10 @@ fn drum(key: u8, offset: usize) -> UmpAt {
 fn soundfont_note_logic_is_allocation_free() {
     let font = load_test_soundfont();
     let (open, closed) = two_drums_of_a_class(&font);
-    let config = SoundFontConfig::new(font).polyphony(Polyphony::of(8));
-    let mut unit = Hand::new(SoundFontUnit::try_from(config).expect("create SoundFontUnit"));
+    let config = SoundFontConfig::new(font)
+        .expect("a font with a playable preset")
+        .polyphony(Polyphony::of(8));
+    let mut unit = Hand::new(SoundFontUnit::from(config));
 
     let ons: Vec<UmpAt> = (0..24usize).map(|f| note_on(36 + f as u8, f * 2)).collect();
     let offs: Vec<UmpAt> = (0..24usize)

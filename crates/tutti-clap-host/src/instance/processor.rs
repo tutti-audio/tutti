@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
-    EditReader, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor, ReportSink,
+    EditReader, Flushed, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor,
+    ReportSink,
 };
 use tutti_rt::Reader;
 use tutti_units::Normalized;
@@ -18,6 +19,7 @@ use tutti_clap_ffi::AudioSide;
 use super::ClapProcessContext;
 use super::audio::ProcessOutputRef;
 use super::config::{AudioScratch, RangeTable};
+use super::held::HeldWrites;
 use super::thread_pool::PoolCell;
 use crate::types::ClapNoteExpression;
 
@@ -53,6 +55,10 @@ pub struct ClapProcessor {
     pub(crate) scratch: Box<AudioScratch>,
     pub(crate) ranges: Reader<RangeTable>,
     pub(crate) drain: EditReader,
+    /// The writes a flush kept for the next block's `process`: a parameter
+    /// flagged `REQUIRES_PROCESS` is never delivered out of band while the
+    /// plugin is active.
+    pub(crate) held: HeldWrites,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
     /// events), on their way to the Controller's `take_reported_edits`.
     pub(crate) reports: ReportSink,
@@ -85,15 +91,17 @@ impl ClapProcessor {
             output_ports,
             max_frames,
             scratch,
-            ranges,
+            mut ranges,
             drain,
             reports,
             reports_dropped,
         } = parts;
+        let held = HeldWrites::with_room(ranges.lend().ranges.len());
         Self {
             scratch,
             ranges,
             drain,
+            held,
             reports,
             reports_dropped,
             audio_side,
@@ -151,11 +159,14 @@ impl ClapProcessor {
         self.scratch.out_translator.reset();
     }
 
-    /// Takes the parameter writes the Controller made that no block has
-    /// taken, latest per parameter, into `out`, skipping the stale. Main
+    /// Takes the parameter writes no block has delivered, into `out`, skipping
+    /// the stale: what a flush kept for the next block, then the Controller's
+    /// own, so a later write of a parameter follows its earlier one. Main
     /// thread, with the Processor held (nothing is rendering): for a caller
     /// that must not lose them, as a rejoin must not.
     pub fn take_edits(&mut self, out: &mut Vec<(ParamId, Normalized)>) {
+        self.held
+            .take(self.drain.epoch(), |id, value| out.push((id, value)));
         self.drain.drain(|id, value| out.push((id, value)));
     }
 
@@ -374,12 +385,8 @@ impl Processor for ClapProcessor {
     fn flush_parameters(
         &mut self,
         changes: &tutti_plugin_types::ParameterChanges,
-    ) -> PluginResult<()> {
-        if ClapProcessor::flush_parameters(self, changes) {
-            Ok(())
-        } else {
-            Err(PluginError::Block("the plugin has no params.flush to call"))
-        }
+    ) -> PluginResult<Flushed> {
+        ClapProcessor::flush_parameters(self, changes)
     }
 
     fn reset(&mut self) {
