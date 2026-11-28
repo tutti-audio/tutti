@@ -34,7 +34,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    SoundFontUnit::try_from(SoundFontConfig::new(font())).expect("builds")
+    SoundFontUnit::from(SoundFontConfig::new(font()).expect("a font with a playable preset"))
 }
 
 /// A clip playing middle C at `frame` into the unit, both at key 1 and 2,

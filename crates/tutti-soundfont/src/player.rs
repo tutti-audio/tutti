@@ -12,7 +12,6 @@
 //! The player renders five planes, not a mix: the dry pair, the chorus send
 //! pair and the reverb send. It holds no effect (see [`Plane`]).
 
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,8 +25,7 @@ use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
 use tutti_voicing::{MasterGain, VoiceAllocator, VoiceConfig, VoiceTable};
 
 use crate::channel::Channel;
-use crate::config::SoundFontConfig;
-use crate::error::{Error, Result};
+use crate::config::{SoundFontConfig, preset_id};
 use crate::patch::PresetPatch;
 use crate::render::Render;
 use crate::soundfont_math::NON_AUDIBLE;
@@ -112,12 +110,6 @@ impl Heard {
 /// Five equal-length planes: the unit's outputs for one stretch of frames.
 pub(crate) struct Planes<'a, F>(pub(crate) [&'a mut [F]; Plane::COUNT]);
 
-/// The key of a preset in the player's lookup: its bank in the upper 16 bits,
-/// its program in the lower.
-fn preset_id(bank: tutti_sf2::Bank, program: U7) -> i32 {
-    (i32::from(bank.get()) << 16) | i32::from(program.get())
-}
-
 /// The channel General MIDI plays percussion on.
 const PERCUSSION_CHANNEL: MidiChannel = MidiChannel::of(9);
 
@@ -194,10 +186,6 @@ impl MissingPresets {
 pub(crate) struct Player<F: Float + SimdLanes> {
     config: SoundFontConfig,
     render: Render,
-
-    presets: HashMap<i32, usize>,
-    default_preset: usize,
-
     channels: Vec<Channel>,
     /// The program changes that named a preset the font lacks.
     missing: MissingPresets,
@@ -223,60 +211,23 @@ pub(crate) struct Player<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes> Player<F> {
-    /// Builds a player over `font` at [`INITIAL_RATE`].
+    /// Builds a player over the config's font at [`INITIAL_RATE`].
     /// Allocates the voices.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::NoPlayablePreset`] when no preset of the font has a MIDI bank
-    /// and program (SF2 2.04 section 7.2).
-    pub(crate) fn new(config: SoundFontConfig) -> Result<Self> {
+    pub(crate) fn new(config: SoundFontConfig) -> Self {
         Self::at(config, Render::new(INITIAL_RATE))
     }
 
-    /// Builds a player over `font` on the grid `render`.
-    fn at(config: SoundFontConfig, render: Render) -> Result<Self> {
+    /// Builds a player over the config's font on the grid `render`.
+    fn at(config: SoundFontConfig, render: Render) -> Self {
         let polyphony = config.polyphony;
-        let font = &config.font;
-
-        let mut presets: HashMap<i32, usize> = HashMap::new();
-        let mut min_preset_id = i32::MAX;
-        let mut default_preset: Option<usize> = None;
-        for (i, preset) in font.presets().iter().enumerate() {
-            // A preset whose bank or program is not MIDI's cannot be played
-            // (SF2 2.04 section 7.2): it is kept in the font and not looked up.
-            let (Some(bank), Some(patch)) = (preset.bank(), preset.patch()) else {
-                continue;
-            };
-            let preset_id = preset_id(bank, patch);
-            // Two presets with the same bank and program: the first in the file
-            // is the active one (section 7.2).
-            presets.entry(preset_id).or_insert(i);
-
-            // The preset with the minimum ID number will be default.
-            // If the SoundFont is GM compatible, the piano will be chosen.
-            if preset_id < min_preset_id {
-                default_preset = Some(i);
-                min_preset_id = preset_id;
-            }
-        }
-
-        // A font with nothing playable would sound a preset the file says cannot
-        // be played, or nothing at all: it is refused.
-        let Some(default_preset) = default_preset else {
-            return Err(Error::NoPlayablePreset);
-        };
-
         let channels = (0..MidiChannel::COUNT)
             .map(|i| Channel::new(i == PERCUSSION_CHANNEL.get()))
             .collect();
 
         let universal = UniversalReader::new(config.group, config.device);
-        Ok(Self {
+        Self {
             config,
             render,
-            presets,
-            default_preset,
             channels,
             missing: MissingPresets::default(),
             voices: VoiceTable::new(voice_config(polyphony.voices()), || Voice::new(&render)),
@@ -288,7 +239,7 @@ impl<F: Float + SimdLanes> Player<F> {
             block_read: render.block_len(),
             inverse_block_size: F::from_design(1.0 / render.block_len() as f64),
             audible_floor: F::from_unit(NON_AUDIBLE),
-        })
+        }
     }
 
     /// The Group this player's sixteen channels are.
@@ -301,7 +252,12 @@ impl<F: Float + SimdLanes> Player<F> {
     /// the font's first.
     fn preset_of(&self, channel: MidiChannel) -> usize {
         let info = &self.channels[channel.index()];
-        if let Some(&preset) = self.presets.get(&preset_id(info.bank(), info.program())) {
+        if let Some(&preset) = self
+            .config
+            .index
+            .presets
+            .get(&preset_id(info.bank(), info.program()))
+        {
             return preset;
         }
         let gm_id = match info.bank() {
@@ -310,10 +266,12 @@ impl<F: Float + SimdLanes> Player<F> {
             }
             tutti_sf2::Bank::Percussion => preset_id(tutti_sf2::Bank::Percussion, U7::of(0)),
         };
-        self.presets
+        let index = &self.config.index;
+        index
+            .presets
             .get(&gm_id)
             .copied()
-            .unwrap_or(self.default_preset)
+            .unwrap_or(index.default_preset)
     }
 
     /// Reads one channel voice message.
@@ -398,7 +356,7 @@ impl<F: Float + SimdLanes> Player<F> {
         let info = &mut self.channels[channel.index()];
         info.program_change(program);
         let id = preset_id(info.bank(), info.program());
-        if !self.presets.contains_key(&id) {
+        if !self.config.index.presets.contains_key(&id) {
             self.missing.0.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -624,8 +582,7 @@ impl<F: Float + SimdLanes> Player<F> {
         if !RATES.contains(render.rate()) {
             return None;
         }
-        // The font has a playable preset, or `self` was not built.
-        let mut player = Self::at(self.config.clone(), render).ok()?;
+        let mut player = Self::at(self.config.clone(), render);
         player.channels = self.channels.clone();
         player.missing = self.missing.clone();
         // The core's channel state (wheel, sensitivity); its notes are not

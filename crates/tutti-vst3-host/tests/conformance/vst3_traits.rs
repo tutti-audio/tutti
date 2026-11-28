@@ -1023,7 +1023,10 @@ fn a_flush_between_blocks_reaches_a_processing_plugin() {
     render_f32(&mut processor);
     let mut changes = ParameterChanges::reserved(1, 1);
     assert!(changes.add_change(id(PARAM_RAMP), at_frame(0), unit_value(0.4)));
-    Processor::flush_parameters(&mut processor, &changes).expect("the plugin takes the flush");
+    assert_eq!(
+        Processor::flush_parameters(&mut processor, &changes).expect("the plugin takes the flush"),
+        tutti_plugin_types::Flushed::Applied
+    );
     let rendered = render_f32(&mut processor);
     assert!((rendered - 0.4).abs() < 1e-6, "{rendered}");
     Vst3Loaded::deactivate(main_thread(), processor, controller).expect("a pair");
@@ -1051,7 +1054,10 @@ fn a_flush_while_the_plugin_is_not_processing_is_staged_for_the_next_block_and_s
     Processor::stop(&mut processor);
     let mut changes = ParameterChanges::reserved(1, 1);
     assert!(changes.add_change(id(PARAM_RAMP), at_frame(0), unit_value(0.4)));
-    Processor::flush_parameters(&mut processor, &changes).expect("staged");
+    assert_eq!(
+        Processor::flush_parameters(&mut processor, &changes).expect("staged"),
+        tutti_plugin_types::Flushed::Applied
+    );
     let ProcessorAny::F32(inner) = &processor else {
         panic!("activated at f32");
     };

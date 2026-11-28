@@ -8,6 +8,7 @@ mod chase;
 mod contract;
 mod f64_unit;
 mod graph_node;
+mod node_config;
 mod ring_out;
 #[path = "../support/mod.rs"]
 mod support;

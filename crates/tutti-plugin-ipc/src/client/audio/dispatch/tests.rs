@@ -231,6 +231,28 @@ fn an_answer_from_a_replaced_table_is_not_the_new_ones() {
     assert_eq!(sent(&state, again), [(1, 0.75)], "owed from the new table");
 }
 
+/// **A flush the server kept for the next block ends with nothing published
+/// and nothing lost or owed**: the writes stay pending, none is sent again, and
+/// the next request's answer, whose drain is later, covers them.
+#[test]
+fn a_held_flush_publishes_nothing_loses_nothing_and_is_covered_by_the_next_answer() {
+    let (mut state, _replies, channels) = audio_state();
+    let mut writer = host_slots(&channels);
+    write(&mut writer, 1, 0.5);
+    let flush = drain_request(&mut state, &channels);
+    assert!(!state.flush_answered(&channels, flush, ApplyOutcome::Held));
+    assert_eq!(writer.pending().len(), 1, "the plugin lacks it");
+    assert_eq!(channels.unapplied_edits_cell().get(), 0, "not lost");
+
+    let block = drain_request(&mut state, &channels);
+    assert!(
+        sent(&state, block).is_empty(),
+        "not owed: the server has it"
+    );
+    state.answered(&channels, block, true);
+    assert!(writer.pending().is_empty(), "the block took it");
+}
+
 /// **A write owed is not covered by a later answer**: a request handed over
 /// while another's writes are owed publishes nothing (one generation cannot
 /// say that a later write is applied and an earlier is not), so both stay

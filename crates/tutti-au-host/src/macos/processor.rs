@@ -825,7 +825,7 @@ impl Processor for AuProcessor {
     fn flush_parameters(
         &mut self,
         changes: &tutti_plugin_types::ParameterChanges,
-    ) -> PluginResult<()> {
+    ) -> PluginResult<tutti_plugin_types::Flushed> {
         let table = self.ranges.lend();
         let mut refused = false;
         for queue in &changes.queues {
@@ -852,7 +852,7 @@ impl Processor for AuProcessor {
         if refused {
             Err(PluginError::Block("the unit refused a parameter write"))
         } else {
-            Ok(())
+            Ok(tutti_plugin_types::Flushed::Applied)
         }
     }
 

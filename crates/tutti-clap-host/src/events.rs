@@ -74,6 +74,9 @@ pub struct ParamBounds {
     /// `CLAP_PARAM_IS_READONLY`: "the parameter can't be changed by the host",
     /// so no value is ever written to it.
     pub read_only: bool,
+    /// `CLAP_PARAM_REQUIRES_PROCESS`: while the plugin is active a change is
+    /// delivered through `process`, in event order, never out of band.
+    pub requires_process: bool,
 }
 
 impl ParamBounds {
@@ -86,6 +89,7 @@ impl ParamBounds {
             max,
             stepped: false,
             read_only: false,
+            requires_process: false,
         }
     }
 
@@ -98,6 +102,7 @@ impl ParamBounds {
             max,
             stepped: true,
             read_only: false,
+            requires_process: false,
         }
     }
 
@@ -1543,10 +1548,25 @@ impl InputEventList {
         ranges: &[ParamBounds],
         plugin_claims_params: bool,
     ) -> &mut Self {
+        self.add_param_changes_where(changes, ranges, plugin_claims_params, |_| true)
+    }
+
+    /// [`add_param_changes`](Self::add_param_changes) for the queues whose
+    /// parameter's bounds `take` accepts (`None` for one the table lacks).
+    pub(crate) fn add_param_changes_where(
+        &mut self,
+        changes: &ParameterChanges,
+        ranges: &[ParamBounds],
+        plugin_claims_params: bool,
+        take: impl Fn(Option<&ParamBounds>) -> bool,
+    ) -> &mut Self {
         let mut pushed = 0usize;
         for queue in &changes.queues {
             let param_id = queue.param_id;
             let range = ParamBounds::find(ranges, param_id);
+            if !take(range) {
+                continue;
+            }
             if range.is_none() && plugin_claims_params {
                 continue;
             }

@@ -1,6 +1,5 @@
 //! [`BufferError`], the one refusal a view's construction or a conversion gives.
 
-use crate::BlockSide;
 use crate::{ChannelLayout, LayoutError};
 use tutti_units::Samples;
 
@@ -69,4 +68,22 @@ pub enum BufferError {
         /// The most the structure holds.
         max: usize,
     },
+}
+
+/// Which view of a block a [`BufferError::BlockLengthMismatch`] names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BlockSide {
+    /// The input planes.
+    Input,
+    /// The output planes.
+    Output,
+}
+
+impl core::fmt::Display for BlockSide {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Input => "input",
+            Self::Output => "output",
+        })
+    }
 }
