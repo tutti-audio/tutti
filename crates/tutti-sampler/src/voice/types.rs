@@ -184,16 +184,13 @@ impl<F: SamplerFloat> VoiceSource<F> {
         }
     }
 
-    /// Update the timeline window: `None` frees a memory voice to run on its
-    /// own cursor, and leaves a streamed voice, which is always placed, where
-    /// it is.
+    /// Moves the voice's window of the timeline. A voice is placed or free for
+    /// its life, so only a placed voice's window is moved.
     #[inline]
-    pub(crate) fn apply_window(&mut self, window: Option<VoiceWindow>) {
-        match (self, window) {
-            (Self::Memory(s), Some(window)) => s.set_window(window),
-            (Self::Memory(s), None) => s.free_run(),
-            (Self::Disk(s), Some(window)) => s.set_window(window),
-            (Self::Disk(_), None) => {}
+    pub(crate) fn apply_window(&mut self, window: VoiceWindow) {
+        match self {
+            Self::Memory(s) => s.set_window(window),
+            Self::Disk(s) => s.set_window(window),
         }
     }
 }

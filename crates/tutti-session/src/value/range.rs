@@ -144,6 +144,8 @@ impl<U: Scalar> Target for RangeTarget<U> {
 impl<U: Scalar> sealed::Store for RangeTarget<U> {
     type Cell = SlotCell<Range<U>>;
 
+    crate::value::no_host_gesture!();
+
     fn resolve(self, params: &Params) -> Option<(Self::Cell, Range<U>)> {
         let cell = params.slot::<Range<U>>(SlotId::Range(self.target))?;
         let base = cell.load();

@@ -78,6 +78,7 @@ fn a_blocks_fields_become_the_services_numbers_of_the_same_spec_values() {
 }
 
 /// Each defined value of the three enumerations has its own number, in the spec's order.
+/// Spec: m2-104/6.1.1#3
 #[test]
 fn each_defined_enumeration_value_has_its_own_number() {
     let map =
@@ -158,6 +159,7 @@ fn a_reserved_direction_or_midi1_status_is_refused() {
 
 /// A block number, first Group, group span or MIDI-CI version outside its range is refused
 /// by the field's name.
+/// Spec: m2-104/6.1.1#1
 #[test]
 fn a_reserved_number_group_span_or_ci_version_is_refused() {
     for (os, field) in [
@@ -199,6 +201,7 @@ fn a_reserved_number_group_span_or_ci_version_is_refused() {
 
 /// The endpoint's declared count is the number of blocks given, and a reserved count is
 /// refused.
+/// Spec: m2-104/6.1.1#2
 #[test]
 fn the_declared_block_count_is_the_blocks_given() {
     let blocks = [block(os_block(0), None), block(os_block(1), None)];

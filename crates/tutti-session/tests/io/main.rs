@@ -58,3 +58,12 @@ mod loading;
 // Takes: a recording placed on the graph's clock, punched, and reported.
 #[cfg(feature = "capture")]
 mod takes;
+
+// What an `update`'s events say it sent.
+#[path = "../support/committed.rs"]
+mod committed;
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(feature = "export")]
+#[path = "../support/bounced.rs"]
+mod bounced;

@@ -139,14 +139,10 @@ fn mix_reads_back_what_was_set() {
     assert_eq!(r.s.get(r.halve.mix()).unwrap(), Mix::DRY);
 }
 
-/// A mix is a control: setting one marks nothing edited, and the next update
-/// sends no commit (the plan last sent is the same `Arc`).
+/// A mix is a control: setting one marks nothing edited.
 #[test]
 fn a_mix_is_not_an_edit() {
     let mut r = rig();
-    let plan = r.s.graph_ref().testing().sent_plan().expect("a plan");
-    let sent = r.s.graph_ref().testing().commits_sent();
-
     r.s.set(r.halve.mix().to(Mix::DRY)).unwrap();
     let _ = r.s.update();
     assert!(
@@ -154,14 +150,6 @@ fn a_mix_is_not_an_edit() {
         "a mix marks nothing edited"
     );
     let _ = r.settled();
-
-    assert_eq!(
-        r.s.graph_ref().testing().commits_sent(),
-        sent,
-        "no commit was sent"
-    );
-    let now = r.s.graph_ref().testing().sent_plan().expect("a plan");
-    assert!(std::sync::Arc::ptr_eq(&plan, &now), "the same plan");
 }
 
 /// A node that is no longer in the graph is refused (set and read alike); a

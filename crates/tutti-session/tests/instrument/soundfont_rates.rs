@@ -18,24 +18,26 @@ fn a_session_refuses_a_rate_the_soundfont_unit_does_not_run_at() {
     );
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
-    let g = s.graph();
-    let key = g.add(unit);
+    let key = s.graph().add(unit);
     let supported =
         tutti_graph::SampleRates::of(SampleRate::of(16_000.0), SampleRate::of(192_000.0));
 
     for rate in [SampleRate::of(8_000.0), SampleRate::of(384_000.0)] {
         assert_eq!(
-            g.set_sample_rate(rate).unwrap_err(),
+            s.set_sample_rate(rate).unwrap_err(),
             SetRateError::RateUnsupported {
                 node: key.erase(),
                 supported,
                 rate,
             }
         );
-        assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_48K);
+        assert_eq!(s.sample_rate(), SampleRate::SR_48K);
     }
-    g.set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_44K1);
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.sample_rate(), SampleRate::SR_44K1);
 }

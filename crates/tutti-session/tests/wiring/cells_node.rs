@@ -5,10 +5,16 @@
 //! `IntoNode`. A `published` value of such a node is written through its key and lands at
 //! the update, with nothing implemented for the session.
 
+#[cfg(feature = "export")]
+use crate::bounced::first_frames;
 use tutti_buffers::{ChannelLayout, InterleavedMut};
+#[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
+#[cfg(feature = "export")]
+use tutti_fixtures::block_on;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_midi_runtime::{ClipEvents, ClipEventsKind, TimedMidiEvent};
-use tutti_session::{DetachedSession, MainOutput, Session};
+use tutti_session::{MainOutput, Session};
 use tutti_ump::MidiChannel;
 use tutti_units::{Amplitude, Beat, SampleRate};
 
@@ -47,10 +53,13 @@ impl Node for Level {
     }
 }
 
-fn session_with_level() -> (DetachedSession, tutti_session::Key<Level>) {
+fn session_with_level() -> (Session, tutti_session::Key<Level>) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let level = s.graph().add(Level::from(LevelConfig::new()));
     s.graph()
@@ -61,9 +70,9 @@ fn session_with_level() -> (DetachedSession, tutti_session::Key<Level>) {
     (s, level)
 }
 
-fn frame(s: &mut DetachedSession) -> f32 {
+fn frame(s: &mut Session) -> f32 {
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     out[0]
 }
 
@@ -83,19 +92,19 @@ fn a_cells_node_is_addressed_by_its_parts_and_a_write_reaches_its_next_block() {
 
 /// **A fork of a cells-form node starts from the values set at the fork**,
 /// and a later write does not reach it: the parts' fork detaches the cells.
+#[cfg(feature = "export")]
 #[test]
 fn a_cells_node_forks_from_the_values_set() {
-    let (s, level) = session_with_level();
+    let (mut s, level) = session_with_level();
     s.set(level.volume().to(Amplitude::new(0.5))).unwrap();
-    let mut fork = s
-        .graph_ref()
-        .testing()
-        .fork_live()
-        .expect("a cells node forks");
+    let fork = s.bounce(first_frames(1)).expect("a cells node forks");
     s.set(level.volume().to(Amplitude::new(0.9))).unwrap();
-    let mut forked = [0.0f32];
-    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
-    assert_eq!(forked, [0.5]);
+    let forked = s
+        .apply(block_on(fork))
+        .unwrap()
+        .into_main_output()
+        .to_planes();
+    assert_eq!(forked, [[0.5]]);
 }
 
 /// A source of how many events its published `events` hold, on one channel.
@@ -141,10 +150,13 @@ fn events_of(count: u8) -> ClipEvents {
         .collect()
 }
 
-fn session_with_count() -> (DetachedSession, tutti_session::Key<Count>, CountCells) {
+fn session_with_count() -> (Session, tutti_session::Key<Count>, CountCells) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let node = Count::from(CountConfig::new());
     let probe = node.cells.clone();
@@ -201,21 +213,21 @@ fn an_update_frees_a_published_value_a_block_held_across_a_replacement() {
 
 /// **A fork reads the published value as it was set**, and a later write does
 /// not reach it.
+#[cfg(feature = "export")]
 #[test]
 fn a_fork_reads_the_published_value_as_set() {
     let (mut s, count, _probe) = session_with_count();
     s.set(count.events().to(events_of(2))).unwrap();
     let _ = s.update();
-    let mut fork = s
-        .graph_ref()
-        .testing()
-        .fork_live()
-        .expect("a cells node forks");
+    let fork = s.bounce(first_frames(1)).expect("a cells node forks");
     s.set(count.events().to(events_of(5))).unwrap();
     let _ = s.update();
-    let mut forked = [0.0f32];
-    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
-    assert_eq!(forked, [2.0]);
+    let forked = s
+        .apply(block_on(fork))
+        .unwrap()
+        .into_main_output()
+        .to_planes();
+    assert_eq!(forked, [[2.0]]);
 }
 
 /// A kind no session addresses.
@@ -267,7 +279,10 @@ impl Node for Silent {
 fn a_node_publishing_an_unknown_kind_is_added_and_renders() {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let silent = s.graph().add(Silent::from(SilentConfig::new()));
     s.graph()
@@ -284,7 +299,10 @@ fn a_node_publishing_an_unknown_kind_is_added_and_renders() {
 fn an_update_frees_the_value_of_an_unaddressed_entry_a_block_held() {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let node = Silent::from(SilentConfig::new());
     let mut block = node.cells.clone();

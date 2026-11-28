@@ -12,7 +12,6 @@
 1 crates/tutti-plugin/tests/clap_nodes/clap_live.rs
 2 crates/tutti-plugin/tests/clap_nodes/clap_node_no_alloc.rs
 1 crates/tutti-plugin/tests/clap_nodes/clap_ragged.rs
-1 crates/tutti-plugin/tests/clap_nodes/clap_rate_refused.rs
 1 crates/tutti-plugin/tests/clap_nodes/clap_transport.rs
 1 crates/tutti-plugin/tests/clap_nodes/plugin_param_delivery_no_alloc.rs
 2 crates/tutti-plugin/tests/clap_nodes/plugin_param_delivery.rs
@@ -28,7 +27,6 @@
 3 crates/tutti-session/src/key.rs
 1 crates/tutti-session/src/lib.rs
 8 crates/tutti-session/src/modulation.rs
-1 crates/tutti-session/src/node.rs
 1 crates/tutti-session/src/plugin.rs
 2 crates/tutti-session/src/session/event.rs
 1 crates/tutti-session/src/session/mod.rs

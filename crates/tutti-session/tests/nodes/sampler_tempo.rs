@@ -38,7 +38,8 @@ fn run(s: &mut Session, frames: usize, block: usize) -> Vec<f32> {
 /// jump from source frame 23 999 to 48 000.
 #[test]
 fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
-    use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
+    use tutti_sampler::testing::placed_source;
+    use tutti_sampler::{Playback, SlotId, VoicePool, VoiceWindow};
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     use tutti_units::{Beat, Bpm};
 
@@ -47,8 +48,7 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
         wave.append(Interleaved::new(&[i as f32 / 131_072.0], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
     let mut pool = VoicePool::new();
     pool.insert(SlotId(1), source, Playback::default())
         .expect("a finite gain and a nonempty width");
@@ -88,8 +88,8 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
 #[test]
 fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop() {
     use tutti_music::LoopRange;
-    use tutti_sampler::testing::spares_sent;
-    use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
+    use tutti_sampler::testing::{placed_source, spares_sent};
+    use tutti_sampler::{Playback, SlotId, VoicePool, VoiceWindow};
     use tutti_timeline::LoopRegion;
     use tutti_units::{Beat, StretchFactor};
 
@@ -98,8 +98,7 @@ fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop()
         wave.append(Interleaved::new(&[0.0], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
     let mut s = offline_48k();
     let pool = s.graph().add(VoicePool::new());
     let handle = s

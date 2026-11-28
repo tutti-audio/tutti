@@ -17,9 +17,7 @@ use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{GRAPH_MAX_BLOCK, Normalize, Stage};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, Shape, Status};
-use tutti_session::{
-    Bounce, BounceError, BounceHandle, BounceTail, DetachedSession, ExportClock, Range, Session,
-};
+use tutti_session::{Bounce, BounceError, BounceHandle, BounceTail, ExportClock, Range, Session};
 use tutti_units::{Db, Frame, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -51,14 +49,18 @@ impl Node for CancelAt {
 }
 
 struct Rig {
-    session: DetachedSession,
+    session: Session,
     node: tutti_graph::NodeKey,
     blocks: Arc<AtomicUsize>,
     handle: Arc<OnceLock<BounceHandle>>,
 }
 
 fn rig(at: usize) -> Rig {
-    let mut session = Session::builder().build_detached(RATE).unwrap();
+    let mut session = Session::builder()
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .unwrap();
     let blocks = Arc::new(AtomicUsize::new(0));
     let handle = Arc::new(OnceLock::new());
     let node = CancelAt {

@@ -8,8 +8,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Fade, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_rt::atomic_word;
 use tutti_session::{
-    ChangedBy, Declarations, DetachedSession, Graph, KeyError, NodeDecl, PatchError,
-    ReplaceRefused, Session,
+    ChangedBy, Declarations, Graph, KeyError, NodeDecl, PatchError, ReplaceRefused, Session,
 };
 use tutti_units::{Hz, SampleRate, Samples, SyncSetting};
 
@@ -93,10 +92,13 @@ impl Node for Hum {
     }
 }
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -104,7 +106,7 @@ fn tone() -> ToneConfig {
     ToneConfig::new(ChannelLayout::MONO)
 }
 
-fn declare(s: &mut DetachedSession, config: ToneConfig) -> tutti_session::Patched<&'static str> {
+fn declare(s: &mut Session, config: ToneConfig) -> tutti_session::Patched<&'static str> {
     s.patch(NodeDecl::new("a", config)).expect("patches")
 }
 

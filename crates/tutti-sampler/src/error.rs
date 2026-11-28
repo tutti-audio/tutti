@@ -22,7 +22,7 @@ pub enum StreamerStartError {
 /// Why a wave cannot be placed into a voice's channels.
 ///
 /// Raised on the control side when a source is built over a wave
-/// ([`MemorySource::with_config`](crate::MemorySource::with_config),
+/// ([`MemorySourceConfig::new`](crate::MemorySourceConfig::new),
 /// [`memory_voice`](crate::memory_voice)), never on the audio thread: a wave
 /// that cannot be placed is refused rather than played with a channel in the
 /// wrong place or dropped.

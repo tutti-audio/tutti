@@ -6,13 +6,17 @@
 //! render with another render.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use tutti_buffers::PlanesMut;
-use tutti_session::Stamp;
+use std::sync::Arc;
+use tutti_fixtures::WavePlanes;
+use tutti_session::{ExportClock, Stamp};
+use tutti_tempo::TempoMap;
+use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
-use tutti_units::{Amplitude, At, Frame, Tail};
+use tutti_units::{Amplitude, At, Frame, SampleRate, Tail};
 
 use super::midi::*;
 use super::rig::{BLOCK, Rig};
+use crate::bounced::{bounced, first_frames};
 use tutti_ump::{Message, NoteNumber, NoteVelocity, Ump, Voice2};
 
 /// A case a subject cannot pass: it runs, and must fail with `fails_with`.
@@ -425,7 +429,6 @@ pub(crate) fn a_rate_change_keeps_the_note_on_its_frame<S: Subject>() {
         let mut rig = S::rig();
         rig.render_to(2 * BLOCK);
         rig.session
-            .graph()
             .set_sample_rate(tutti_units::SampleRate::SR_44K1)
             .unwrap();
         rig.settle();
@@ -501,7 +504,6 @@ fn rate_change_instant_once<S: Subject>(send_after_the_change: bool) -> Judged {
         rig.block();
     }
     rig.session
-        .graph()
         .set_sample_rate(tutti_units::SampleRate::SR_44K1)
         .unwrap();
     rig.settle();
@@ -607,39 +609,31 @@ pub(crate) fn a_fork_starts_silent_and_plays<S: Subject>() {
         )
         .expect("an instrument takes a clip");
     let _ = rig.session.update();
-    let mut fork = rig
-        .session
-        .graph_ref()
-        .testing()
-        .fork_live()
-        .expect("the instrument forks");
-    let mut out = vec![vec![0.0; 2_048]; 2];
-    fork.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
-    let p = out.iter().flatten().fold(0.0f32, |a, v| a.max(v.abs()));
+    let silent = bounced(&mut rig.session, first_frames(2_048))
+        .expect("the instrument forks")
+        .into_main_output()
+        .to_planes();
+    let p = silent.iter().flatten().fold(0.0f32, |a, v| a.max(v.abs()));
     assert_eq!(p, 0.0, "the fork sounds {p}");
 
-    // Rolling a block at a time until the plugin is heard. A hosted plugin in a
-    // live fork answers a chunk in real time, and this loop renders faster than
-    // that: a chunk the bridge is more than one behind on is skipped with its
-    // MIDI (counted, never sent again), and the clip's note-on is sent once per
-    // pass over beat 0.01. So the playhead loops over the first `PASS` blocks,
-    // and each pass strikes the note again until one reaches the plugin.
-    const PASS: u32 = 64;
-    let mut peak = 0.0f32;
-    let mut i = 0u32;
-    tutti_fixtures::wait_until("the fork to play", tutti_fixtures::HANG_GUARD, || {
-        let beat = f64::from(i % PASS) * BLOCK as f64 / 24_000.0;
-        fork.set_transport(tutti_graph::TransportPosition::new(
-            true,
-            tutti_units::Bpm::of(120.0),
-            tutti_units::Beat::new(beat),
-            None,
-        ));
-        fork.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
-        peak = out.iter().flatten().fold(peak, |a, v| a.max(v.abs()));
-        i += 1;
-        peak > 1e-4
-    });
+    // Rolling from beat 0 for as long as the clip's note takes to reach the
+    // plugin: a render the pipeline answers chunk by chunk.
+    const PASS: usize = 64;
+    let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
+        start_beat: tutti_units::Beat::new(0.0),
+        tempo_map: Arc::new(TempoMap::constant(tutti_units::Bpm::of(120.0)).expect("a tempo")),
+        sample_rate: SampleRate::SR_48K,
+        loop_range: None,
+    }));
+    let played = bounced(
+        &mut rig.session,
+        first_frames((PASS * BLOCK) as u64).clock(ExportClock::timeline(timeline)),
+    )
+    .expect("the instrument forks")
+    .into_main_output()
+    .to_planes();
+    let peak = played.iter().flatten().fold(0.0f32, |a, v| a.max(v.abs()));
+    assert!(peak > 1e-4, "the fork plays the clip's note: {peak}");
 }
 
 /// **Sending allocates nothing**, and neither does a block that plays it. The

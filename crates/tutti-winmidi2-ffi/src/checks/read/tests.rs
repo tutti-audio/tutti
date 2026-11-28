@@ -71,6 +71,7 @@ fn each_endpoint_info_flag_is_the_notifications_flag_of_its_name() {
 
 /// M2-104 §7.1.2: a count of Function Blocks above 32 is more than the field holds, and
 /// reads as the most it does, 32, as a count read from ALSA does.
+/// Spec: m2-104/6.1.1#2
 #[test]
 fn a_block_count_above_32_saturates_to_32() {
     let read = endpoint_info(&PlatformInfo {
@@ -103,6 +104,7 @@ fn only_midi1_and_midi2_are_an_agreed_protocol() {
 
 /// M2-104 §7.1.8: the service's direction and MIDI 1.0 port numbers are the spec's, and a
 /// block's other fields and its name pass through, an empty name as none.
+/// Spec: m2-104/6.1.1#3
 #[test]
 fn a_blocks_numbers_read_as_the_specs_values() {
     let read = function_block(&PlatformBlock {

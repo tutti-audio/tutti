@@ -313,6 +313,48 @@ impl Control for AuLoaded {
         self.descriptor()
     }
 
+    fn host_edits(&self) -> Option<&Arc<tutti_plugin_types::HostEdits>> {
+        Some(&self.host_edits)
+    }
+
+    fn adopt_host_edits(&mut self, list: Arc<tutti_plugin_types::HostEdits>) {
+        self.host_edits = list;
+    }
+
+    /// A begin and an end notify every listener of the unit but the host's own
+    /// (`AUEventListenerNotify` of the gesture events, the host's listener as
+    /// the sender), so the plugin's view hears the host's gesture and
+    /// `watch_gestures` does not report it as the plugin's. A value is
+    /// `AudioUnitSetParameter`, between the two.
+    fn apply_host_edit(&mut self, main: MainThreadMarker, edit: ParamEdit) {
+        match edit {
+            ParamEdit::Begin(id) | ParamEdit::End(id) => {
+                let begin = matches!(edit, ParamEdit::Begin(_));
+                match self.listener() {
+                    Some(listener) => {
+                        let _ = listener.emit_gesture(
+                            id.get(),
+                            tutti_au_ffi::EventAddress::GLOBAL,
+                            begin,
+                        );
+                    }
+                    // Without the host's listener there is no one to exclude.
+                    None => {
+                        let _ = tutti_au_ffi::emit_gesture(
+                            self.unit(),
+                            id.get(),
+                            tutti_au_ffi::EventAddress::GLOBAL,
+                            begin,
+                        );
+                    }
+                }
+            }
+            ParamEdit::Change { id, value, .. } => {
+                let _ = Control::set_parameter(self, main, id, value);
+            }
+        }
+    }
+
     fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
         PluginWiring {
             inputs: self.buses(BusDirection::Input),

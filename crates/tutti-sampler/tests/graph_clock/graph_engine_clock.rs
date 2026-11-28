@@ -16,6 +16,7 @@
 //! frames is the same pieces, and must render the same bits.
 
 use tutti_graph::testing::WireDeclared;
+use tutti_sampler::testing::placed_source;
 
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
@@ -31,7 +32,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
+use tutti_sampler::{Playback, SlotId, VoicePool};
 use tutti_timeline::{AfterLocate, FadeOut, LoopEdit, MotionCommand, Timeline, Transport};
 use tutti_units::{At, Beat, Cents, Frame, SampleRate, Samples};
 
@@ -52,8 +53,7 @@ fn pool(cents: f64) -> VoicePool<f32> {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
     let mut pool = VoicePool::new();
     pool.insert(
         SlotId(1),

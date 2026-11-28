@@ -17,8 +17,8 @@ use tutti_fixtures::signal::rms;
 
 use tutti_buffers::Wave;
 use tutti_graph::contract;
-use tutti_sampler::testing::MockTransport;
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
+use tutti_sampler::testing::{MockTransport, placed_source};
+use tutti_sampler::{Playback, SlotId, VoicePool};
 use tutti_units::{Beat, Bpm, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
@@ -40,8 +40,7 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
     handle
         .add(
             SlotId(1),
-            MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
+            placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0))),
             Playback {
                 stretch: StretchFactor::new(2.0),
                 ..Default::default()

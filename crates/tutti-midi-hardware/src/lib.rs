@@ -90,7 +90,8 @@
 //! - **Windows (MIDI Services):** the service's endpoint watcher reports each endpoint
 //!   that appears, leaves or changes, with no re-list. A
 //!   [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the endpoint's device interface
-//!   path, and each endpoint is one duplex device.
+//!   path, and each endpoint is one duplex device. Each listing reads the endpoint's
+//!   declared info and Function Blocks, so a change to either shows in the list.
 //! - **Windows (winmm):** Windows Multimedia has no notification, so the watch lists the
 //!   ports once a second and reports the difference; a device shows within about
 //!   that long. A [`MidiDeviceId`](tutti_midi_device::MidiDeviceId) is the device interface path the driver reports,
@@ -116,14 +117,17 @@
 //! another thread. What peers write is delivered into an [`InputProducerHandle`],
 //! so its events take the path a device input's do. Where the platform cannot publish what the
 //! spec asks, opening says so: [`MidiHardwareError::Unsupported`] where there is no backend
-//! or the backend publishes no virtual ports (Windows Multimedia, Windows MIDI Services),
+//! or the backend publishes no virtual ports (Windows Multimedia),
 //! [`MidiHardwareError::VirtualBlocksUnsupported`] for Function Blocks on macOS before 15,
 //! where an endpoint carries a name and a protocol only (from macOS 15 the endpoint is
 //! a UMP Endpoint that declares its blocks and its identity; CoreMIDI numbers the blocks
 //! itself in registration order and has no MIDI-CI version, so a block that needs either is [`MidiHardwareError::Os`] with the
 //! refusal named). On Linux the sequencer is
 //! opened as a MIDI 2.0 client when the kernel has that mode and as a MIDI 1.0
-//! client otherwise; the endpoint reports the protocol it got.
+//! client otherwise; the endpoint reports the protocol it got. On Windows MIDI Services
+//! the endpoint is a virtual device the service lists as one UMP Endpoint with the
+//! declared Function Blocks, published on a session of its own and removed when the
+//! endpoint is dropped.
 //!
 //! ## Starting
 //!
@@ -229,7 +233,7 @@
 //! |---|---|---|
 //! | macOS | CoreMIDI | `MIDIInputPortCreateWithProtocol` / `MIDISendEventList`. |
 //! | Linux | ALSA UMP sequencer | Needs alsa-lib ≥ 1.2.10. Kernel ≥ 6.5 converts UMP↔legacy at the port boundary, so it works against MIDI 1.0 hardware. |
-//! | Windows | Windows MIDI Services | UMP words end to end, each endpoint one duplex device. The service's endpoint watcher feeds the list, an output hands each packet to the service at its send time, and a PC without the service fails to open with a named error. No virtual endpoints. |
+//! | Windows | Windows MIDI Services | UMP words end to end, each endpoint one duplex device. The service's endpoint watcher feeds the list, each endpoint is described by the info, Function Blocks and protocol the service declares, and virtual endpoints are the service's virtual devices. An output is a send-only connection that hands each packet to the service at its send time; a send more than 20 s ahead is refused and counted once as a loss. A PC without the service fails to open with a named error. |
 //! | Windows (`winmm` feature) | Windows Multimedia (winmm) | MIDI 1.0 bytes, carried as MIDI 1.0 UMP and translated as a legacy ALSA port is. Polled device watch, no virtual ports. An output holds each event until its send time on a thread of its own. Replaces Windows MIDI Services, for a PC that has none. |
 //! | Elsewhere | stub | Enumerates nothing, [`MidiHardwareError::Unsupported`] on open. |
 //!
@@ -296,15 +300,11 @@ mod backend;
 #[cfg(test)]
 #[path = "../backend_choice.rs"]
 mod backend_choice;
-// Compiled everywhere so its tests run on every platform; only the native
-// backends (ALSA, CoreMIDI) convert an OS block, so it is dead where the stub,
-// winmm or Windows MIDI Services (which describes no block yet) is the backend.
+// Compiled everywhere so its tests run on every platform; only the UMP backends
+// (ALSA, CoreMIDI, Windows MIDI Services) convert an OS block, so it is dead where
+// the stub or winmm is the backend.
 #[cfg_attr(
-    any(
-        midi_backend = "none",
-        midi_backend = "winmm",
-        midi_backend = "midi_services"
-    ),
+    any(midi_backend = "none", midi_backend = "winmm"),
     allow(dead_code, reason = "only a UMP backend converts OS blocks")
 )]
 mod capability;

@@ -4,10 +4,86 @@
 //! render, resample, dither, encode) reports through it, so a caller matches one
 //! type whichever entry point it used.
 
-use crate::TargetError;
 use std::io;
 
-use tutti_buffers::ChannelLayout;
+#[cfg(doc)]
+use crate::{
+    BufferTarget, Done, EventLossPolicy, Gain, Normalize, Output, Outputs, Placement, SinkTarget,
+    Written,
+};
+#[cfg(doc)]
+use tutti_buffers::ChannelTopology;
+use tutti_buffers::{ChannelLayout, FoldError};
+
+/// Why an [`Output`] cannot be rendered ([`RenderError::Target`]).
+#[derive(thiserror::Error, Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum TargetError {
+    /// The channels (the graph's, or a tap's lanes) have no place in the
+    /// target's layout: the topology it states cannot take them.
+    #[error("the channels cannot be placed into the target's: {0}")]
+    Placement(FoldError),
+    /// The tap has a lane count other than its [`Placement`]'s width.
+    #[error("the tap carries {lanes:?} but its placement names {placement:?}")]
+    Lanes {
+        /// The tap's width.
+        lanes: ChannelLayout,
+        /// The placement's width.
+        placement: ChannelLayout,
+    },
+    /// A [`Gain::Of`] that names an output that does not measure itself.
+    #[error(
+        "the gain is to come from output {index}, which is not another output that measures itself"
+    )]
+    GainSource {
+        /// The position of the output it names.
+        index: usize,
+    },
+    /// A [`Gain::Of`] key that another [`Outputs`] made.
+    #[error("the gain is to come from a key of another Outputs")]
+    ForeignGain,
+    /// A [`Normalize::Lufs`] output whose channels name no speakers: loudness
+    /// is weighted by each speaker's placement, and a file with no stated
+    /// topology is taken to be [`ChannelTopology::default_for`] for its width, which
+    /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
+    /// ([`Encoding::channels`](tutti_codec::Encoding::channels)) that is a known bed, or normalize by
+    /// [`Normalize::Peak`].
+    #[error(
+        "a Lufs output of {channels:?} has no speaker placement to weigh loudness by: \
+         state a known topology with `topology`, or normalize by peak"
+    )]
+    UnplacedLoudness {
+        /// The output's width.
+        channels: ChannelLayout,
+    },
+    /// A [`SinkTarget`] whose sink is not as wide as the audio the output
+    /// reads. A sink takes the output's width unconverted, so it is refused, never folded.
+    #[error("the sink is {sink:?} wide and the audio it is fed {feed:?}")]
+    SinkWidth {
+        /// The sink's width.
+        sink: ChannelLayout,
+        /// The width of the audio the output reads.
+        feed: ChannelLayout,
+    },
+    /// Another output writes the same path.
+    #[error("output {other} writes the same path")]
+    SamePath {
+        /// The other output.
+        other: usize,
+    },
+}
+
+/// Why a [`Done`] has no result for a key.
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DoneError {
+    /// Another [`Outputs`] made the key.
+    #[error("the key belongs to another Outputs")]
+    Foreign,
+    /// The result was moved out by [`Done::take_file`] or [`Done::take_buffers`].
+    #[error("the result was already taken")]
+    Taken,
+}
 
 /// Anything that can go wrong rendering or writing an export.
 ///
@@ -68,7 +144,7 @@ pub enum RenderError {
     /// An error rather than a skipped or invented gain, because a normalized
     /// export that quietly writes un-normalized audio (or applies +47 dB to a
     /// hiss at the gate's floor) reports success and leaves no trace: nothing
-    /// in [`Written`](crate::Written) records that the gain the caller asked
+    /// in [`Written`] records that the gain the caller asked
     /// for was never applied, or what it was. A file export leaves the target
     /// as it was.
     #[error("Cannot normalize: {channels:?} at {sample_rate:?} is unmeasurable: {reason}")]
@@ -111,7 +187,7 @@ pub enum RenderError {
     /// The graph dropped events during the render (a port past its capacity,
     /// a full delay): the audio of a dropped note-on or note-off is wrong, and
     /// a note whose note-off was dropped may sound to the end. Raised under
-    /// [`EventLossPolicy::Fail`](crate::EventLossPolicy::Fail), the default;
+    /// [`EventLossPolicy::Fail`], the default;
     /// a file output is not put in place. The render stops at the first block
     /// that lost an event, so `count` is the executor's `lost_event_count`
     /// from when the render began (or, for a graph that had a commit
@@ -124,7 +200,7 @@ pub enum RenderError {
         count: u64,
     },
 
-    /// The render would hold its planes in memory (a [`BufferTarget`](crate::BufferTarget)) and
+    /// The render would hold its planes in memory (a [`BufferTarget`]) and
     /// the allocation for `frames` frames of `channels` channels failed or
     /// overflowed. Nothing was rendered. A file export streams and never asks
     /// for this much.
@@ -147,7 +223,7 @@ pub enum RenderError {
         why: TargetError,
     },
 
-    /// A caller's sink ([`SinkTarget`](crate::SinkTarget)) failed on a write or on closing,
+    /// A caller's sink ([`SinkTarget`]) failed on a write or on closing,
     /// and `source` is its own error, type-erased. No file of the render is put in place;
     /// what the sink already received stays with it.
     #[error("output {output}'s sink failed: {source}")]
@@ -198,7 +274,7 @@ pub enum RenderError {
     },
 
     /// A result was read from the finished render by a key it has none for
-    /// ([`DoneError`](crate::DoneError)): for a caller that reads results on its own caller's behalf.
+    /// ([`DoneError`]): for a caller that reads results on its own caller's behalf.
     #[error("Export result unavailable: {0}")]
     Key(#[from] crate::DoneError),
 
@@ -229,7 +305,7 @@ pub enum Unmeasured {
     /// The meter does not take this width or rate: EBU R128 accepts 1 to 64
     /// channels at 16 Hz to 2.8 MHz.
     Format,
-    /// [`Normalize::Lufs`](crate::Normalize::Lufs) cannot weigh the channels:
+    /// [`Normalize::Lufs`] cannot weigh the channels:
     /// loudness is weighted by each speaker's angles (BS.1770-5 Table 4),
     /// which an ambisonic set or speakers that are not a known bed do not have.
     /// A file output is refused before the render
@@ -237,12 +313,12 @@ pub enum Unmeasured {
     /// this is what [`Normalize::gain_for_wave`](crate::Normalize::gain_for_wave)
     /// reports for a topology it was given.
     Placement,
-    /// [`Normalize::Lufs`](crate::Normalize::Lufs): no part of the audio
+    /// [`Normalize::Lufs`]: no part of the audio
     /// passed the integrated loudness gate. It is silent, quieter than the
     /// absolute gate (-70 LUFS), or shorter than the 400 ms block the gate is
     /// judged in; any gain chosen from that reading would be made up.
     BelowGate,
-    /// [`Normalize::Peak`](crate::Normalize::Peak): the true peak is at the
+    /// [`Normalize::Peak`]: the true peak is at the
     /// floor ([`Db::FLOOR`](tutti_units::Db::FLOOR)), which is silence.
     Silent,
 }

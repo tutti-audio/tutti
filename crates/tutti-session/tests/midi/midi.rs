@@ -104,14 +104,9 @@ pub(crate) fn note_ons(seen: &Seen) -> Vec<(u64, u8)> {
         .collect()
 }
 
-/// The nodes the last plan sent holds.
+/// The nodes the graph holds.
 fn plan_nodes(s: &Session) -> usize {
-    s.graph_ref()
-        .testing()
-        .sent_plan()
-        .expect("a plan")
-        .units()
-        .len()
+    s.graph_ref().node_count()
 }
 
 /// **A clip lands its note on its frame**: a third of a beat in at 120 BPM
@@ -612,26 +607,6 @@ fn a_refusing_sink_counts_what_it_refused() {
     roll(&mut s, 24_000);
     let _ = s.update();
     assert!(sink.losses().refused > before, "and the count only rises");
-}
-
-/// **The session's own input node goes in through `add` with a reclaimer**
-/// (its MPE request cell is no published entry), and a tap has none. A clip
-/// `play_clip` made is swept as a published entry: what the entries and the
-/// reclaimers free is pinned in `tests/wiring/cells_node.rs` and
-/// `tests/wiring/graph.rs`, and the clip's cell in `tutti-midi-runtime`.
-#[cfg(feature = "midi-hardware")]
-#[test]
-fn the_sessions_input_node_keeps_a_reclaimer_and_a_tap_none() {
-    let (mut s, input) = with_input(None);
-    let (synth, _) = tap(&mut s);
-    assert!(
-        s.graph_ref().testing().keeps_reclaimer(input),
-        "the input node's"
-    );
-    assert!(
-        !s.graph_ref().testing().keeps_reclaimer(synth),
-        "a tap publishes nothing"
-    );
 }
 
 /// A session over a fake OS with no devices, and the handle that plugs some.

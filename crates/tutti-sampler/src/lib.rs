@@ -29,7 +29,7 @@
 //!   thread through a `VoicePoolHandle` (add, remove, re-place, respeed, stretch).
 //!   Adding or removing a voice is a queued command, not a graph edit.
 //! - `VoiceNode`: a single voice as its own node, for previews and single clips,
-//!   controlled through a `VoiceNodeHandle`.
+//!   controlled through a `VoiceNodeControls`.
 //!
 //! A voice placed on the transport (a start beat and an optional duration)
 //! derives its read position from the playhead in its block's `Env`, so it enters,
@@ -66,7 +66,8 @@
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::{Prepare, Renderer};
 //! use tutti_buffers::Interleaved;
-//! use tutti_sampler::{MemorySource, Wave};
+//! use tutti_buffers::ChannelLayout;
+//! use tutti_sampler::{MemorySource, MemorySourceConfig, Wave};
 //!
 //! // 100 stereo frames; `append` takes one frame, not one sample.
 //! let mut wave = Wave::new(2, SampleRate::SR_44K1);
@@ -75,7 +76,9 @@
 //! }
 //!
 //! // Free-running (not placed on the transport), so it plays once started.
-//! let source = MemorySource::new(Arc::new(wave)).expect("a stereo wave places");
+//! let config = MemorySourceConfig::new(Arc::new(wave), ChannelLayout::STEREO)
+//!     .expect("a stereo wave places");
+//! let source = MemorySource::from(config);
 //! source.play();
 //!
 //! // No audio input: the voice is the source. Stereo out.
@@ -133,7 +136,7 @@
 //! - [`Voice`], [`VoiceSource`], [`Playback`]: a voice of either tier and its
 //!   control state.
 //! - [`VoicePool`] with [`VoicePoolHandle`], and [`VoiceNode`] with
-//!   [`VoiceNodeHandle`]: the graph nodes that play voices, and their
+//!   [`VoiceNodeControls`]: the graph nodes that play voices, and their
 //!   control-thread handles (add, steer and remove voices; a node's handle
 //!   owns the disk stream that feeds it).
 //! - [`Clip`]: one sample placed on the timeline, resident or streamed.
@@ -185,7 +188,7 @@ pub(crate) fn nonempty(layout: tutti_buffers::ChannelLayout) -> tutti_buffers::C
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-// The resident buffer every voice constructor takes (`MemorySource::new`,
+// The resident buffer every voice constructor takes (`MemorySourceConfig::new`,
 // `Voice`'s memory tier) is a `tutti-buffers` type. Re-exported so a consumer building
 // a voice needs no direct `tutti-buffers` dependency.
 pub use tutti_buffers::Wave;
@@ -213,9 +216,9 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 // crate constructs it.
 //
 pub use voice::{
-    DirectionKind, DiskVoice, DiskVoiceControls, GainError, Loop, LoopError, LoopingKind,
-    MemorySource, MemorySourceConfig, PlayDirection, PlayError, Playback, PoolDrops, SendError,
-    SlotId, SpeedKind, StreamingAddError, Voice, VoiceNode, VoiceNodeError, VoiceNodeHandle,
+    DirectionKind, DiskVoice, DiskVoiceControls, FreeRunning, GainError, Loop, LoopError,
+    LoopingKind, MemorySource, MemorySourceConfig, PlayDirection, Playback, PoolDrops, SendError,
+    SlotId, SpeedKind, StreamingAddError, Voice, VoiceNode, VoiceNodeControls, VoiceNodeError,
     VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, WindowKind, memory_voice, voice_width,
 };
 // The async disk-streaming engine (streamer future + the `DiskStreamer` handle).

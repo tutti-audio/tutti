@@ -2,18 +2,6 @@
 
 use thiserror::Error;
 
-/// Why [`Session::open_heard_tap`](crate::Session::open_heard_tap) or
-/// [`Session::close_heard_tap`](crate::Session::close_heard_tap) refused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Error)]
-#[non_exhaustive]
-pub enum SessionHeardTapError {
-    /// The session has no engine, so nothing renders to tap (a detached
-    /// session; a plan tap, [`Taps::open_ports`](crate::Taps::open_ports), is
-    /// fed by its `render_frame`).
-    #[error("this session has no engine to tap")]
-    Detached,
-}
-
 /// Why a declaration was refused: a value declared with a wire or a target
 /// ([`Connection::gain`](crate::Connection::gain),
 /// [`Mods::range`](crate::Mods::range)). Nothing is declared. The value
@@ -105,8 +93,8 @@ pub enum InletError {
     },
 }
 
-/// Why [`Graph::set_sample_rate`](crate::Graph::set_sample_rate) refused.
-/// The graph keeps its rate.
+/// Why [`Session::set_sample_rate`](crate::Session::set_sample_rate) refused.
+/// The session keeps its rate.
 #[derive(Clone, Debug, PartialEq, Error)]
 #[non_exhaustive]
 pub enum SetRateError {

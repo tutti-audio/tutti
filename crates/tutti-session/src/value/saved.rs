@@ -234,6 +234,8 @@ impl Target for CellParam {
 impl Store for CellParam {
     type Cell = (ParamCell, DeclaredUnit);
 
+    crate::value::no_host_gesture!();
+
     fn resolve(self, params: &Params) -> Option<(Self::Cell, CellValue)> {
         let (cell, unit) = params.unit_cell(self.node, self.addr, self.owner)?;
         let base = CellValue(cell.load(Ordering::Acquire));
@@ -286,6 +288,8 @@ impl<V: Clone + PartialEq + Send + Sync + 'static> Target for SlotValue<V> {
 }
 impl<V: Clone + PartialEq + Send + Sync + 'static> Store for SlotValue<V> {
     type Cell = SlotCell<V>;
+
+    crate::value::no_host_gesture!();
 
     fn resolve(self, params: &Params) -> Option<(Self::Cell, V)> {
         let cell = params.slot::<V>(self.id)?;

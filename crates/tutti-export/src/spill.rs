@@ -12,10 +12,15 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Float, InterleavedMut};
+use tutti_buffers::{Float, InterleavedMut, Sample};
 use tutti_units::Samples;
 
-use crate::render::Replay;
+/// Audio read back in blocks: what a normalized output spilled while the graph rendered.
+pub(crate) trait Replay<F: Sample = f32> {
+    /// Fills the leading frames of `out`, returning how many frames were
+    /// written; `0` is the end.
+    fn fill(&mut self, out: InterleavedMut<'_, F>) -> crate::Result<usize>;
+}
 
 /// The most the spills of one render hold in memory before they move to
 /// files: 512 MiB, so a long bounce is never rendered twice nor held whole in

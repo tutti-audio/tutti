@@ -38,7 +38,7 @@ fn a_system_session_renders_its_graph_with_no_device() {
             .unwrap()
             .unfaded();
     }
-    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
+    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK));
     assert_eq!(tap.width(), 2);
 
     s.play().expect("room");

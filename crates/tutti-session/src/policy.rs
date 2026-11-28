@@ -84,10 +84,6 @@ impl OutputPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum OutputPolicyError {
-    /// The session has no engine (a detached one): nothing is folded to a
-    /// device, so there is nothing to route.
-    #[error("the session has no output device to route to")]
-    Detached,
     /// An output has a strip and the device has no such output.
     #[error("output {output} has a strip and the device has {device:?}")]
     StripPast {
@@ -158,7 +154,9 @@ pub(crate) type FactsCell = Arc<Mutex<Option<OutputFacts>>>;
 pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
     Cell::new(OutputPolicy::default(), move |policy| {
         let facts = facts.lock();
-        let facts = facts.as_ref().ok_or(OutputPolicyError::Detached)?;
+        let facts = facts
+            .as_ref()
+            .expect("the engine published the output facts before the session was built");
         if policy.outputs.len() > usize::from(facts.device.width().count()) {
             return Err(OutputPolicyError::StripPast {
                 output: policy.outputs.len() - 1,

@@ -11,8 +11,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
-    AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamMapping,
-    ParamUnit, ParamWriteError, ParameterInfo, PlainMap, PlainUnit, TrackInfo, effective_midi_map,
+    AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamEdit,
+    ParamMapping, ParamRole, ParamUnit, ParamWriteError, ParameterInfo, PlainMap, PlainUnit,
+    TrackInfo, effective_midi_map,
 };
 use tutti_rt::Mutex;
 use tutti_units::{
@@ -23,7 +24,7 @@ use tutti_units::{
 use super::error::{PluginParamRefusal, SetRefusal, UnitError};
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
-use super::target::{Modulatable, Target, TargetId, sealed, target_builders};
+use super::target::{Modulatable, Target, TargetId, sealed, sealed::GestureStep, target_builders};
 use crate::plugin_params::Driven;
 
 /// One parameter of the plugin hosted at a node: what `key.param(id)` returns,
@@ -89,6 +90,16 @@ impl<U> std::hash::Hash for PluginParamTarget<U> {
 }
 
 impl<U> PluginParamTarget<U> {
+    /// Tells the plugin `edit` of a gesture over the parameter, through its
+    /// handle; nothing when the plugin is gone or not read yet.
+    fn hold(self, params: &Params, edit: ParamEdit) {
+        if let Some(entry) = params.plugin(self.node)
+            && let Some(declared) = entry.param(self.id)
+        {
+            let _ = entry.handle.edit(edit, declared.role);
+        }
+    }
+
     /// Parameter `id` of the plugin at `node`, read in `U`.
     pub(crate) const fn new(node: NodeKey, id: ParamId) -> Self {
         Self {
@@ -143,6 +154,17 @@ pub struct PluginCell {
 
 impl sealed::Store for PluginParamTarget {
     type Cell = PluginCell;
+
+    fn gesture_step(self, params: &Params, step: GestureStep<&Normalized>) {
+        self.hold(
+            params,
+            match step {
+                GestureStep::Begin => ParamEdit::Begin(self.id),
+                GestureStep::Wrote(value) => ParamEdit::change(self.id, *value),
+                GestureStep::End => ParamEdit::End(self.id),
+            },
+        );
+    }
 
     fn resolve(self, params: &Params) -> Option<(PluginCell, Normalized)> {
         let entry = params.plugin(self.node)?;
@@ -307,6 +329,24 @@ macro_rules! unit_targets {
 
         impl sealed::Store for PluginParamTarget<$ty> {
             type Cell = UnitCell;
+
+            fn gesture_step(self, params: &Params, step: GestureStep<&$ty>) {
+                let edit = match step {
+                    GestureStep::Begin => ParamEdit::Begin(self.id),
+                    GestureStep::End => ParamEdit::End(self.id),
+                    GestureStep::Wrote(value) => {
+                        let position = params
+                            .plugin(self.node)
+                            .and_then(|entry| entry.conversion::<$ty>(self.id)?.ok())
+                            .and_then(|conversion| conversion.position(*value).ok());
+                        let Some(position) = position else {
+                            return;
+                        };
+                        ParamEdit::change(self.id, position)
+                    }
+                };
+                self.hold(params, edit);
+            }
 
             fn resolve(self, params: &Params) -> Option<(UnitCell, $ty)> {
                 self.resolve_unit(params)
@@ -474,6 +514,8 @@ impl Owed {
 #[derive(Debug)]
 struct Declared {
     access: ParamAccess,
+    /// What the parameter is to a host gesture.
+    role: ParamRole,
     /// How the plain value follows from the position, when the declaration
     /// says; read at each call that converts, never held by a target.
     plain_map: Option<PlainMap>,
@@ -487,6 +529,7 @@ impl Declared {
     fn of(info: &ParameterInfo, value: Normalized) -> Self {
         Self {
             access: ParamAccess::of(info),
+            role: info.gesture_role(),
             plain_map: info.plain_map(),
             measures: info.measures(),
             value: AtomicU64::new(value.get().to_bits()),
@@ -500,6 +543,7 @@ impl Declared {
 pub(crate) struct CarriedParam {
     id: ParamId,
     access: ParamAccess,
+    role: ParamRole,
     plain_map: Option<PlainMap>,
     measures: Option<ParamUnit>,
     value: Normalized,
@@ -510,6 +554,7 @@ impl CarriedParam {
         Self {
             id: info.id(),
             access: ParamAccess::of(info),
+            role: info.gesture_role(),
             plain_map: info.plain_map(),
             measures: info.measures(),
             value,
@@ -543,6 +588,7 @@ impl PluginEntry {
                     .map(|p| {
                         let declared = Declared {
                             access: p.access,
+                            role: p.role,
                             plain_map: p.plain_map,
                             measures: p.measures,
                             value: AtomicU64::new(p.value.get().to_bits()),
@@ -965,6 +1011,8 @@ impl std::fmt::Debug for MidiMapCell {
 
 impl sealed::Store for PluginMidiMapTarget {
     type Cell = MidiMapCell;
+
+    crate::value::no_host_gesture!();
 
     fn resolve(self, params: &Params) -> Option<(MidiMapCell, MidiMap)> {
         let entry = params.plugin(self.0)?;

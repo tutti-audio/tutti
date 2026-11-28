@@ -545,6 +545,13 @@ mod tests {
         ) -> Result<(), tutti_plugin_types::ParamWriteError> {
             Ok(())
         }
+        fn edit(
+            &self,
+            _edit: tutti_plugin_types::ParamEdit,
+            _role: tutti_plugin_types::ParamRole,
+        ) -> tutti_plugin_types::EditOutcome {
+            tutti_plugin_types::EditOutcome::NotDefined
+        }
         fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
             None
         }

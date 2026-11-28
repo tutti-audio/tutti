@@ -122,6 +122,8 @@ impl<U: crate::Scalar> ScalarTarget for ParamTarget<U> {
 impl<U: ParamValue> sealed::Store for ParamTarget<U> {
     type Cell = ParamCell;
 
+    crate::value::no_host_gesture!();
+
     fn resolve(self, params: &Params) -> Option<(ParamCell, U)> {
         let cell = params.cell(self.node, self.addr, self.owner)?;
         let base = U::from_cell(cell.load(Ordering::Acquire));

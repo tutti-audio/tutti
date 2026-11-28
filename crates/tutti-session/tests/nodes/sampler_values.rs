@@ -6,7 +6,8 @@
 use crate::offline::offline_48k;
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Wave};
 use tutti_graph::NodeKey;
-use tutti_sampler::{Clip, PlayError, VoiceWindow};
+use tutti_sampler::testing::free_source;
+use tutti_sampler::{Clip, Playback, VoiceNode, VoiceNodeControls, VoiceWindow};
 use tutti_session::{MainOutput, OutputPort, Replacement, Session, ValueErrorKind};
 use tutti_units::{Amplitude, Beat, SampleRate};
 
@@ -52,26 +53,25 @@ fn wire(s: &mut Session, node: NodeKey) {
     }
 }
 
-/// The graph's handle of `clip`, cloned: the cells and verbs a test reads
+/// The graph's controls of `node`, cloned: the cells and verbs a test reads
 /// beside the key's targets.
-fn handle_of(
+fn handle_of<N: tutti_session::Handled<f32, Controls = VoiceNodeControls<f32>>>(
     s: &Session,
-    clip: &tutti_session::Key<Clip<f32>>,
-) -> tutti_sampler::VoiceNodeHandle<f32> {
+    node: &tutti_session::Key<N>,
+) -> VoiceNodeControls<f32> {
     s.graph_ref()
-        .handle(clip)
-        .expect("the clip is in the graph")
+        .handle(node)
+        .expect("the node is in the graph")
         .clone()
 }
 
+/// The window cell of a placed voice's controls.
+fn window(handle: &VoiceNodeControls<f32>) -> &tutti_rt::Publisher<VoiceWindow> {
+    handle.window_cell().expect("a placed voice")
+}
+
 /// A clip of constant level placed at `at`, wired to the output.
-fn placed(
-    s: &mut Session,
-    at: Beat,
-) -> (
-    tutti_session::Key<Clip<f32>>,
-    tutti_sampler::VoiceNodeHandle<f32>,
-) {
+fn placed(s: &mut Session, at: Beat) -> (tutti_session::Key<Clip<f32>>, VoiceNodeControls<f32>) {
     let clip = Clip::new(level(0.5))
         .and_then(|c| c.channels(ChannelLayout::STEREO))
         .expect("a placeable wave")
@@ -95,7 +95,7 @@ fn placed(
 fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     let mut s = offline_48k();
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
-    let beat_one = Some(VoiceWindow::from(Beat::new(1.0)));
+    let beat_one = VoiceWindow::from(Beat::new(1.0));
 
     s.set(clip.window().to(beat_one)).unwrap();
     assert_eq!(
@@ -104,8 +104,8 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
         "the pending window"
     );
     assert_eq!(
-        *handle.window_cell().current(),
-        Some(VoiceWindow::from(Beat::new(2.0))),
+        *window(&handle).current(),
+        VoiceWindow::from(Beat::new(2.0)),
         "the node's cell holds the window in force"
     );
     s.play().expect("room");
@@ -119,7 +119,7 @@ fn a_window_set_is_pending_until_the_update_then_places_the_voice() {
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
     s.set(clip.window().to(beat_one)).unwrap();
     let _ = s.update();
-    assert_eq!(*handle.window_cell().current(), beat_one);
+    assert_eq!(*window(&handle).current(), beat_one);
     s.play().expect("room");
     assert_eq!(first_sound(&render(&mut s, 40_000)), Some(BEAT));
 }
@@ -134,12 +134,7 @@ fn ramp_value(i: usize) -> f32 {
 }
 
 /// A clip of the ramp at beat 0, wired to the output.
-fn placed_ramp(
-    s: &mut Session,
-) -> (
-    tutti_session::Key<Clip<f32>>,
-    tutti_sampler::VoiceNodeHandle<f32>,
-) {
+fn placed_ramp(s: &mut Session) -> (tutti_session::Key<Clip<f32>>, VoiceNodeControls<f32>) {
     let mut wave = Wave::new(1, SampleRate::of(RATE));
     for i in 0..RAMP_LEN {
         wave.append(Interleaved::new(&[ramp_value(i)], wave.layout()).unwrap())
@@ -160,31 +155,54 @@ fn left(s: &mut Session, frames: usize) -> Vec<f32> {
     render(s, frames).chunks(2).map(|f| f[0]).collect()
 }
 
-/// **`play` and `stop` refuse a placed voice and drive a free-running one,
-/// by its own cursor**: a placed ramp clip plays source frame `f` at frame
-/// `f` and is `Placed` for both verbs, until its window is `None` and
-/// published. Then the voice is free: `play` sounds the ramp from its frame 0
-/// (not from where the transport is: the placed to free transition), `stop`
-/// silences it, `play` resumes without rewinding, and it is silent from the
-/// ramp's end on.
+/// A free-running voice node of the ramp, wired to the output: no window, and
+/// the steering that plays it on its own cursor.
+fn free_ramp(s: &mut Session) -> (tutti_session::Key<VoiceNode<f32>>, VoiceNodeControls<f32>) {
+    let mut wave = Wave::new(1, SampleRate::of(RATE));
+    for i in 0..RAMP_LEN {
+        wave.append(Interleaved::new(&[ramp_value(i)], wave.layout()).unwrap())
+            .unwrap();
+    }
+    let node = VoiceNode::new(free_source(std::sync::Arc::new(wave)), Playback::default())
+        .expect("a finite gain");
+    let key = s.graph().add(node);
+    let handle = handle_of(s, &key);
+    wire(s, key.erase());
+    let _ = s.update();
+    (key, handle)
+}
+
+/// **A placed voice has no steering and a free-running one plays its own
+/// cursor**: a placed ramp clip plays source frame `f` at frame `f` and its
+/// controls have no steering. A free-running voice has no window to write: the
+/// write fails at the call. Its `play` sounds the ramp from its frame 0 (not
+/// from where the transport is), `stop` silences it, `play` resumes without
+/// rewinding, and it is silent from the ramp's end on.
 #[test]
-fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor() {
+fn a_placed_voice_has_no_steering_and_a_free_running_one_plays_its_own_cursor() {
     let mut s = offline_48k();
-    let (clip, handle) = placed_ramp(&mut s);
+    let (_, handle) = placed_ramp(&mut s);
     s.play().expect("room");
     let placed: Vec<f32> = left(&mut s, 1_024);
     assert!(placed.iter().enumerate().all(|(f, &x)| x == ramp_value(f)));
-    assert_eq!(handle.play(), Err(PlayError::Placed));
-    assert_eq!(handle.stop(), Err(PlayError::Placed));
+    assert!(
+        handle.steering().is_none(),
+        "a placed voice has no steering"
+    );
 
-    s.set(clip.window().to(None)).unwrap();
-    assert_eq!(handle.play(), Err(PlayError::Placed), "until the update");
-    let _ = s.update();
-    assert_eq!(handle.play(), Ok(()));
+    let mut s = offline_48k();
+    let (voice, handle) = free_ramp(&mut s);
+    let err = s
+        .set(voice.window().to(VoiceWindow::from(Beat::new(0.0))))
+        .expect_err("a free-running voice has no window");
+    assert_eq!(err.kind, ValueErrorKind::NoSuchTarget);
+    let steering = handle.steering().expect("a free-running voice");
+    s.play().expect("room");
+    steering.play();
     let mut got = left(&mut s, 512);
-    assert_eq!(handle.stop(), Ok(()));
+    steering.stop();
     got.extend(left(&mut s, 512));
-    assert_eq!(handle.play(), Ok(()));
+    steering.play();
     got.extend(left(&mut s, RAMP_LEN));
 
     for (f, &x) in got.iter().enumerate() {
@@ -204,16 +222,16 @@ fn play_on_a_placed_voice_is_refused_and_a_free_running_one_plays_its_own_cursor
 fn two_window_writes_before_an_update_publish_once_and_the_second_wins() {
     let mut s = offline_48k();
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
-    let before = handle.window_cell().seq();
-    let second = Some(VoiceWindow::from(Beat::new(3.0)));
-    s.set(clip.window().to(Some(VoiceWindow::from(Beat::new(1.0)))))
+    let before = window(&handle).seq();
+    let second = VoiceWindow::from(Beat::new(3.0));
+    s.set(clip.window().to(VoiceWindow::from(Beat::new(1.0))))
         .unwrap();
     s.set(clip.window().to(second)).unwrap();
     let _ = s.update();
-    assert_eq!(handle.window_cell().seq(), before + 1);
-    assert_eq!(*handle.window_cell().current(), second);
+    assert_eq!(window(&handle).seq(), before + 1);
+    assert_eq!(*window(&handle).current(), second);
     let _ = s.update();
-    assert_eq!(handle.window_cell().seq(), before + 1, "nothing pending");
+    assert_eq!(window(&handle).seq(), before + 1, "nothing pending");
 }
 
 /// **A window written to a node removed before the update never publishes**:
@@ -223,14 +241,17 @@ fn two_window_writes_before_an_update_publish_once_and_the_second_wins() {
 fn a_pending_window_write_to_a_removed_node_never_publishes() {
     let mut s = offline_48k();
     let (clip, handle) = placed(&mut s, Beat::new(2.0));
-    let (seq, in_force) = (handle.window_cell().seq(), handle.window_cell().current());
-    s.set(clip.window().to(None)).unwrap();
+    let (seq, in_force) = (window(&handle).seq(), window(&handle).current());
+    s.set(clip.window().to(VoiceWindow::from(Beat::new(5.0))))
+        .unwrap();
     s.remove(clip).unwrap();
     let _ = s.update();
     let _ = s.update();
-    assert_eq!(handle.window_cell().seq(), seq);
-    assert_eq!(handle.window_cell().current(), in_force);
-    let err = s.set(clip.window().to(None)).expect_err("the node is gone");
+    assert_eq!(window(&handle).seq(), seq);
+    assert_eq!(window(&handle).current(), in_force);
+    let err = s
+        .set(clip.window().to(VoiceWindow::from(Beat::new(5.0))))
+        .expect_err("the node is gone");
     assert_eq!(err.kind, ValueErrorKind::NoSuchTarget);
     assert_eq!(
         s.get(clip.window()).expect_err("gone").kind,
@@ -245,7 +266,7 @@ fn a_block_adopting_a_written_window_does_not_allocate() {
     let (clip, _) = placed(&mut s, Beat::new(2.0));
     s.play().expect("room");
     let _ = render(&mut s, 1_024);
-    s.set(clip.window().to(Some(VoiceWindow::from(Beat::new(0.0)))))
+    s.set(clip.window().to(VoiceWindow::from(Beat::new(0.0))))
         .unwrap();
     let _ = s.update();
     let mut buf = vec![0.0f32; 512 * 2];
@@ -268,10 +289,10 @@ fn ramp(i: usize) -> f32 {
 
 /// A clip of the ramp at beat 0 in `tier`, wired to the output, with the
 /// session rolling and, for the streamed tier, the streamer that feeds it.
-struct Rig {
+struct Rig<N = Clip<f32>> {
     s: Session,
-    clip: tutti_session::Key<Clip<f32>>,
-    handle: tutti_sampler::VoiceNodeHandle<f32>,
+    clip: tutti_session::Key<N>,
+    handle: VoiceNodeControls<f32>,
     streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Manual<f32>, f32>>,
     /// Frames rendered so far: the frame the next render starts at.
     at: usize,
@@ -282,7 +303,7 @@ impl Rig {
     fn new(streamed: bool) -> Self {
         let dir = tempfile::tempdir().expect("a temp dir");
         let samples: Vec<f32> = (0..LEN).map(ramp).collect();
-        let mut s = offline_48k();
+        let s = offline_48k();
         let (clip, streamer) = if streamed {
             let path = dir.path().join("ramp.wav");
             tutti_fixtures::signal::write_wav_f32(&path, SampleRate::of(RATE), 1, &samples);
@@ -301,7 +322,34 @@ impl Rig {
             }
             (Clip::new(wave).expect("a placeable wave"), None)
         };
-        let clip = s.graph().add(clip.at(Beat::new(0.0)));
+        Rig::over(s, clip.at(Beat::new(0.0)), streamer, dir)
+    }
+}
+
+impl Rig<VoiceNode<f32>> {
+    /// A free-running voice node of the ramp, in place of a clip.
+    fn free() -> Self {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let mut wave = Wave::new(1, SampleRate::of(RATE));
+        for i in 0..LEN {
+            wave.append(Interleaved::new(&[ramp(i)], wave.layout()).unwrap())
+                .unwrap();
+        }
+        let node = VoiceNode::new(free_source(std::sync::Arc::new(wave)), Playback::default())
+            .expect("a finite gain");
+        Rig::over(offline_48k(), node, None, dir)
+    }
+}
+
+impl<N: tutti_session::Handled<f32, Controls = VoiceNodeControls<f32>>> Rig<N> {
+    /// `node` in `s`, wired to the output, with the session rolling.
+    fn over(
+        mut s: Session,
+        node: N,
+        streamer: Option<tutti_sampler::DiskStreamer<tutti_sampler::Manual<f32>, f32>>,
+        dir: tempfile::TempDir,
+    ) -> Self {
+        let clip = s.graph().add(node);
         let handle = handle_of(&s, &clip);
         for port in 0..2 {
             s.graph()
@@ -709,10 +757,8 @@ fn a_direction_reversed_then_forward_mid_play_lands_on_a_streamed_voice() {
 #[test]
 fn a_direction_turned_mid_play_on_a_free_running_voice_jumps_to_the_mirrored_frame() {
     use tutti_sampler::PlayDirection;
-    let mut rig = Rig::new(false);
-    rig.s.set(rig.clip.window().to(None)).unwrap();
-    let _ = rig.s.update();
-    rig.handle.play().expect("a free-running voice");
+    let mut rig = Rig::free();
+    rig.handle.steering().expect("a free-running voice").play();
     let forward = rig.render(1_024);
     assert_source(&forward, 0, 0, |f| f);
     rig.s
@@ -872,11 +918,9 @@ fn a_speed_set_mid_play_reads_a_streamed_placed_voice_at_twice_the_position() {
 #[test]
 fn a_speed_set_mid_play_continues_a_free_running_voice_from_its_cursor() {
     let mut s = offline_48k();
-    let (clip, handle) = placed_ramp(&mut s);
-    s.set(clip.window().to(None)).unwrap();
-    let _ = s.update();
+    let (clip, handle) = free_ramp(&mut s);
     s.play().expect("room");
-    assert_eq!(handle.play(), Ok(()));
+    handle.steering().expect("a free-running voice").play();
     let mut got = left(&mut s, 512);
     s.set(clip.speed().to(rate(2.0))).unwrap();
     let _ = s.update();

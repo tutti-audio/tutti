@@ -72,7 +72,8 @@ jobs:
             -p tutti-au-ffi -p tutti-au-host \
             -p tutti-plugin-server \
             -p tutti-ump -p tutti-midi-protocol -p tutti-midi-ci -p tutti-midi-device \
-            -p tutti-midi-file -p tutti-midi-runtime -p tutti-voicing || echo "some tests failed; the dashboard shows them"
+            -p tutti-midi-file -p tutti-midi-runtime -p tutti-voicing \
+            -p tutti-winmidi2-ffi || echo "some tests failed; the dashboard shows them"
       - name: Name the file by OS
         shell: bash
         run: |

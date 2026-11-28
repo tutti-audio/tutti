@@ -34,10 +34,10 @@ pub enum Tier {
     /// A file whose header gives no length counts as past any threshold, so
     /// when it can be streamed it is.
     ///
-    /// The choice is the file's alone: it does not ask whether the session has
-    /// a disk streamer, so a streamed reading in a session built without one
-    /// fails at [`open_stream`](Session::open_stream) with
-    /// [`SamplerError::NoStreamer`](crate::SamplerError::NoStreamer), the call
+    /// The choice is the file's alone: it does not ask whether the target
+    /// starts threads, so a streamed reading where it starts none fails at
+    /// [`open_stream`](Session::open_stream) with
+    /// [`SamplerError::NeedsThreads`](crate::SamplerError::NeedsThreads), the call
     /// that needs the streamer.
     Auto {
         /// The decoded size, in bytes, past which the file streams.

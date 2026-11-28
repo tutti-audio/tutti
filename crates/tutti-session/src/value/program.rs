@@ -365,6 +365,8 @@ impl<U: crate::Scalar> Target for AutomationTarget<U> {
 impl<U: crate::Scalar> sealed::Store for AutomationTarget<U> {
     type Cell = SlotCell<Arc<Trajectory<U>>>;
 
+    crate::value::no_host_gesture!();
+
     fn resolve(self, params: &Params) -> Option<(Self::Cell, Self::Value)> {
         let cell = params.slot::<Arc<Trajectory<U>>>(SlotId::Automation(self.key))?;
         let base = cell.load();

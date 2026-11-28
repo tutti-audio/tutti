@@ -12,6 +12,7 @@ mod frame_exact_entry;
 mod gain;
 mod handle_slot_race;
 mod loops_and_handles;
+mod node_config;
 mod reverse_and_loop;
 mod rt_no_alloc;
 mod stretched_onset;

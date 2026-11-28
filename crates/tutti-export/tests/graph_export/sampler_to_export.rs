@@ -59,7 +59,7 @@ use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
+use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
@@ -110,8 +110,11 @@ fn voice_graph(stretch: f64, cents: f64) -> (RenderGraph, Arc<OfflineTimeline>) 
     // and read as an attenuation bug rather than an exhausted source.
     let wave = tone((SR * DUR_S) as usize * 4);
 
-    let source =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let source = MemorySource::from(
+        MemorySourceConfig::new(wave, ChannelLayout::STEREO)
+            .expect("a placeable wave")
+            .window(VoiceWindow::from(Beat::new(0.0))),
+    );
 
     let play = Playback {
         stretch: StretchFactor::new(stretch),

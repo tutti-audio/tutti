@@ -18,8 +18,8 @@ use std::sync::Arc;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
-use tutti_sampler::testing::MockTransport;
-use tutti_sampler::{MemorySource, Playback, SlotId, VoiceNode, VoicePool, VoiceWindow};
+use tutti_sampler::testing::{MockTransport, placed_source};
+use tutti_sampler::{Playback, SlotId, VoiceNode, VoicePool, VoiceWindow};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, Seconds, StretchFactor};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -35,8 +35,7 @@ fn stretch(c: &mut Criterion) {
         wave.set(0, i, s);
         wave.set(1, i, s);
     }
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
     let play = Playback {
         stretch: StretchFactor::new(1.5),
         pitch: Cents::new(200.0),
@@ -88,8 +87,7 @@ fn reseat_case(c: &mut Criterion, name: &str, voices: u128, block: usize) {
     let (pool, handle) = VoicePool::<f32>::new().with_handle();
     let mut direct = Direct::new(pool, RATE, block);
     for id in 0..voices {
-        let source = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
         let play = Playback {
             stretch: StretchFactor::new(1.5),
             pitch: Cents::new(200.0),

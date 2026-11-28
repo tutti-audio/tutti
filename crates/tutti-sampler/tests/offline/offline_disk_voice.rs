@@ -15,7 +15,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::loop_frames;
+use tutti_sampler::testing::{loop_frames, placed_source};
 
 use std::cell::Cell;
 use std::path::Path;
@@ -800,9 +800,7 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
                 .unwrap();
         }
         let clock = clock_at(SR);
-        let mut source =
-            tutti_sampler::MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
-                .expect("a placeable wave");
+        let mut source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)));
         source.set_speed(tutti_units::PlaybackRate::of(case.speed));
         source.set_loop(case.loop_);
         let mut memory: Box<dyn Node> = if case.reverse {

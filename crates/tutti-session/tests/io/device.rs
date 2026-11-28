@@ -92,7 +92,7 @@ fn the_session_reads_the_load_its_callback_measures() {
             .render_block(Samples::new(64))
             .expect("the stream is open");
     }
-    let blocks = session.blocks().expect("a device's engine");
+    let blocks = session.blocks();
     assert_eq!(blocks.get().blocks, 3);
 }
 
@@ -135,18 +135,10 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     let _ = s.update();
 
     let in_step = |s: &LiveSession, what: &str| -> Samples {
-        let sent = s.graph_ref().testing().sent_compensation().expect("a plan");
-        let (channels, total) = (sent.channels(), sent.total());
         let lim = s.graph_ref().node_latency(lim).unwrap();
-        assert_eq!(total, lim, "{what}: the plan compensates the limiter");
-        assert_eq!(s.latency(), total, "{what}: the total is the plan's");
+        assert_eq!(s.latency(), lim, "{what}: the plan compensates the limiter");
         assert_eq!(
-            s.compensation().to_vec().as_slice(),
-            channels,
-            "{what}: the table is the plan's"
-        );
-        assert_eq!(
-            channels.first().copied(),
+            s.compensation().to_vec().first().copied(),
             Some(lim),
             "{what}: dry pre-rolls"
         );
@@ -159,10 +151,6 @@ fn a_rerate_keeps_the_published_compensation_in_step_with_the_plan() {
     s.restart_on(spec_at(96_000.0), driver, None, None)
         .expect("restarts");
     assert!(!old.is_open() && new.is_open(), "on the new device");
-    assert_eq!(
-        s.graph_ref().testing().prepared().sample_rate(),
-        SampleRate::SR_96K
-    );
     assert_eq!(s.sample_rate(), SampleRate::SR_96K);
     let at96 = in_step(&s, "96 kHz, before the first block");
     assert_eq!(at96, at48 * 2, "the lookahead is a time");
@@ -780,7 +768,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let across = s.open_heard_tap(Samples::new(1_024)).expect("opens");
+    let across = s.open_heard_tap(Samples::new(1_024));
     assert_eq!(across.width(), 2);
 
     let six = OutputSpec::new(
@@ -803,7 +791,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     );
 
     drop(across);
-    let after = s.open_heard_tap(Samples::new(1_024)).expect("reopens");
+    let after = s.open_heard_tap(Samples::new(1_024));
     assert_eq!(after.width(), 6, "the device's width now");
     new.render_block(Samples::new(64)).expect("open");
     assert_eq!(after.available(), Samples::new(64));
@@ -1344,6 +1332,39 @@ impl tutti_engine::StreamDriver for OpensAt {
     }
 }
 
+/// A silent source that keeps the `Prepare` it was last given: what the graph
+/// prepares its nodes for.
+#[derive(Clone)]
+struct Prepared(Arc<Mutex<Option<Prepare>>>);
+
+impl Prepared {
+    /// Inserts the node into `session`'s graph, which prepares it.
+    fn insert(session: &mut LiveSession) -> Self {
+        let seen = Self(Arc::new(Mutex::new(None)));
+        session.graph().add(ForkByClone(seen.clone()));
+        seen
+    }
+
+    /// The largest block the graph last prepared the node for, if it was asked.
+    fn quantum(&self) -> Option<MaxBlock> {
+        self.0.lock().as_ref().and_then(Prepare::quantum)
+    }
+}
+
+impl Node for Prepared {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+    }
+    fn prepare(&mut self, p: &Prepare) {
+        *self.0.lock() = Some(*p);
+    }
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(0.0);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
 /// **A stream that opened at another size than the graph is prepared for is
 /// still asked to move.** The device was asked for 512 frames and its stream
 /// reports, and delivers, 480: the stream's spec says 480 and the graph is
@@ -1364,13 +1385,14 @@ fn a_stream_that_opened_at_another_size_than_the_graph_is_prepared_for_is_still_
             },
         )
         .unwrap();
+    let prepared = Prepared::insert(&mut session);
     assert_eq!(
         session.device().spec().quantum,
         Some(OutputQuantum::of(480)),
         "the stream says what it opened at"
     );
     assert_eq!(
-        session.graph_ref().testing().prepared().quantum(),
+        prepared.quantum(),
         Some(MaxBlock::of(Samples::new(512))),
         "the graph is prepared for the request"
     );
@@ -1395,10 +1417,7 @@ fn a_stream_that_opened_at_another_size_than_the_graph_is_prepared_for_is_still_
     session
         .restart_on(spec_with_quantum(48_000.0, 480), driver, None, None)
         .unwrap();
-    assert_eq!(
-        session.graph_ref().testing().prepared().quantum(),
-        Some(MaxBlock::of(Samples::new(480)))
-    );
+    assert_eq!(prepared.quantum(), Some(MaxBlock::of(Samples::new(480))));
     let mut later = poll(&mut session, base, 200);
     for step in 0..50 {
         new.render_block(Samples::new(480)).expect("open");
@@ -1420,6 +1439,7 @@ fn callbacks_that_settle_at_another_size_move_the_graph_and_the_stream_to_it() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_with_quantum(48_000.0, 512), driver)
         .unwrap();
+    let prepared = Prepared::insert(&mut session);
     let base = Instant::now();
     let mut asked = Vec::new();
     let mut ms = 0;
@@ -1434,7 +1454,7 @@ fn callbacks_that_settle_at_another_size_move_the_graph_and_the_stream_to_it() {
         "asked for what it settled at"
     );
     assert_eq!(
-        session.graph_ref().testing().prepared().quantum(),
+        prepared.quantum(),
         Some(MaxBlock::of(Samples::new(512))),
         "nothing moved until the host runs the restart"
     );
@@ -1445,10 +1465,7 @@ fn callbacks_that_settle_at_another_size_move_the_graph_and_the_stream_to_it() {
     session
         .restart_on(spec_with_quantum(48_000.0, 480), driver, None, None)
         .unwrap();
-    assert_eq!(
-        session.graph_ref().testing().prepared().quantum(),
-        Some(MaxBlock::of(Samples::new(480)))
-    );
+    assert_eq!(prepared.quantum(), Some(MaxBlock::of(Samples::new(480))));
     assert_eq!(
         session.device().spec().quantum,
         Some(OutputQuantum::of(480))

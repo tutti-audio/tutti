@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
 
-use super::memory_source::{MemorySource, VoiceWindow};
+use super::memory_source::{MemorySource, MemorySourceConfig, VoiceWindow};
 use super::types::{Playback, Voice, VoiceSource};
 use crate::SamplerFloat;
 use crate::{PlaceError, Wave};
@@ -35,7 +35,8 @@ pub fn memory_voice<F: SamplerFloat>(
     play: Playback,
     window: VoiceWindow,
 ) -> Result<Voice<F>, PlaceError> {
-    let source = MemorySource::with_channels(wave, width)?.placed_at(window);
+    let config = MemorySourceConfig::new(wave, width)?.window(window);
+    let source = MemorySource::from(config);
     Ok(Voice {
         source: VoiceSource::Memory(source),
         play,

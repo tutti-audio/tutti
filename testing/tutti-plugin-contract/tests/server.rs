@@ -254,6 +254,107 @@ fn a_served_gesture_arrives_in_order<F: Format>(path: PathBuf) {
     );
 }
 
+/// **A host gesture crosses the wire and reaches the plugin in the server as it
+/// reaches one in process**: begin, the latest value, end on a helper parameter,
+/// nothing for an automatable one, and `NotDefined` at the call for it.
+fn a_served_host_gesture_reaches_the_plugin_in_order<F: Format>(path: PathBuf) {
+    use tutti_plugin_types::{AnyThread, EditOutcome, ParamRole};
+    let (mut a, _heard) = served::<F>(path);
+    let helper = spec::HELPER_ID;
+    let level = Param::Level.id();
+    let c = a.controller();
+    assert_eq!(
+        AnyThread::edit(c, ParamEdit::Begin(level), ParamRole::Other),
+        EditOutcome::NotDefined,
+        "{}: an automatable parameter has no host gesture, said at the call",
+        F::NAME
+    );
+    for edit in [
+        ParamEdit::Begin(helper),
+        ParamEdit::change(helper, Normalized::of(0.25)),
+        ParamEdit::change(helper, Normalized::of(0.75)),
+        ParamEdit::End(helper),
+    ] {
+        assert_eq!(
+            AnyThread::edit(c, edit, ParamRole::Helper),
+            EditOutcome::Queued
+        );
+    }
+    // The control connection is one ordered stream: the server has posted the
+    // steps before it answers the save, and drains them on its main loop.
+    let guard = HangGuard::new();
+    let seen: Vec<_> = loop {
+        guard.check("the host gesture never reached the plugin");
+        let t = tutti_plugin_contract::transcript::<F, _>(a.controller_mut());
+        let seen: Vec<_> = t
+            .events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    tutti_plugin_contract::Kind::HostBegin
+                        | tutti_plugin_contract::Kind::HostValue
+                        | tutti_plugin_contract::Kind::HostEnd
+                )
+            })
+            .map(|e| (e.kind, e.id, e.value))
+            .collect();
+        if seen
+            .last()
+            .is_some_and(|&(kind, ..)| kind == tutti_plugin_contract::Kind::HostEnd)
+        {
+            break seen;
+        }
+        a.silent(BLOCK);
+    };
+    // The server drains between the steps it has received, so the values it
+    // heard are some of those sent, the last of them the final one; the begin
+    // is first and the end last.
+    let id = helper.get();
+    let (begin, rest) = seen.split_first().expect("a begin");
+    let (end, values) = rest.split_last().expect("an end");
+    assert_eq!(*begin, (tutti_plugin_contract::Kind::HostBegin, id, 0.0));
+    assert_eq!(*end, (tutti_plugin_contract::Kind::HostEnd, id, 0.0));
+    assert!(
+        values
+            .iter()
+            .all(|&(kind, i, _)| kind == tutti_plugin_contract::Kind::HostValue && i == id),
+        "{}: only the helper's values between the ends: {seen:?}",
+        F::NAME
+    );
+    assert_eq!(
+        values.last().map(|v| v.2),
+        Some(0.75),
+        "{}: the last value sent is the last heard",
+        F::NAME
+    );
+}
+
+#[test]
+fn vst3_host_gesture_reaches_the_served_plugin_in_order() {
+    a_served_host_gesture_reaches_the_plugin_in_order::<Vst3>(bundle_of(&vst3_module()));
+}
+
+#[test]
+fn vst3_cpp_host_gesture_reaches_the_served_plugin_in_order() {
+    a_served_host_gesture_reaches_the_plugin_in_order::<Vst3Cpp>(bundle_of(&vst3_cpp_module()));
+}
+
+#[test]
+fn clap_host_gesture_is_not_defined_for_a_served_plugin() {
+    use tutti_plugin_types::{AnyThread, EditOutcome, ParamRole};
+    let (a, _heard) = served::<Clap>(clap_path());
+    assert_eq!(
+        AnyThread::edit(
+            a.controller(),
+            ParamEdit::Begin(Param::Level.id()),
+            ParamRole::Other
+        ),
+        EditOutcome::NotDefined,
+        "CLAP defines no host gesture (ext/params.h, scenario II)"
+    );
+}
+
 /// **What a plugin says while it takes parameters outside a block crosses the
 /// wire as what it says in a block**: CLAP's plugin raises its gesture from
 /// `params.flush` too, and no block runs here. A write and a read of the plugin

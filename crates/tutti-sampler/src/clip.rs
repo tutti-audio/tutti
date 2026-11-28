@@ -11,8 +11,8 @@ use tutti_units::{Amplitude, Beat, PlaybackRate};
 
 use crate::streamer::{StreamHandle, StreamReader};
 use crate::{
-    DiskVoice, GainError, Loop, MemorySource, PlaceError, Playback, VoiceNode, VoiceNodeHandle,
-    VoiceWindow, voice_width,
+    DiskVoice, GainError, Loop, MemorySource, MemorySourceConfig, PlaceError, Playback, VoiceNode,
+    VoiceNodeControls, VoiceWindow, voice_width,
 };
 
 /// A sample placed on the timeline: where it starts, how loud, and whether it
@@ -46,7 +46,7 @@ use crate::{
 /// another. A streamed clip's is its stream's, which its open chose.
 ///
 /// A clip is a [`VoiceNode`]'s: its controls are the node's
-/// [`VoiceNodeHandle`], which also owns a streamed clip's stream, so the clip
+/// [`VoiceNodeControls`], which also owns a streamed clip's stream, so the clip
 /// sounds for as long as the node is in its graph.
 ///
 /// `Clip` is a thin builder over [`VoiceNode`], which stays the doorway for
@@ -65,10 +65,7 @@ pub struct Clip<F: SamplerFloat> {
 #[derive(Debug)]
 enum Tier<F: SamplerFloat> {
     /// The decoded wave, placed.
-    Resident {
-        wave: Arc<Wave<F>>,
-        source: Box<MemorySource<F>>,
-    },
+    Resident { config: Box<MemorySourceConfig<F>> },
     /// A stream and the reader the streamer feeds.
     Streamed {
         reader: Box<StreamReader<F>>,
@@ -109,11 +106,10 @@ impl<F: SamplerFloat> Clip<F> {
     /// LFE, a wide or high speaker): refused here, never played with a
     /// channel in the wrong place.
     pub fn new(wave: impl Into<Arc<Wave<F>>>) -> Result<Self, PlaceError> {
-        let wave = wave.into();
+        let wave: Arc<Wave<F>> = wave.into();
         let width = voice_width(ChannelLayout::clamped(wave.channels()))?;
         Ok(Self::over(Tier::Resident {
-            source: Box::new(MemorySource::with_channels(Arc::clone(&wave), width)?),
-            wave,
+            config: Box::new(MemorySourceConfig::new(wave, width)?),
         }))
     }
 
@@ -144,17 +140,16 @@ impl<F: SamplerFloat> Clip<F> {
     /// speaker names), or [`PlaceError::Streamed`] for a streamed clip, whose
     /// width is its stream's (`DiskStreamer::open_stream_into` chooses it).
     pub fn channels(mut self, channels: impl Into<ChannelLayout>) -> Result<Self, PlaceError> {
-        let Tier::Resident { wave, source } = &mut self.tier else {
+        let Tier::Resident { config } = &mut self.tier else {
             return Err(PlaceError::Streamed);
         };
-        **source = MemorySource::with_channels(Arc::clone(wave), channels)?;
+        **config = MemorySourceConfig::new(config.wave.clone(), channels)?;
         Ok(self)
     }
 
-    /// Starts the clip at `start` on the timeline. A clip's node is placed
-    /// from the start; its window can be published away
-    /// ([`VoiceNodeHandle::window_cell`]), which frees it to run on its own
-    /// cursor, forwards or backwards as built, unstretched.
+    /// Starts the clip at `start` on the timeline. A clip's node is placed for
+    /// its life; its window can be moved
+    /// ([`VoiceNodeControls::window_cell`]), never taken away.
     pub fn at(mut self, start: Beat) -> Self {
         self.window.start = start;
         self
@@ -199,13 +194,13 @@ impl<F: SamplerFloat> Clip<F> {
             ..Playback::default()
         };
         match tier {
-            Tier::Resident { mut source, .. } => {
-                source.set_window(window);
-                source.store_gain(gain);
-                source.set_speed(speed);
-                source.set_loop(loop_);
-                let width = source.channels();
-                VoiceNode::with_channels(*source, play, width)
+            Tier::Resident { config } => {
+                let width = config.channels;
+                let mut config = config.gain(gain).speed(speed).window(window);
+                if let Some(looped) = loop_ {
+                    config = config.looped(looped);
+                }
+                VoiceNode::with_channels(MemorySource::from(config), play, width)
             }
             Tier::Streamed { reader, stream } => {
                 VoiceNode::streaming(DiskVoice::from_reader(*reader, window), stream, play)
@@ -231,9 +226,9 @@ impl<F: SamplerFloat, K: PublishedKind> HasPublished<K> for Clip<F> where
 }
 
 impl<F: SamplerFloat> IntoNode<F> for Clip<F> {
-    type Controls = VoiceNodeHandle<F>;
+    type Controls = VoiceNodeControls<F>;
 
-    fn into_parts(self) -> NodeParts<VoiceNodeHandle<F>, F> {
+    fn into_parts(self) -> NodeParts<VoiceNodeControls<F>, F> {
         self.into_node().into_parts()
     }
 }
