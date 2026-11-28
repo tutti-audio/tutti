@@ -28,7 +28,7 @@
 //! scratch was sized from `Prepare::max_block`.
 
 use tutti_graph::testing::WireDeclared;
-use tutti_sampler::testing::placed_source;
+use tutti_sampler::testing::placed_config;
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Planes, PlanesMut};
@@ -45,7 +45,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Editor, Env, Io, Node, Prepare, Shape, Status, TransportChanges, contract};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::FrameClock;
-use tutti_sampler::{SlotId, VoicePool};
+use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{
     MotionCommand, OfflineTimeline, OfflineTimelineConfig, Transport, render_graph,
@@ -74,11 +74,11 @@ fn pool(start: Beat) -> VoicePool<f32> {
         wave.append(Interleaved::new(&[0.5], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = placed_source(Arc::new(wave), VoiceWindow::from(start));
-    let mut pool = VoicePool::new();
-    pool.insert(SlotId(1), source, Default::default())
-        .expect("a finite gain and a nonempty width");
-    pool
+    let voice = VoiceNodeConfig::placed(placed_config(Arc::new(wave), VoiceWindow::from(start)))
+        .expect("a finite gain");
+    let config =
+        VoicePoolConfig::new(ChannelLayout::STEREO).expect("stereo is a width a pool runs");
+    VoicePool::from(config.row(SlotId(1), voice).expect("one row in a free key"))
 }
 
 /// A node that records the beat its block's `Env` gives the frame the clip

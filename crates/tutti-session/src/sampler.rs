@@ -136,9 +136,8 @@ pub type OpeningStream<F> = Unblocked<OpenStream<F>, OpenedStream<F>, LoadError>
 /// back with [`Session::apply`](crate::Session::apply): the stream's control
 /// side and the reader its voice is built from, in the session's float. The
 /// reader is the voice's (`DiskVoice::from_reader`); the stream is the control
-/// side, which a streamed `VoiceNodeConfig` or a pool's `add_streaming` takes, so
-/// the voice sounds for as long as the node or the pool slot lives. Dropping
-/// the stream ends it.
+/// side, which a streamed `VoiceNodeConfig` takes, so the voice sounds for as long as
+/// the node or the pool row lives. Dropping the stream ends it.
 ///
 /// A session applies only what was read in its own float; the other is a type
 /// error:

@@ -30,14 +30,15 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::Wave;
+use tutti_buffers::{ChannelLayout, Wave};
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, Manual, MemorySource, Playback, SlotId,
-    StepOutcome, StreamHandle, StreamStart, VoiceNode, VoicePool, VoicePoolHandle,
+    StepOutcome, StreamHandle, StreamStart, VoiceDrive, VoiceNode, VoiceNodeConfig, VoicePool,
+    VoicePoolConfig,
 };
-use tutti_units::{Beat, Bpm, Cents, PlaybackRate, SampleRate, StretchFactor};
+use tutti_units::{Amplitude, Beat, Bpm, Cents, PlaybackRate, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -108,41 +109,45 @@ fn tone(freq: f64, frames: usize) -> Arc<Wave> {
 
 /// A pool with `n` voices resident, each on its own slot and pitch.
 fn pool_with(n: usize, stretch: f64, cents: f64) -> Rig {
-    let (pool, handle) = VoicePool::new().with_handle();
     // Generous length: at a slow stretch the source is consumed much faster
     // than it is emitted, and a short wave would run dry mid-measurement and
     // quietly turn the benchmark into one of silence.
     let wave = tone(440.0, 48_000 * 4);
 
+    let mut config = pool_config();
     for i in 0..n {
-        let source = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
-        handle
-            .add(
-                SlotId(i as u128 + 1),
-                source,
-                Playback {
-                    stretch: StretchFactor::new(stretch),
-                    // Every voice gets the SAME pitch, deliberately.
-                    // `Cents(0)` is a resampler *bypass*: detuning each
-                    // voice by `i` cents would put voice 0 on the fast
-                    // path and voices 1..n on the pitch-shifting one, and
-                    // `voices/plain` would price the shifter (1.37 µs for
-                    // one voice, 144 µs for eight). `voices/pitch` is
-                    // where the shifter is priced.
-                    pitch: Cents::new(cents),
-                    ..Default::default()
-                },
-            )
-            .expect("the command queue has room");
+        let voice = VoiceNodeConfig::placed(placed_config(
+            Arc::clone(&wave),
+            VoiceWindow::from(Beat::new(0.0)),
+        ))
+        .expect("a finite gain")
+        .stretch(StretchFactor::new(stretch))
+        // Every voice gets the SAME pitch, deliberately.
+        // `Cents(0)` is a resampler *bypass*: detuning each
+        // voice by `i` cents would put voice 0 on the fast
+        // path and voices 1..n on the pitch-shifting one, and
+        // `voices/plain` would price the shifter (1.37 µs for
+        // one voice, 144 µs for eight). `voices/pitch` is
+        // where the shifter is priced.
+        .pitch(Cents::new(cents));
+        config = config
+            .row(SlotId(i as u128 + 1), voice)
+            .expect("a free key within the voices");
     }
+    let pool = VoicePool::from(config);
 
-    // Apply the queued commands and let any analysis window settle before the
+    // Install the voices (the first block) and let any analysis window settle before the
     // measurement starts.
     let mut rig = Rig::new(pool);
     for _ in 0..64 {
         rig.block();
     }
     rig
+}
+
+/// A pool config over a stereo output, with no rows.
+fn pool_config() -> VoicePoolConfig<f32> {
+    VoicePoolConfig::new(ChannelLayout::STEREO).expect("stereo is a width a pool runs")
 }
 
 fn drive(rig: &mut Rig) {
@@ -223,15 +228,19 @@ enum Tier {
 /// prefilled whole), so the measurement never waits on, or steps, a streamer.
 struct Pool64 {
     rig: Rig,
-    /// Keeps the disk tier's streamer and the handle that owns its streams (and
-    /// so their rings) alive.
-    _streamer: Option<(DiskStreamer<Manual<f32>, f32>, VoicePoolHandle<f32>)>,
+    /// Keeps the disk tier's streamer alive; the pool's rows own the streams (and
+    /// so their rings).
+    _streamer: Option<DiskStreamer<Manual<f32>, f32>>,
     _dir: tempfile::TempDir,
 }
 
 /// A voice the pool bench adds: a memory source, or a disk voice with its stream.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a bench builds each once, on the control side, and reads the variant in place"
+)]
 enum Built {
-    Memory(MemorySource<f32>),
+    Memory(Arc<Wave>),
     Disk(DiskVoice<f32>, StreamHandle<f32>),
 }
 
@@ -274,6 +283,17 @@ fn looped() -> Option<Loop> {
     Some(loop_frames(12_000, 60_000, 256))
 }
 
+/// `voice` looping over `looped`, when it has a loop.
+fn with_loop<D: VoiceDrive>(
+    voice: VoiceNodeConfig<f32, D>,
+    looped: Option<Loop>,
+) -> VoiceNodeConfig<f32, D> {
+    match looped {
+        Some(looped) => voice.looped(looped),
+        None => voice,
+    }
+}
+
 /// [`pool64`] driven in `block`-frame blocks (the pool prepared for them).
 fn pool_blocks(tier: Tier, n: usize, speed: f64, stretch: f64, block: usize) -> Pool64 {
     pool_knobs(tier, n, speed, stretch, block, Knobs::default())
@@ -291,7 +311,6 @@ fn pool_knobs(
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("tone.wav");
     let frames = (SR * FILE_SECS) as usize;
-    let (pool, handle) = VoicePool::new().with_handle();
     let mut streamer = None;
     let sources: Vec<Built> = match tier {
         Tier::Memory => {
@@ -301,14 +320,7 @@ fn pool_knobs(
                     .unwrap();
             }
             let wave = Arc::new(wave);
-            (0..n)
-                .map(|_| {
-                    Built::Memory(placed_source(
-                        Arc::clone(&wave),
-                        VoiceWindow::from(knobs.start),
-                    ))
-                })
-                .collect()
+            (0..n).map(|_| Built::Memory(Arc::clone(&wave))).collect()
         }
         Tier::Disk => {
             let spec = hound::WavSpec {
@@ -350,29 +362,42 @@ fn pool_knobs(
             voices
         }
     };
+    let mut config = pool_config();
     for (i, built) in sources.into_iter().enumerate() {
         let id = SlotId(i as u128 + 1);
-        let play = Playback {
-            speed: PlaybackRate::of(speed),
-            stretch: StretchFactor::new(stretch),
-            loop_: knobs.loop_,
-            ..Default::default()
-        };
-        // The handle builds the stretch vocoder, on this (control) thread, as it
-        // does for a real host.
-        match built {
-            Built::Memory(source) => handle
-                .add(id, source, play)
-                .expect("the command queue has room"),
-            Built::Disk(voice, stream) => handle
-                .add_streaming(id, voice, stream, play)
-                .expect("the command queue has room"),
+        let speed = PlaybackRate::of(speed);
+        let stretch = StretchFactor::new(stretch);
+        // The table's rows are built on this (control) thread, as a real host's
+        // are: the stretch vocoder is built here, and sent to the pool.
+        config = match built {
+            Built::Memory(wave) => {
+                let voice =
+                    VoiceNodeConfig::placed(placed_config(wave, VoiceWindow::from(knobs.start)))
+                        .expect("a finite gain")
+                        .speed(speed)
+                        .stretch(stretch);
+                config.row(id, with_loop(voice, knobs.loop_))
+            }
+            Built::Disk(voice, stream) => {
+                let voice = VoiceNodeConfig::streaming(
+                    voice,
+                    stream,
+                    Amplitude::new(1.0),
+                    stretch,
+                    Cents::new(0.0),
+                )
+                .expect("a finite gain and a nonempty width")
+                .speed(speed);
+                config.row(id, with_loop(voice, knobs.loop_))
+            }
         }
+        .expect("a free key within the voices");
     }
+    let pool = VoicePool::from(config);
     // The rig prepares the pool, which re-rates every voice it holds.
     let mut p = Pool64 {
         rig: Rig::with_block(pool, block),
-        _streamer: streamer.map(|s| (s, handle)),
+        _streamer: streamer,
         _dir: dir,
     };
     // Drain the adds, then run past the vocoder's fill-up (a 2048 window at

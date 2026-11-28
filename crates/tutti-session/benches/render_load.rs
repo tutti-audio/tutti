@@ -84,7 +84,7 @@ use tutti_nodes::{
     BusStripConfig, BusStripNode, ConvolverConfig, ConvolverNode, ImpulseResponses, IrLayout,
     LimiterConfig, LimiterControls, LimiterNode,
 };
-use tutti_sampler::testing::placed_source;
+use tutti_sampler::testing::placed_config;
 
 /// How the sampler voices transpose, and whether the reverb is in the
 /// scene.
@@ -132,7 +132,7 @@ use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unf
 use tutti_platform::Instant;
 use tutti_polysynth::{Adsr, FilterType, LadderSaturation, OscillatorType, PolySynth, SynthConfig};
 use tutti_rt::SplitMix64;
-use tutti_sampler::{Playback, SlotId, VoicePool, VoiceWindow};
+use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig, VoiceWindow};
 use tutti_session::{InputPort, MainOutput, OutputPort, Session, Workers};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{
@@ -288,33 +288,27 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     }
     let tone = Arc::new(tone);
     for t in 0..SAMPLER_TRACKS {
-        let mut pool = VoicePool::new();
+        let mut config = VoicePoolConfig::new(ChannelLayout::STEREO).expect("a stereo pool");
         for v in 0..SAMPLER_VOICES {
-            pool.insert(
-                SlotId(v as u128 + 1),
-                placed_source(Arc::clone(&tone), VoiceWindow::from(Beat::new(0.0))),
-                {
-                    let k = (t * SAMPLER_VOICES + v) as f64;
-                    let interval = Cents::new(-350.0 + 25.0 * k + 3.0);
-                    let play = Playback {
-                        gain: Amplitude::new(0.1),
-                        ..Default::default()
-                    };
-                    if variant.vocoder() {
-                        Playback {
-                            pitch: interval,
-                            ..play
-                        }
-                    } else {
-                        Playback {
-                            speed: PlaybackRate::clamped(interval.to_pitch_ratio()),
-                            ..play
-                        }
-                    }
-                },
-            )
-            .expect("a finite gain");
+            let k = (t * SAMPLER_VOICES + v) as f64;
+            let interval = Cents::new(-350.0 + 25.0 * k + 3.0);
+            let source = placed_config(Arc::clone(&tone), VoiceWindow::from(Beat::new(0.0)))
+                .gain(Amplitude::new(0.1));
+            let row = if variant.vocoder() {
+                VoiceNodeConfig::placed(source)
+                    .expect("a finite gain")
+                    .pitch(interval)
+            } else {
+                VoiceNodeConfig::placed(
+                    source.speed(PlaybackRate::clamped(interval.to_pitch_ratio())),
+                )
+                .expect("a finite gain")
+            };
+            config = config
+                .row(SlotId(v as u128 + 1), row)
+                .expect("a row in the table");
         }
+        let pool = VoicePool::from(config);
         let pool = s.graph().add(pool);
         strips.push(pool.erase());
     }

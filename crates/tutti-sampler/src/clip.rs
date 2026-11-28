@@ -11,8 +11,8 @@ use tutti_units::{Amplitude, Beat, Cents, PlaybackRate, StretchFactor};
 
 use crate::streamer::{StreamHandle, StreamReader};
 use crate::{
-    DiskVoice, Drive, GainError, Loop, MemorySourceConfig, PlaceError, VoiceNode, VoiceNodeConfig,
-    VoiceNodeControls, VoiceWindow, voice_width,
+    DiskVoice, GainError, Loop, MemorySourceConfig, PlaceError, VoiceDrive, VoiceNode,
+    VoiceNodeConfig, VoiceNodeControls, VoiceWindow, voice_width,
 };
 
 /// A sample placed on the timeline: where it starts, how loud, and whether it
@@ -187,7 +187,7 @@ impl<F: SamplerFloat> Clip<F> {
             speed,
             loop_,
         } = self;
-        fn looped<F: SamplerFloat, D: Drive>(
+        fn looped<F: SamplerFloat, D: VoiceDrive>(
             config: VoiceNodeConfig<F, D>,
             setting: Option<Loop>,
         ) -> VoiceNodeConfig<F, D> {

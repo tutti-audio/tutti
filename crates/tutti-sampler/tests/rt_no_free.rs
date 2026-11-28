@@ -1,30 +1,33 @@
-//! Regression gate: the pool's command drain must not free on the audio
-//! thread, and a disk stream's ring is freed on the control thread.
+//! Regression gate: the pool's audio thread frees nothing, and a disk stream's
+//! ring is freed on the control thread.
 //!
-//! `tests/rt_no_alloc.rs` guards allocation, and says why it cannot see a
+//! `tests/voice/rt_no_alloc.rs` guards allocation, and says why it cannot see a
 //! free: `assert_no_alloc` counts allocations only. This file counts
 //! deallocations, with a global allocator that tallies every `dealloc` made
-//! while a thread-local flag is up, so the drain's frees are counted and
-//! nothing else's (the test harness's own threads included).
+//! while a thread-local flag is up, so the callback's frees are counted and
+//! nothing else's (the test harness's own threads included). A removed row's
+//! slot, wave and vocoder are freed by `Reclaim::reclaim` on the control side.
 
 use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::{loop_frames, placed_source};
+use tutti_sampler::testing::{controlled_pool, loop_frames, placed_config};
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::Arc;
 
-use tutti_buffers::Wave;
+use tutti_buffers::{ChannelLayout, Wave};
+use tutti_graph::Published;
 use tutti_graph::contract::Direct;
+use tutti_rt::Reclaim;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, Playback, SendError, SlotId, StreamHandle, StreamStart,
-    VoicePool,
+    DiskStreamer, DiskVoice, Manual, Row, SlotId, StreamHandle, StreamStart, VoiceCount,
+    VoiceNodeConfig, VoicePool, VoicePoolConfig, VoicePoolControls,
 };
-use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
+use tutti_units::{Amplitude, Beat, Bpm, Cents, SampleRate, Samples, StretchFactor};
 
 thread_local! {
     static WATCHING: Cell<bool> = const { Cell::new(false) };
@@ -70,60 +73,134 @@ fn watch(f: impl FnOnce()) -> (usize, usize) {
     (FREES.with(|c| c.get()), BIGGEST.with(|c| c.get()))
 }
 
-/// Adding voices, and removing one, frees nothing in the drain. Two stretched
-/// adds (their filters built by the sender), a remove of the first and an add
-/// at its id again are drained by one `process`, counting frees on this
-/// thread. The removed slot comes back through the retirement channel, where
-/// the control thread frees it.
-#[test]
-fn the_add_voice_drain_frees_nothing() {
-    let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let wave = Arc::new(Wave::from_mono(
+/// A stereo pool config over `rows`.
+fn config_of(rows: impl IntoIterator<Item = (u128, Row<f32>)>) -> VoicePoolConfig<f32> {
+    rows.into_iter().fold(
+        VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo is a pool width"),
+        |config, (key, row)| config.row(SlotId(key), row).expect("a free key"),
+    )
+}
+
+/// A mono wave of 0.5 over `frames` frames: a new allocation each call, so two calls are
+/// two identities.
+fn flat(frames: usize) -> Arc<Wave> {
+    Arc::new(Wave::from_mono(
         SampleRate::SR_48K,
-        Mono::new(&vec![0.5f32; 48_000]),
-    ));
-    let (pool, handle) = VoicePool::new().with_handle();
+        Mono::new(&vec![0.5f32; frames]),
+    ))
+}
+
+/// The row of `wave` placed at beat 0, stretched by 2 (a vocoder, built by the sender).
+fn stretched(wave: &Arc<Wave>) -> Row<f32> {
+    Row::from(
+        VoiceNodeConfig::placed(placed_config(
+            Arc::clone(wave),
+            VoiceWindow::from(Beat::new(0.0)),
+        ))
+        .expect("a finite gain and a nonempty width")
+        .stretch(StretchFactor::new(2.0)),
+    )
+}
+
+/// A change of the table frees nothing in the callback. Two stretched rows (their
+/// vocoders built by the sender) are installed by the first block; a table without the
+/// first row, then a table with it back over another wave, are each applied by one
+/// block, counting frees on this thread. The removed slot goes through the retirement
+/// ring, and `reclaim` on the control side frees it, and the wave it held.
+#[test]
+fn a_table_change_drain_frees_nothing() {
+    let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let first = flat(48_000);
+    let first_weak = Arc::downgrade(&first);
+    let second = flat(48_000);
+    let (pool, controls) = controlled_pool(VoicePool::from(config_of([
+        (1, stretched(&first)),
+        (2, stretched(&second)),
+    ])));
     let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
     let env = t.env(64, SampleRate::SR_48K);
-    let voice = || {
-        (
-            placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0))),
-            Playback {
-                stretch: StretchFactor::new(2.0),
-                ..Playback::default()
-            },
-        )
-    };
-    for id in [1, 2] {
-        let (source, play) = voice();
-        handle
-            .add(SlotId(id), source, play)
-            .expect("the command queue has room");
-    }
-    handle
-        .remove(SlotId(1))
-        .expect("the command queue has room");
-    let (source, play) = voice();
-    handle
-        .add(SlotId(1), source, play)
-        .expect("the command queue has room");
     let frees = frees_during(|| {
         rig.block_in(&env);
     });
     assert_eq!(
         rig.node.voice_count(),
         2,
-        "the last add took the id the remove freed"
+        "the first block installs both rows"
     );
     assert_eq!(
         frees, 0,
-        "the drain freed {frees} time(s) on the audio thread; a box or a \
-         replaced slot must travel to the control thread instead"
+        "installing freed {frees} time(s) on the audio thread"
     );
+
+    let without_first = config_of([(2, stretched(&second))]);
+    controls.replace(without_first.table());
+    let frees = frees_during(|| {
+        rig.block_in(&env);
+    });
+    assert_eq!(rig.node.voice_count(), 1, "the removed row's slot is gone");
     assert_eq!(
-        handle.collect_retired(),
-        1,
-        "the removed slot is retired to the control thread"
+        frees, 0,
+        "the drain freed {frees} time(s) on the audio thread; a slot must travel to \
+         the control thread instead"
+    );
+
+    let again = flat(48_000);
+    controls.replace(config_of([(1, stretched(&again)), (2, stretched(&second))]).table());
+    let frees = frees_during(|| {
+        rig.block_in(&env);
+    });
+    assert_eq!(rig.node.voice_count(), 2, "the row is back under its key");
+    assert_eq!(
+        frees, 0,
+        "the drain freed {frees} time(s) on the audio thread"
+    );
+
+    drop(first);
+    assert!(
+        first_weak.upgrade().is_some(),
+        "the removed slot, parked in the retirement ring, still holds its wave"
+    );
+    controls.reclaim();
+    assert!(
+        first_weak.upgrade().is_none(),
+        "the sweep freed the removed slot, and its wave, on the control side"
+    );
+}
+
+/// **A table with another wave under the same key frees the old wave on the control
+/// side.** The row's voice is a new voice (a wave is structure): the old slot, whose
+/// source is the wave's last holder, leaves through the retirement ring in the block
+/// that applies the table, which frees nothing, and `reclaim` frees the wave.
+#[test]
+fn a_table_with_another_wave_under_the_same_key_frees_the_old_wave_on_the_control_side() {
+    let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let old = flat(24_000);
+    let old_weak = Arc::downgrade(&old);
+    let (pool, controls) = controlled_pool(VoicePool::from(config_of([(1, stretched(&old))])));
+    drop(old);
+    let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
+    let env = t.env(64, SampleRate::SR_48K);
+    rig.block_in(&env);
+    assert_eq!(rig.node.voice_count(), 1, "setup: the row is installed");
+    assert!(old_weak.upgrade().is_some(), "the slot holds the old wave");
+
+    controls.replace(config_of([(1, stretched(&flat(24_000)))]).table());
+    let frees = frees_during(|| {
+        rig.block_in(&env);
+    });
+    assert_eq!(rig.node.voice_count(), 1, "the new voice replaced the old");
+    assert_eq!(
+        frees, 0,
+        "the drain freed {frees} time(s) on the audio thread"
+    );
+    assert!(
+        old_weak.upgrade().is_some(),
+        "the old wave is alive after the drain: retired, not freed"
+    );
+    controls.reclaim();
+    assert!(
+        old_weak.upgrade().is_none(),
+        "the sweep freed the old wave, on the control side"
     );
 }
 
@@ -222,41 +299,59 @@ fn a_block_that_ends_after_a_publish_frees_nothing() {
     );
 }
 
-/// A pool with the disk voice of a stream whose handle has been dropped and
+/// A pool of one streamed row over a stream whose handle has been dropped and
 /// closed, so the voice's reader is the ring's **last holder**: its drop
 /// frees the ring wherever it happens.
 fn pool_holding_the_last_holder(
     streamer: DiskStreamer<Manual<f32>, f32>,
     stream: StreamHandle<f32>,
     reader: tutti_sampler::StreamReader<f32>,
-) -> (VoicePool<f32>, tutti_sampler::VoicePoolHandle<f32>) {
-    let (pool, handle) = VoicePool::new().with_handle();
+    voices: VoiceCount,
+    memory: &[(u128, Row<f32>)],
+) -> (VoicePool<f32>, VoicePoolControls<f32>) {
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
-    handle
-        .add_streaming(SlotId(1), voice, stream, Playback::default())
-        .expect("room");
+    let streamed = VoiceNodeConfig::streaming(
+        voice,
+        stream,
+        Amplitude::new(1.0),
+        StretchFactor::UNITY,
+        Cents::new(0.0),
+    )
+    .expect("a finite gain and a nonempty width");
+    let config = memory
+        .iter()
+        .cloned()
+        .fold(
+            VoicePoolConfig::<f32>::new(ChannelLayout::STEREO)
+                .expect("stereo is a pool width")
+                .voices(voices)
+                .expect("the voices hold the rows"),
+            |config, (key, row)| config.row(SlotId(key), row).expect("a free key"),
+        )
+        .row(SlotId(1), streamed)
+        .expect("a free key");
     // The streamer is gone: its side of the ring goes with it, and the voice
-    // (whose handle keeps only the stream's control side) holds the ring last.
+    // (whose row keeps only the stream's control side) holds the ring last.
     drop(streamer);
-    (pool, handle)
+    controlled_pool(VoicePool::from(config))
 }
 
 /// **The remove path: a voice's last holder of a ring is never dropped on the
-/// audio thread.** The voice is removed through the handle; the drain frees
-/// nothing (the slot goes over the retirement channel) and the control thread's
-/// `collect_retired` frees the ring. A disk voice's drop is on the
-/// control thread.
+/// audio thread.** The row is removed by a table without it; the drain frees
+/// nothing (the slot goes over the retirement ring) and the control thread's
+/// `reclaim` frees the ring.
 #[test]
 fn a_removed_disk_voice_frees_its_ring_on_the_control_thread() {
     let (_dir, streamer, stream, reader) = stream();
-    let (pool, handle) = pool_holding_the_last_holder(streamer, stream, reader);
+    let (pool, controls) =
+        pool_holding_the_last_holder(streamer, stream, reader, VoiceCount::DEFAULT, &[]);
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
     let env = t.env(64, SampleRate::SR_48K);
     rig.block_in(&env);
     assert_eq!(rig.node.voice_count(), 1, "setup: the voice is in");
 
-    handle.remove(SlotId(1)).expect("room");
+    controls.replace(config_of([]).table());
     let (frees, _) = watch(|| {
         rig.block_in(&env);
     });
@@ -267,7 +362,7 @@ fn a_removed_disk_voice_frees_its_ring_on_the_control_thread() {
     );
 
     let (_, biggest) = watch(|| {
-        assert_eq!(handle.collect_retired(), 1);
+        controls.reclaim();
     });
     assert!(
         biggest >= RING_BYTES,
@@ -275,100 +370,115 @@ fn a_removed_disk_voice_frees_its_ring_on_the_control_thread() {
     );
 }
 
-/// **A full retirement channel refuses the command; the callback never frees.**
-/// The handle reserves a retirement slot for every command that might retire a
-/// value. With the channel full of uncollected voices the next `remove` of the
-/// disk voice (the ring's last holder), and an add that the pool could refuse,
-/// fail with `SendError::RetirementFull` and queue nothing, so the drain frees
-/// nothing; after `collect_retired` the same `remove` goes through and the
-/// ring is freed on the control side.
+/// **A retirement room with no place left defers an install; the callback never
+/// frees.** The controls reserve a retirement slot for every voice they send, held
+/// until it is collected. A pool of two voices has six: with them used by uncollected
+/// voices, a row whose voice is new is not sent, so the table's other changes (the
+/// removal of the disk voice, the ring's last holder) still apply and the drain frees
+/// nothing; after `reclaim` the deferred voice is sent and the ring is freed on the
+/// control side.
 #[test]
-fn a_full_retirement_channel_refuses_a_remove_and_the_callback_frees_nothing() {
+fn a_full_retirement_room_defers_an_install_and_the_callback_frees_nothing() {
     let (_dir, streamer, stream, reader) = stream();
-    let (pool, handle) = pool_holding_the_last_holder(streamer, stream, reader);
+    let wave = flat(480);
+    let memory = |wave: &Arc<Wave>| {
+        Row::from(
+            VoiceNodeConfig::placed(placed_config(
+                Arc::clone(wave),
+                VoiceWindow::from(Beat::new(0.0)),
+            ))
+            .expect("a finite gain and a nonempty width"),
+        )
+    };
+    let (pool, controls) = pool_holding_the_last_holder(
+        streamer,
+        stream,
+        reader,
+        VoiceCount::of(2),
+        &[(2, memory(&wave))],
+    );
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
     let env = t.env(64, SampleRate::SR_48K);
     rig.block_in(&env);
+    assert_eq!(rig.node.voice_count(), 2, "setup: both voices are in");
 
-    let wave = Arc::new(Wave::from_mono(
-        SampleRate::SR_48K,
-        Mono::new(&vec![0.5f32; 480]),
-    ));
-    let memory = || placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
-    // The pool holds 64 voices: the disk voice and 63 memory ones. Removing
-    // the 63 (and one more added and removed after) puts 64 values in the
-    // retirement channel, none collected.
-    for id in 2..=64 {
-        handle
-            .add(SlotId(id), memory(), Playback::default())
-            .expect("room");
+    // Each wave under key 2 is a new voice: with the two first, they use the six
+    // places, none collected.
+    let current = controls.current();
+    let disk = current
+        .rows()
+        .iter()
+        .find(|(key, _)| *key == SlotId(1))
+        .map(|(_, row)| row.clone())
+        .expect("the disk row");
+    drop(current);
+    let with = |other: &Arc<Wave>| {
+        VoicePoolConfig::<f32>::new(ChannelLayout::STEREO)
+            .expect("stereo is a pool width")
+            .voices(VoiceCount::of(2))
+            .expect("two voices")
+            .row(SlotId(1), disk.clone())
+            .expect("a free key")
+            .row(SlotId(2), memory(other))
+            .expect("a free key")
+    };
+    for _ in 0..4 {
+        controls.replace(with(&flat(480)).table());
+        rig.block_in(&env);
     }
-    rig.block_in(&env);
-    for id in 2..=64 {
-        handle.remove(SlotId(id)).expect("room");
-    }
-    rig.block_in(&env);
-    handle
-        .add(SlotId(100), memory(), Playback::default())
-        .expect("room");
-    rig.block_in(&env);
-    handle.remove(SlotId(100)).expect("room");
-    rig.block_in(&env);
+    assert_eq!(rig.node.voice_count(), 2, "setup: six voices sent");
 
-    // Full: the remove of the last holder, and an add that could be refused
-    // at the voice cap and retired, are both refused at the call.
-    assert_eq!(
-        handle.remove(SlotId(1)),
-        Err(SendError::RetirementFull),
-        "the remove is refused"
-    );
-    assert_eq!(
-        handle.add(SlotId(101), memory(), Playback::default()),
-        Err(SendError::RetirementFull),
-        "an add that might be refused is too"
-    );
+    // The seventh is deferred: the memory row's old slot leaves and no new one comes.
+    let waiting = flat(480);
+    controls.replace(with(&waiting).table());
+    rig.block_in(&env);
+    assert_eq!(rig.node.voice_count(), 1, "only the disk voice sounds");
+
+    // Remove the ring's last holder: it applies, and the callback frees nothing. The
+    // test lets go of its own copies of the row first.
+    drop(disk);
+    controls.replace(config_of([(2, memory(&waiting))]).table());
     let (frees, _) = watch(|| {
         rig.block_in(&env);
     });
-    assert_eq!(rig.node.voice_count(), 1, "nothing was queued");
+    assert_eq!(rig.node.voice_count(), 0, "the disk voice is gone");
     assert_eq!(frees, 0, "the callback freed {frees} time(s)");
 
-    assert_eq!(handle.collect_retired(), 64);
-    handle.remove(SlotId(1)).expect("room after collecting");
-    let (frees, _) = watch(|| {
-        rig.block_in(&env);
-    });
-    assert_eq!(rig.node.voice_count(), 0);
-    assert_eq!(frees, 0, "the callback freed {frees} time(s)");
     let (_, biggest) = watch(|| {
-        assert_eq!(handle.collect_retired(), 1);
+        controls.reclaim();
     });
     assert!(
         biggest >= RING_BYTES,
         "the control thread's collection freed at most {biggest} bytes: no ring"
     );
+    let (frees, _) = watch(|| {
+        rig.block_in(&env);
+    });
+    assert_eq!(rig.node.voice_count(), 1, "the deferred voice arrived");
+    assert_eq!(frees, 0, "the callback freed {frees} time(s)");
 }
 
-/// **A retirement after every handle is gone is freed with the pool.** The
-/// handle is dropped with a remove of the ring's last holder still queued;
-/// the block applies it, the callback frees nothing (the voice is parked in
-/// the pool), and dropping the pool, on the control side, frees the ring.
+/// **A retirement after the controls are gone is freed with the pool.** The
+/// controls are dropped with a removal of the ring's last holder applied by the next
+/// block; the callback frees nothing (the voice is parked in the pool), and
+/// dropping the pool, on the control side, frees the ring.
 #[test]
-fn a_retirement_after_the_handle_is_gone_is_freed_when_the_pool_drops() {
+fn a_retirement_after_the_controls_are_gone_is_freed_when_the_pool_drops() {
     let (_dir, streamer, stream, reader) = stream();
-    let (pool, handle) = pool_holding_the_last_holder(streamer, stream, reader);
+    let (pool, controls) =
+        pool_holding_the_last_holder(streamer, stream, reader, VoiceCount::DEFAULT, &[]);
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
     let env = t.env(64, SampleRate::SR_48K);
     rig.block_in(&env);
 
-    handle.remove(SlotId(1)).expect("room");
-    drop(handle);
+    controls.replace(config_of([]).table());
+    drop(controls);
     let (frees, _) = watch(|| {
         rig.block_in(&env);
     });
-    assert_eq!(rig.node.voice_count(), 0, "the remove was applied");
+    assert_eq!(rig.node.voice_count(), 0, "the removal was applied");
     assert_eq!(frees, 0, "the callback freed {frees} time(s)");
 
     let (_, biggest) = watch(|| drop(rig));
@@ -376,56 +486,4 @@ fn a_retirement_after_the_handle_is_gone_is_freed_when_the_pool_drops() {
         biggest >= RING_BYTES,
         "dropping the pool freed at most {biggest} bytes: the ring was leaked"
     );
-}
-
-/// **A second handle starts with every retirement slot.** Reservations belong
-/// to one handle's ring: a first handle with 64 reservations does not use up
-/// the second's room, and the first's `collect_retired` (on its own, dead
-/// ring) does not give the second's slots back.
-#[test]
-fn a_second_handle_has_its_own_retirement_room() {
-    let wave = Arc::new(Wave::from_mono(
-        SampleRate::SR_48K,
-        Mono::new(&vec![0.5f32; 480]),
-    ));
-    let memory = || placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
-    let (pool, first) = VoicePool::<f32>::new().with_handle();
-    first
-        .add(SlotId(1), memory(), Playback::default())
-        .expect("room");
-    for _ in 0..63 {
-        first
-            .replace_wave(SlotId(1), Arc::clone(&wave))
-            .expect("room");
-    }
-    let (pool, second) = pool.with_handle();
-    assert_eq!(
-        first.replace_wave(SlotId(1), Arc::clone(&wave)),
-        Err(SendError::RetirementFull),
-        "setup: the first handle still holds its own 64"
-    );
-    let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let mut rig = Direct::new(pool, SampleRate::SR_48K, 64);
-    let env = t.env(64, SampleRate::SR_48K);
-    second
-        .add(SlotId(1), memory(), Playback::default())
-        .expect("room");
-    rig.block_in(&env);
-    // Every replaced wave is retired: 64 fill the second handle's channel.
-    for _ in 0..64 {
-        second
-            .replace_wave(SlotId(1), Arc::clone(&wave))
-            .expect("the second handle has all 64 slots");
-    }
-    rig.block_in(&env);
-    assert_eq!(first.collect_retired(), 0);
-    assert_eq!(
-        second.replace_wave(SlotId(1), Arc::clone(&wave)),
-        Err(SendError::RetirementFull),
-        "the first handle's collect gave nothing back to the second"
-    );
-    assert_eq!(second.collect_retired(), 64);
-    second
-        .replace_wave(SlotId(1), wave)
-        .expect("room after collecting");
 }

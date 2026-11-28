@@ -275,11 +275,14 @@ fn graph::Graph::node_outputs
 fn graph::Graph::node_tail
 fn graph::Graph::open_event_inlet
 fn graph::Graph::outputs
+fn graph::Graph::pool_drops
+fn graph::Graph::pool_spares
 fn graph::Graph::replace
 fn graph::Graph::replace_plugin
 fn graph::Graph::set_feed
 fn graph::Graph::set_sources
 fn graph::Graph::sources
+fn graph::Graph::stream_hold
 fn graph::Graph::taps
 fn graph::Replacement::fade
 fn graph::Replacement::new

@@ -29,7 +29,7 @@
 //! largest source frame read here).
 
 use tutti_graph::testing::WireDeclared;
-use tutti_sampler::testing::{free_source, placed_source};
+use tutti_sampler::testing::{free_source, placed_config};
 
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
@@ -44,7 +44,7 @@ use tutti_engine::Engine;
 use tutti_graph::{
     Editor, NodeKey, OutputPort, PortSource, Prepare, TransportChanges, TransportPosition,
 };
-use tutti_sampler::{Playback, SlotId, VoicePool};
+use tutti_sampler::{Row, SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Beat, BeatDuration, Bpm, Cents, SampleRate, Samples, StretchFactor};
@@ -57,6 +57,15 @@ const SCALE: f32 = 131_072.0;
 /// docs: 0.04 for the grid, 0.02 for the wave's `f32`, and some slack).
 const E: f64 = 0.08;
 const BLOCKS: [usize; 6] = [1, 64, 100, 512, 1_000, 4_096];
+
+/// A pool of one row, key 1, over `row`.
+fn pool_of(row: impl Into<Row<f32>>) -> VoicePool<f32> {
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("stereo is a width a pool runs")
+        .row(SlotId(1), row)
+        .expect("one row in a free key");
+    VoicePool::from(config)
+}
 
 fn map(points: &[(f64, f64, Transition)]) -> Arc<TempoMap> {
     Arc::new(
@@ -133,17 +142,17 @@ fn render(
     ));
     match voice {
         Some((start, duration)) => {
-            let source = placed_source(
-                wave,
-                match duration {
-                    Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
-                    None => VoiceWindow::from(Beat::new(start)),
-                },
+            let window = match duration {
+                Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
+                None => VoiceWindow::from(Beat::new(start)),
+            };
+            ed.insert(
+                NodeKey(1),
+                "voice",
+                pool_of(
+                    VoiceNodeConfig::placed(placed_config(wave, window)).expect("a finite gain"),
+                ),
             );
-            let mut pool = VoicePool::new();
-            pool.insert(SlotId(1), source, Playback::default())
-                .expect("a finite gain and a nonempty width");
-            ed.insert(NodeKey(1), "voice", pool);
         }
         // Free-running: a node of its own, from its first frame, at its own
         // speed, on no window.
@@ -288,11 +297,12 @@ fn a_block_lent_no_map_places_a_clip_by_the_transports_tempo() {
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
-    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)));
-    let mut pool = VoicePool::new();
-    pool.insert(SlotId(1), source, Playback::default())
-        .expect("a finite gain and a nonempty width");
-    ed.insert(NodeKey(1), "voice", pool);
+    let voice = VoiceNodeConfig::placed(placed_config(
+        Arc::new(wave),
+        VoiceWindow::from(Beat::new(1.0)),
+    ))
+    .expect("a finite gain");
+    ed.insert(NodeKey(1), "voice", pool_of(voice));
     ed.wire_declared_outputs(
         (0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
     )
@@ -379,23 +389,16 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
-    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)));
-    let pool = VoicePool::new();
-    // The handle the insert hands back is the pool's live one.
-    let handle = ed.insert(NodeKey(1), "voice", pool).controls;
-    handle
-        .add(
-            SlotId(1),
-            source,
-            Playback {
-                stretch: StretchFactor::new(1.5),
-                ..Playback::default()
-            },
-        )
-        .expect("room");
-    handle
-        .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-        .expect("room");
+    // A stretching row at unity: it owns its vocoder.
+    let voice = Row::from(
+        VoiceNodeConfig::placed(placed_config(
+            Arc::new(wave),
+            VoiceWindow::from(Beat::new(3.0)),
+        ))
+        .expect("a finite gain"),
+    )
+    .stretching(StretchFactor::UNITY, Cents::new(0.0));
+    ed.insert(NodeKey(1), "voice", pool_of(voice));
     ed.wire_declared_outputs(
         (0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
     )

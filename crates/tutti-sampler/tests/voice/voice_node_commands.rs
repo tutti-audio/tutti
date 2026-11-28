@@ -202,9 +202,7 @@ fn a_command_reaches_a_node_across_a_commit() {
 /// the live node's move: this property is structural. It is the end-to-end check that a
 /// fork rendering first leaves the live node moved; the fork reading the
 /// shared cell is what `a_placement_sent_after_the_insert_reaches_a_fork`
-/// pins. The pool's
-/// `a_pools_fork_shares_nothing_with_the_live_pool` makes the queue claim
-/// for `VoicePool`, which still has one.
+/// pins.
 #[test]
 fn a_fork_steals_no_commands() {
     let (ed, mut exec, handle) = graph_with(node_at(0.0));
@@ -234,8 +232,7 @@ fn a_fork_steals_no_commands() {
 
 /// A node no handle was taken for still works.
 ///
-/// A node driven by hand (`with_channels`, never inserted, `with_handle`
-/// never called) has an empty placement cell, and must keep the window it
+/// A node driven by hand (never inserted, its controls never taken) has an empty placement cell, and must keep the window it
 /// was built with rather than lose it to the empty cell.
 #[test]
 fn a_node_with_no_handle_renders_normally() {

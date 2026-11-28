@@ -1,5 +1,5 @@
-//! A loop is one value on every tier, and a pool's and a node's handles steer
-//! the voice they hold.
+//! A loop is one value on every tier, a node's controls steer the voice it
+//! holds, and a gain that is not finite is refused where it is made.
 //!
 //! The material is a ramp whose value *is* its frame index, played at the file's
 //! own rate on a transport that moves one file frame per output frame, so
@@ -13,15 +13,15 @@ use tutti_buffers::{ChannelLayout, Interleaved};
 
 use tutti_buffers::Wave;
 use tutti_sampler::testing::{
-    MockTransport, controlled, free_config, free_source, loop_frames, placed_config, placed_source,
-    play, source_config, voice_node, wait_for_open,
+    MockTransport, controlled, controlled_pool, free_config, loop_frames, placed_config,
+    placed_source, play, source_config, voice_node, wait_for_open,
 };
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, Manual, MemorySourceConfig,
     PlayDirection, Playback, SlotId, StreamHandle, StreamStart, VoiceNode, VoiceNodeConfig,
-    VoiceNodeControls, VoicePool, VoiceWindow,
+    VoiceNodeControls, VoicePool, VoicePoolConfig, VoiceWindow,
 };
-use tutti_units::{Beat, Bpm, PlaybackRate, SampleRate, Samples};
+use tutti_units::{Amplitude, Beat, Bpm, Cents, PlaybackRate, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const RATE: SampleRate = SampleRate::of(SR);
@@ -292,28 +292,30 @@ fn render_with(node: &mut VoiceNode<f32>, frames: usize) -> Vec<f32> {
     play(node, &rolling(), RATE, frames, BLOCK).swap_remove(0)
 }
 
-/// **A disk voice added through the pool handle keeps its loop and direction.**
-/// `add_streaming` takes the voice's `Playback` with the stream: the loop it
+/// **A disk voice in a pool's row keeps its loop and direction.** The row's
+/// `looped` and `direction` are written to its stream's cells: the loop it
 /// carries plays the span, and a reversed one plays the file from its end.
-/// (A disk voice cannot be added without its stream, so the add that once
-/// dropped both silently is not writable: see `VoicePoolHandle::add`.)
 #[test]
 fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
     for direction in [PlayDirection::Forward, PlayDirection::Reverse] {
         let dir = tempfile::tempdir().expect("a temp dir");
         let (mut streamer, stream, reader) = streaming(dir.path());
         let voice = DiskVoice::from_reader(reader, window());
-        let (pool, handle) = VoicePool::with_channels(tutti_buffers::ChannelLayout::MONO)
+        let row = VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            Amplitude::new(1.0),
+            StretchFactor::UNITY,
+            Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width")
+        .looped(loop_frames(300, 700, 0))
+        .direction(direction);
+        let config = VoicePoolConfig::<f32>::new(ChannelLayout::MONO)
             .expect("mono is a width")
-            .with_handle();
-        let play = Playback {
-            loop_: Some(loop_frames(300, 700, 0)),
-            direction,
-            ..Playback::default()
-        };
-        handle
-            .add_streaming(SlotId(1), voice, stream, play)
-            .expect("the queue has room");
+            .row(SlotId(1), row)
+            .expect("a free key");
+        let (pool, controls) = controlled_pool(VoicePool::from(config));
         let _ = streamer.step_until_idle(1_000);
         let mut pool = tutti_sampler::testing::prepared(pool, RATE, BLOCK);
         let got = play_pool(&mut pool, &mut streamer);
@@ -334,34 +336,17 @@ fn a_disk_voice_added_to_a_pool_keeps_its_loop_and_direction() {
                 });
             }
         }
-        drop(handle);
+        drop(controls);
     }
 }
 
 /// `FRAMES` of `pool` from beat 0, the streamer stepped between blocks as a
 /// running one is, so a stream that turns or loops has its ring refilled.
 fn play_pool(pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<Manual<f32>, f32>) -> Vec<f32> {
-    play_pool_calling(pool, streamer, || {})
-}
-
-/// [`play_pool`], calling `mid` once, between the blocks, when half the frames
-/// are out.
-fn play_pool_calling(
-    pool: &mut VoicePool<f32>,
-    streamer: &mut DiskStreamer<Manual<f32>, f32>,
-    mid: impl FnOnce(),
-) -> Vec<f32> {
     let t = rolling();
     let mut out = Vec::new();
-    let mut mid = Some(mid);
     while out.len() < FRAMES {
-        if out.len() >= FRAMES / 2
-            && let Some(mid) = mid.take()
-        {
-            mid();
-        }
-        let block = tutti_sampler::testing::block(pool, &t, RATE, BLOCK).swap_remove(0);
-        out.extend(block);
+        out.extend(tutti_sampler::testing::block(pool, &t, RATE, BLOCK).swap_remove(0));
         t.advance(BLOCK as i64, RATE);
         let _ = streamer.step_until_idle(1_000);
     }
@@ -445,35 +430,6 @@ fn a_looped_free_running_voice_wraps_at_the_loops_end() {
     assert_frames("looped", &got, |n| looped_frame(n, 300, 700));
 }
 
-/// **A pool refuses a stretch for a free-running voice at the call**, on the
-/// add and on a later stretch, and takes it once the voice is placed.
-#[test]
-fn a_free_running_voice_refuses_stretch_until_it_is_placed() {
-    use tutti_units::{Cents, StretchFactor};
-    let (_pool, handle) = VoicePool::new().with_handle();
-    let id = tutti_sampler::SlotId(1);
-    let stretched = Playback {
-        stretch: StretchFactor::new(2.0),
-        ..Playback::default()
-    };
-    let free = || free_source(ramp());
-    assert_eq!(
-        handle.add(id, free(), stretched),
-        Err(tutti_sampler::SendError::FreeRunning)
-    );
-    handle
-        .add(id, free(), Playback::default())
-        .expect("a plain free-running voice");
-    assert_eq!(
-        handle.set_stretch(id, StretchFactor::new(2.0), Cents::new(0.0)),
-        Err(tutti_sampler::SendError::FreeRunning)
-    );
-    handle.set_window(id, window()).expect("room");
-    handle
-        .set_stretch(id, StretchFactor::new(2.0), Cents::new(0.0))
-        .expect("a placed voice stretches");
-}
-
 /// **`play` starts a free-running voice a reset left stopped**: after the
 /// node is reset (which rewinds and stops its cursor) it is silent until
 /// `play`, which sounds it from the ramp's first frame. The transport rolls on
@@ -514,215 +470,13 @@ fn a_free_running_voice_built_with_a_stretch_plays_the_ramp_dry() {
     assert_frames("dry", &got, |n| n);
 }
 
-/// A mono pool holding the ramp as a placed memory voice at `SlotId(1)`.
-fn pool_with_resident_ramp() -> (VoicePool<f32>, tutti_sampler::VoicePoolHandle<f32>) {
-    let (pool, handle) = VoicePool::with_channels(tutti_buffers::ChannelLayout::MONO)
-        .expect("mono is a width")
-        .with_handle();
-    let source = placed_source(ramp(), window());
-    handle
-        .add(SlotId(1), source, Playback::default())
-        .expect("room");
-    (prepared_pool(pool), handle)
-}
-
-fn prepared_pool(pool: VoicePool<f32>) -> VoicePool<f32> {
-    tutti_sampler::testing::prepared(pool, RATE, BLOCK)
-}
-
-/// `FRAMES` of the memory `pool` from beat 0, calling `mid` between the blocks
-/// when half are out.
-fn play_memory_pool(pool: &mut VoicePool<f32>, mid: impl FnOnce()) -> Vec<f32> {
-    let t = rolling();
-    let mut out = Vec::new();
-    let mut mid = Some(mid);
-    while out.len() < FRAMES {
-        if out.len() >= FRAMES / 2
-            && let Some(mid) = mid.take()
-        {
-            mid();
-        }
-        out.extend(tutti_sampler::testing::block(pool, &t, RATE, BLOCK).swap_remove(0));
-        t.advance(BLOCK as i64, RATE);
-    }
-    out
-}
-
-/// **An add at a live id is refused, and the voice there plays on.** The
-/// refused add carries a wave of another value; the render is the resident
-/// ramp, frame for frame, across the refusal, and the slot is free again once
-/// its voice is removed.
-#[test]
-fn an_add_at_a_live_id_is_refused_and_the_resident_voice_plays_on() {
-    let (mut pool, handle) = pool_with_resident_ramp();
-    let mut flat = Wave::new(1, SampleRate::of(SR));
-    for _ in 0..LEN {
-        flat.append(Interleaved::new(&[0.5f32], flat.layout()).unwrap())
-            .unwrap();
-    }
-    let got = play_memory_pool(&mut pool, || {
-        let source = placed_source(Arc::new(flat), window());
-        assert_eq!(
-            handle.add(SlotId(1), source, Playback::default()),
-            Err(tutti_sampler::SendError::SlotInUse(SlotId(1)))
-        );
-    });
-    assert_frames("resident ramp", &got, |n| n);
-
-    handle.remove(SlotId(1)).expect("room");
-    let source = placed_source(ramp(), window());
-    handle
-        .add(SlotId(1), source, Playback::default())
-        .expect("a removed id is free again");
-}
-
-/// **An add at a live id is refused on the streaming path too**: the stream is
-/// handed back in the error, and the resident disk voice plays on.
-#[test]
-fn a_streaming_add_at_a_live_id_is_refused_and_the_resident_voice_plays_on() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let (mut streamer, stream, reader) = streaming(dir.path());
-    let voice = DiskVoice::from_reader(reader, window());
-    let (pool, handle) = VoicePool::with_channels(tutti_buffers::ChannelLayout::MONO)
-        .expect("mono is a width")
-        .with_handle();
-    handle
-        .add_streaming(SlotId(1), voice, stream, Playback::default())
-        .expect("room");
-    let _ = streamer.step_until_idle(1_000);
-    let mut pool = prepared_pool(pool);
-    let other = dir.path().join("other.wav");
-    write_ramp(&other);
-    let opening = streamer.open_stream(&other, StreamStart::HEAD);
-    let (second, second_reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
-    let got = play_pool_calling(&mut pool, &mut streamer, || {
-        let refused = handle
-            .add_streaming(
-                SlotId(1),
-                DiskVoice::from_reader(second_reader, window()),
-                second,
-                Playback::default(),
-            )
-            .expect_err("the id is live");
-        assert_eq!(
-            refused.error,
-            tutti_sampler::SendError::SlotInUse(SlotId(1))
-        );
-    });
-    assert_frames("resident disk voice", &got, |n| n);
-}
-
-/// **A command for an id holding no voice is refused, and nothing changes.**
-/// Every command names `SlotId(2)`, which was never added; the voice at
-/// `SlotId(1)` renders the ramp, frame for frame, across them. A removed id is
-/// unknown again.
-#[test]
-fn a_command_for_an_id_with_no_voice_is_refused_and_changes_nothing() {
-    use tutti_sampler::SendError::NoSuchSlot;
-    use tutti_units::{Amplitude, Cents, StretchFactor};
-    let (mut pool, handle) = pool_with_resident_ramp();
-    let unknown = SlotId(2);
-    let got = play_memory_pool(&mut pool, || {
-        assert_eq!(handle.remove(unknown), Err(NoSuchSlot(unknown)));
-        assert_eq!(
-            handle.replace_wave(unknown, ramp()),
-            Err(NoSuchSlot(unknown))
-        );
-        assert_eq!(
-            handle.set_window(unknown, window()),
-            Err(NoSuchSlot(unknown))
-        );
-        assert_eq!(
-            handle.set_gain(unknown, Amplitude::new(0.0)),
-            Err(NoSuchSlot(unknown))
-        );
-        assert_eq!(
-            handle.set_speed(unknown, PlaybackRate::of(2.0)),
-            Err(NoSuchSlot(unknown))
-        );
-        assert_eq!(
-            handle.set_loop(unknown, Some(loop_frames(300, 700, 0))),
-            Err(NoSuchSlot(unknown))
-        );
-        assert_eq!(
-            handle.set_direction(unknown, PlayDirection::Reverse),
-            Err(NoSuchSlot(unknown))
-        );
-        assert_eq!(
-            handle.set_stretch(unknown, StretchFactor::new(2.0), Cents::new(0.0)),
-            Err(NoSuchSlot(unknown))
-        );
-    });
-    assert_frames("resident ramp", &got, |n| n);
-    assert_eq!(handle.drops(), tutti_sampler::PoolDrops::default());
-
-    handle.remove(SlotId(1)).expect("a live id");
-    assert_eq!(
-        handle.set_gain(SlotId(1), Amplitude::new(1.0)),
-        Err(NoSuchSlot(SlotId(1)))
-    );
-    assert_eq!(handle.remove(SlotId(1)), Err(NoSuchSlot(SlotId(1))));
-}
-
-/// **A wave cannot replace a disk voice's**: the call names the slot and
-/// queues nothing (nothing is retired), and the
-/// voice renders the file's ramp across it.
-#[test]
-fn replace_wave_on_a_disk_voice_is_refused_and_queues_nothing() {
-    let dir = tempfile::tempdir().expect("a temp dir");
-    let (mut streamer, stream, reader) = streaming(dir.path());
-    let voice = DiskVoice::from_reader(reader, window());
-    let (pool, handle) = VoicePool::with_channels(tutti_buffers::ChannelLayout::MONO)
-        .expect("mono is a width")
-        .with_handle();
-    handle
-        .add_streaming(SlotId(1), voice, stream, Playback::default())
-        .expect("room");
-    let _ = streamer.step_until_idle(1_000);
-    let mut pool = prepared_pool(pool);
-    let got = play_pool_calling(&mut pool, &mut streamer, || {
-        assert_eq!(
-            handle.replace_wave(SlotId(1), ramp()),
-            Err(tutti_sampler::SendError::DiskVoice(SlotId(1)))
-        );
-    });
-    assert_frames("disk voice", &got, |n| n);
-    assert_eq!(
-        handle.collect_retired(),
-        0,
-        "nothing was queued, so nothing retired"
-    );
-}
-
-/// **A gain that is not finite is refused at the handles, and the voice keeps
-/// its gain.** NaN and both infinities, on the pool's `set_gain` and on an add's
-/// `Playback`, and on a node handle: each names `GainError::NotFinite` and the
-/// voice renders the ramp at unity across the refusal.
+/// **A gain that is not finite is refused at a node's controls, and the voice
+/// keeps its gain.** NaN and both infinities each name `GainError::NotFinite`,
+/// and the voice renders the ramp at unity across the refusals.
 #[test]
 fn a_gain_that_is_not_finite_is_refused_and_the_voice_keeps_its_gain() {
-    use tutti_sampler::{GainError, SendError};
-    use tutti_units::Amplitude;
-    let (mut pool, handle) = pool_with_resident_ramp();
+    use tutti_sampler::GainError;
     let bad = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY].map(Amplitude::new);
-    let got = play_memory_pool(&mut pool, || {
-        for gain in bad {
-            assert_eq!(
-                handle.set_gain(SlotId(1), gain),
-                Err(SendError::Gain(GainError::NotFinite))
-            );
-            let source = placed_source(ramp(), window());
-            let play = Playback {
-                gain,
-                ..Playback::default()
-            };
-            assert_eq!(
-                handle.add(SlotId(7), source, play),
-                Err(SendError::Gain(GainError::NotFinite))
-            );
-        }
-    });
-    assert_frames("unity gain kept", &got, |n| n);
-
     let (mut node, node_handle) = memory_node();
     for gain in bad {
         assert_eq!(node_handle.set_gain(gain), Err(GainError::NotFinite));
@@ -731,14 +485,13 @@ fn a_gain_that_is_not_finite_is_refused_and_the_voice_keeps_its_gain() {
 }
 
 /// **No public setter or constructor takes a gain that is not finite.** The
-/// source's, the disk voice's and its controls' setters, a pool's `insert`, a
+/// source's, the disk voice's and its controls' setters, a
 /// node's constructor and a clip's builder each name `GainError::NotFinite`,
 /// and the one that holds a gain keeps the one it had.
 #[test]
 fn every_gain_entry_refuses_a_gain_that_is_not_finite() {
     use tutti_graph::{IntoNode, NodeParts};
-    use tutti_sampler::{Clip, GainError, VoiceNodeConfig, VoiceNodeError};
-    use tutti_units::Amplitude;
+    use tutti_sampler::{Clip, GainError, VoiceNodeError};
     let bad = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY].map(Amplitude::new);
     let half = Amplitude::new(0.5);
 
@@ -753,18 +506,6 @@ fn every_gain_entry_refuses_a_gain_that_is_not_finite() {
         assert_eq!(source.set_gain(gain), Err(GainError::NotFinite));
         assert_eq!(disk.set_gain(gain), Err(GainError::NotFinite));
         assert_eq!(controls.set_gain(gain), Err(GainError::NotFinite));
-
-        let (mut pool, _handle) = VoicePool::new().with_handle();
-        let play = Playback {
-            gain,
-            ..Playback::default()
-        };
-        let again = placed_source(ramp(), window());
-        assert_eq!(
-            pool.insert(SlotId(1), again, play),
-            Err(GainError::NotFinite)
-        );
-        assert_eq!(pool.voice_count(), 0, "nothing was inserted");
 
         assert_eq!(
             VoiceNodeConfig::placed(placed_config(ramp(), window()).gain(gain)).err(),
@@ -783,13 +524,13 @@ fn every_gain_entry_refuses_a_gain_that_is_not_finite() {
     assert_eq!(disk.gain(), half, "the disk voice kept its gain");
 }
 
-/// **A voice width of no channels is refused where a pool or a node is built**,
+/// **A voice width of no channels is refused where a pool config or a node is built**,
 /// not coerced to mono.
 #[test]
 fn a_pool_or_node_of_no_channels_is_refused() {
     use tutti_sampler::PlaceError;
     assert_eq!(
-        VoicePool::<f32>::with_channels(0u16).err(),
+        VoicePoolConfig::<f32>::new(0u16).err(),
         Some(PlaceError::EmptyWidth)
     );
     assert_eq!(

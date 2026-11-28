@@ -36,6 +36,7 @@ pub(crate) mod node;
 mod node_config;
 pub(crate) mod node_controls;
 pub(crate) mod pool;
+mod roster;
 pub(crate) mod slot;
 pub(crate) mod stretched;
 mod table;
@@ -57,7 +58,7 @@ mod wrap_fade;
 pub use build::{memory_voice, voice_width};
 /// The pool's control-plane protocol and the handle that sends it. Documented
 /// on `command`.
-pub use command::{GainError, SendError, StreamingAddError, VoicePoolHandle};
+pub use command::{GainError, VoicePoolControls};
 /// Disk-streaming playback: the reader, its source and its configuration.
 ///
 /// See `disk_voice` for the full docs on each; they are re-exported flat so a
@@ -72,7 +73,7 @@ pub use memory_source::{MemorySource, MemorySourceConfig, VoiceWindow};
 /// One voice as a standalone graph node. Documented on `node`.
 pub use node::{DirectionKind, LoopingKind, SpeedKind, VoiceNode, VoiceNodeError, WindowKind};
 /// The per-track multi-voice mixer. Documented on `pool`.
-pub use node_config::{Drive, Free, Placed, Streamed, VoiceNodeConfig};
+pub use node_config::{Free, Placed, Streamed, VoiceDrive, VoiceNodeConfig};
 pub use node_controls::{FreeRunning, StreamHold, VoiceNodeControls};
 pub use pool::{PoolDrops, VoicePool};
 /// The voices a pool holds, as rows. Documented on `table`.

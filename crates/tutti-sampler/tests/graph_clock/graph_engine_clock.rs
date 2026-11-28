@@ -16,7 +16,7 @@
 //! frames is the same pieces, and must render the same bits.
 
 use tutti_graph::testing::WireDeclared;
-use tutti_sampler::testing::placed_source;
+use tutti_sampler::testing::placed_config;
 
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
@@ -32,7 +32,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Fade, FadeLaw, Prepare};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
-use tutti_sampler::{Playback, SlotId, VoicePool};
+use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig};
 use tutti_timeline::{AfterLocate, FadeOut, LoopEdit, MotionCommand, Timeline, Transport};
 use tutti_units::{At, Beat, Cents, Frame, SampleRate, Samples};
 
@@ -53,18 +53,17 @@ fn pool(cents: f64) -> VoicePool<f32> {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
-    let mut pool = VoicePool::new();
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            pitch: Cents::new(cents),
-            ..Default::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width");
-    pool
+    let voice = VoiceNodeConfig::placed(placed_config(
+        Arc::new(wave),
+        VoiceWindow::from(Beat::new(0.0)),
+    ))
+    .expect("a finite gain")
+    .pitch(Cents::new(cents));
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("stereo is a width a pool runs")
+        .row(SlotId(1), voice)
+        .expect("one row in a free key");
+    VoicePool::from(config)
 }
 
 /// Where each unit's output goes: one unit plays on both device channels
@@ -205,7 +204,7 @@ fn a_voice_plays_in_time_at_every_device_block_size() {
     }
 }
 
-/// Two nodes over one transport (two clones of one pool) both render the
+/// Two nodes over one transport (two pools of one config) both render the
 /// tone. Each reads the transport from its own block's `Env` and keeps its
 /// own record of where the playhead was (its `Clock`), so neither sees the
 /// other's render as a jump: the nodes share no cursor to get wrong.
@@ -214,8 +213,7 @@ fn a_voice_plays_in_time_at_every_device_block_size() {
 #[test]
 fn two_voices_over_one_transport_both_play_the_tone() {
     let t = Transport::new(SampleRate::of(SR));
-    let p = pool(0.0);
-    let (graph, _ed) = graph_engine(&t, vec![p.clone(), p]);
+    let (graph, _ed) = graph_engine(&t, vec![pool(0.0), pool(0.0)]);
     let b = play(&graph, &t, 512, 60, |_| {});
     assert_sounds("two voices", &b);
     for f in 0..b.len() / 2 {
@@ -229,7 +227,7 @@ fn two_voices_over_one_transport_both_play_the_tone() {
     }
 }
 
-/// A crossfade of a voice (the pool replaced by a clone of itself over
+/// A crossfade of a voice (the pool replaced by another of its config over
 /// 4096 frames) renders what the voice renders uncrossfaded, to rounding (the
 /// two gains sum to one), and the tone throughout: both halves read the
 /// transport from their blocks' `Env` during the fade.
@@ -238,10 +236,8 @@ fn a_crossfaded_voice_plays_on_through_the_fade() {
     let blocks = 60;
     let render = |fade: bool| {
         let t = Transport::new(SampleRate::of(SR));
-        let p = pool(0.0);
-        let spare = p.clone();
-        let (engine, mut ed) = graph_engine(&t, vec![p]);
-        let mut spare = Some(spare);
+        let (engine, mut ed) = graph_engine(&t, vec![pool(0.0)]);
+        let mut spare = Some(pool(0.0));
         play(&engine, &t, 512, blocks, |i| {
             if fade && i == 20 {
                 ed.replace(

@@ -690,24 +690,19 @@ fn timeline() -> Arc<OfflineTimeline> {
 /// here, the render clock's.
 fn placed_pool(cents: f64) -> tutti_sampler::VoicePool<f32> {
     use tutti_sampler::{
-        MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool, VoiceWindow,
+        MemorySourceConfig, SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig, VoiceWindow,
     };
-    let source = MemorySource::from(
-        MemorySourceConfig::new(tone(), ChannelLayout::STEREO)
-            .expect("a placeable wave")
-            .window(VoiceWindow::from(Beat::new(0.0))),
-    );
-    let mut pool = VoicePool::new();
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            pitch: tutti_units::Cents::new(cents),
-            ..Default::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width");
-    pool
+    let source = MemorySourceConfig::new(tone(), ChannelLayout::STEREO)
+        .expect("a placeable wave")
+        .window(VoiceWindow::from(Beat::new(0.0)));
+    let row = VoiceNodeConfig::placed(source)
+        .expect("a finite gain and a nonempty width")
+        .pitch(tutti_units::Cents::new(cents));
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("a stereo pool")
+        .row(SlotId(1), row)
+        .expect("a row in the table");
+    VoicePool::from(config)
 }
 
 /// The planes of `graph`, rendered as float stereo (or the graph's width)

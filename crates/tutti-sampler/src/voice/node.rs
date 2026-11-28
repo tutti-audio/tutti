@@ -191,7 +191,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
         let gain = Param::new(voice.play.gain);
         let window = voice.source.window();
         let play = voice.play;
-        let mut slot = PlaybackSlot::with_channels(SlotId(0), Box::new(voice), channels);
+        let mut slot = PlaybackSlot::new(SlotId(0), Box::new(voice));
         slot.stretch = stretch;
         Self {
             slot,
@@ -548,7 +548,11 @@ pub(crate) fn apply_loop<F: SamplerFloat>(voice: &mut Voice<F>, setting: Option<
 /// at a time and only the ones that changed (a loop set again would restart
 /// the free-running cursor's lap). A disk voice's loop is its stream's, so
 /// only a memory voice takes one here.
-fn apply_steering<F: SamplerFloat>(voice: &mut Voice<F>, was: &Steering, now: &Steering) {
+pub(crate) fn apply_steering<F: SamplerFloat>(
+    voice: &mut Voice<F>,
+    was: &Steering,
+    now: &Steering,
+) {
     if now.plays != was.plays
         && let VoiceSource::Memory(source) = &voice.source
     {

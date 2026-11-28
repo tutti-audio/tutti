@@ -8,7 +8,6 @@
 use std::ops::Range;
 
 use crate::lanes::{BlockScratch, Lanes, accumulate, audible_gain};
-use crate::nonempty;
 
 use super::clock::BlockClock;
 use super::interp::Gate;
@@ -18,9 +17,8 @@ use super::stretched::{
 };
 use super::types::{Playback, SlotId, Voice, VoiceSource};
 use crate::SamplerFloat;
-use tutti_buffers::ChannelLayout;
 use tutti_dsp::PhaseVocoder;
-use tutti_units::{Beat, Bpm, Cents, ReadRate, SamplePosition, StretchFactor};
+use tutti_units::{Beat, Bpm, ReadRate, SamplePosition};
 
 /// A [`Voice`] plus the resident time-stretch DSP processor, and the read that
 /// turns the pair into audio.
@@ -28,7 +26,7 @@ use tutti_units::{Beat, Bpm, Cents, ReadRate, SamplePosition, StretchFactor};
 /// The processor is the DSP object rather than a config record, so it stays on
 /// the slot alongside the engine sample rate it is tuned to; the control
 /// *intent* — factor, pitch, gain, direction, loop — lives in `voice.play`, and
-/// the two are kept in step by [`set_stretch`](Self::set_stretch) writing both.
+/// the two are kept in step by the owner writing both.
 ///
 /// Shared verbatim by [`VoicePool`](super::pool::VoicePool)'s slot vector and by
 /// [`VoiceNode`](super::node::VoiceNode), which holds exactly one — so the per-voice read has one
@@ -38,18 +36,17 @@ use tutti_units::{Beat, Bpm, Cents, ReadRate, SamplePosition, StretchFactor};
 /// stealing lifecycle: this one is a playback descriptor, and which slot is
 /// live is the owner's to decide.
 pub(crate) struct PlaybackSlot<F: SamplerFloat> {
-    /// Addresses this slot for every command after the add. `SlotId(0)` on a
-    /// `VoiceNode`, whose single voice has nothing to disambiguate.
+    /// The key of the row this slot plays. `SlotId(0)` on a `VoiceNode`, whose
+    /// single voice has nothing to disambiguate.
     pub(crate) id: SlotId,
     /// The source (in-memory or streaming) plus the control intent recorded for
     /// it. Which tier is live is the [`VoiceSource`] arm; the read below forks
     /// on that enum at each call site rather than through a trait, so a
     /// tier-conditional difference stays visible.
     ///
-    /// Boxed as `VoiceCommand::AddVoice` carries it, so the pool's drain moves
-    /// the box in rather than moving the `Voice` out of it — which would free
-    /// the box on the audio thread. A slot leaves the pool through the
-    /// retirement channel, box and all.
+    /// Boxed, so the pool moves the slot in and out with a pointer move that
+    /// frees nothing. A slot leaves the pool through the retirement ring, box
+    /// and all.
     pub(crate) voice: Box<Voice<F>>,
     /// The phase vocoder, present once the voice has been asked to stretch or
     /// transpose: `None` reads the source dry, the common case. From then on it
@@ -57,17 +54,14 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// no copy of the audio source: the read feeds it the source frames it asks for (see
     /// `stretched`).
     ///
-    /// Built on the control thread, never in the callback. A vocoder is built
-    /// by `VoicePoolHandle::prepare` when a `VoiceCommand::AddVoice` or a
-    /// `VoiceCommand::UpdateStretch` asks for stretching (or by a standalone
-    /// `VoiceNode`'s constructor), and the pool's drain in `process` only
-    /// moves it in; a redundant one goes back through the retirement channel
-    /// rather than being dropped on the audio thread. Boxed so that moving it
-    /// is a pointer move that frees nothing.
+    /// Built on the control thread, never in the callback: with the slot of a row
+    /// that stretches, or by a standalone `VoiceNode`'s constructor. Whether a
+    /// voice has one never changes. Boxed so that moving it is a pointer move
+    /// that frees nothing.
     ///
     /// The vocoder's controls are read from `voice.play.stretch` and
-    /// `voice.play.pitch` at each block, so a later change goes through
-    /// [`PlaybackSlot::set_stretch`], which writes those.
+    /// `voice.play.pitch` at each block, so a later change of the factor or the
+    /// pitch writes those.
     pub(crate) stretch: Option<Box<Vocoders<F>>>,
     /// Where the vocoder's next input frame is read in the source, once the
     /// voice is seated (see `stretched`).
@@ -80,32 +74,14 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// The spare's, which nothing reads (a memory voice's read does not use a seat's
     /// generation).
     pub(crate) spare_seats: u64,
-    /// Width the vocoder must be built at, remembered so a later
-    /// materialisation matches the reader rather than defaulting.
-    pub(crate) channels: ChannelLayout,
 }
 
 impl<F: SamplerFloat> PlaybackSlot<F> {
-    /// Build a slot at an explicit width: both callers (the pool's drain and
-    /// `VoiceNode`) know their own, and a default would silently mismatch it.
-    ///
-    /// The vocoder is `None` until the slot needs it: most voices never
-    /// stretch (a vocoder is about 60 KB per channel), and this constructor is
-    /// reachable from the audio thread through `VoiceCommand::AddVoice`.
-    /// A slot that arrives needing stretch gets its vocoder built on the
-    /// control thread: `VoicePool` takes one from the sender (see
-    /// `VoicePoolHandle::prepare`, which fills `AddVoice`'s `stretch`), and
-    /// `VoiceNode`'s `From` builds its own.
-    ///
-    /// Turning stretch on later (`VoiceCommand::UpdateStretch`, which reaches
-    /// `set_stretch` below through the pool's drain) is a pool-only
-    /// capability: a node's pitch is fixed at construction.
-    pub(crate) fn with_channels(
-        id: SlotId,
-        voice: Box<Voice<F>>,
-        channels: impl Into<ChannelLayout>,
-    ) -> Self {
-        let channels = nonempty(channels.into());
+    /// A slot over `voice`, with no vocoder: most voices never stretch (a vocoder is
+    /// about 60 KB per channel). A voice that does gets its vocoder from its owner,
+    /// built on the control thread: the pool's controls build one for a row that
+    /// stretches, and `VoiceNode`'s constructor builds its own.
+    pub(crate) fn new(id: SlotId, voice: Box<Voice<F>>) -> Self {
         Self {
             id,
             voice,
@@ -114,7 +90,6 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
             spare_cursor: None,
             seats: 0,
             spare_seats: 0,
-            channels,
         }
     }
 
@@ -188,49 +163,9 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
     }
 
     /// Whether the slot carries a spare vocoder.
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) fn has_spare(&self) -> bool {
         self.stretch.as_ref().is_some_and(|v| v.spare.is_some())
-    }
-
-    /// Update the stretch factors — the only entry point for mutating them.
-    /// Lock-free: writes `voice.play`, which the vocoder's controls are read
-    /// from at the next block.
-    ///
-    /// `incoming` adopts a vocoder built by the sender, for the case where this
-    /// slot has none and the new values ask for one — a voice spawned at
-    /// unity/zero correctly got `stretch: None` from `AddVoice`, so turning
-    /// stretching on later has to bring its own. Passing `None` when one is
-    /// already resident is the common path; an `incoming` that
-    /// arrives redundantly is handed back rather than swapped in, so a live vocoder
-    /// never loses its phase mid-note.
-    ///
-    /// Allocation-free and free-free, so it is safe on the audio-thread
-    /// command drain: adopting is a move, and a redundant arrival is *returned*
-    /// rather than dropped — see the caller in `VoicePool::drain_commands`,
-    /// which retires it for control-thread release. Dropping a vocoder
-    /// here would free its rings in the callback.
-    ///
-    /// Until a vocoder arrives the slot reads dry, which is why the hot paths
-    /// gate on `stretch.is_some()` and not on the intent.
-    pub(crate) fn set_stretch(
-        &mut self,
-        stretch_factor: StretchFactor,
-        pitch_cents: Cents,
-        incoming: Option<Box<Vocoders<F>>>,
-    ) -> Option<Box<Vocoders<F>>> {
-        self.voice.play.stretch = stretch_factor;
-        self.voice.play.pitch = pitch_cents;
-        match (self.stretch.is_some(), incoming) {
-            // Nothing resident and the sender sent one: adopt it. This is the
-            // case that makes turning stretch on mid-flight audible at all.
-            (false, Some(vocoder)) => {
-                self.stretch = Some(vocoder);
-                None
-            }
-            // Already have one — hand the spare back unused.
-            (true, Some(vocoder)) => Some(vocoder),
-            (_, None) => None,
-        }
     }
 
     /// Accumulate this slot's contribution to block frames `range` (at most
@@ -253,7 +188,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
     /// built on the control thread), and the tier fork is a [`VoiceSource`]
     /// match rather than a virtual call.
     ///
-    /// `width` is a plain `usize`, deliberately not a [`ChannelLayout`]: it is
+    /// `width` is a plain `usize`, deliberately not a [`ChannelLayout`](tutti_buffers::ChannelLayout): it is
     /// an already-intersected clamp that callers compute as
     /// `slot width ∧ output channels ∧ MAX_CHANNELS`, not a declaration
     /// of how many channels anything *has*.
@@ -638,17 +573,7 @@ pub(crate) enum Piece {
 /// on.
 #[inline]
 pub(crate) fn stretch_wanted(play: &Playback) -> bool {
-    stretch_values_want_filter(play.stretch, play.pitch)
-}
-
-/// The same question asked of a loose factor/pitch pair, for
-/// `VoiceCommand::UpdateStretch` —
-/// which carries the two values but no `Playback` to wrap them in.
-///
-/// [`stretch_wanted`] delegates here so the thresholds exist once.
-#[inline]
-pub(crate) fn stretch_values_want_filter(stretch: StretchFactor, pitch: Cents) -> bool {
-    (stretch.get() - 1.0).abs() > 0.001 || pitch.get().abs() > 0.5
+    (play.stretch.get() - 1.0).abs() > 0.001 || play.pitch.get().abs() > 0.5
 }
 
 #[cfg(test)]

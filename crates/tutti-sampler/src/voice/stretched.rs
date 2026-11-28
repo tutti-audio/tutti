@@ -132,10 +132,10 @@ const NOMINAL_RATE: SampleRate = SampleRate::SR_48K;
 /// window covers the start of the transport's loop, a second that primes for a loop wrap
 /// ahead of it and takes over at the wrap (see the module docs).
 ///
-/// A pool's handle builds the spare control-side and sends it through the command ring
-/// ([`VoicePoolHandle`](crate::VoicePoolHandle)): it knows the loop region and each voice's
-/// window, so only a voice under a loop carries one, at most one per resident voice
-/// (`MAX_RESIDENT_VOICES`), and the audio thread neither builds nor frees one (a spare
+/// A pool's controls build the spare control-side and send it through the command ring
+/// ([`VoicePoolControls`](crate::VoicePoolControls)): they know the loop region and each voice's
+/// window, so only a voice under a loop carries one, at most one per voice
+/// of the pool, and the audio thread neither builds nor frees one (a spare
 /// that leaves goes back through the retirement ring). A standalone
 /// [`VoiceNode`](crate::VoiceNode) has no command ring, so it carries its spare from
 /// construction. A voice with no spare that meets a wrap flushes as a seek does: it is

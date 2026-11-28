@@ -220,28 +220,22 @@ fn tone_at(i: usize) -> f32 {
 /// One sampler voice on a second of the tone, placed at beat 0 and pitched
 /// by `cents`. It reads the transport from its blocks' `Env`.
 fn voice(cents: f64) -> tutti_sampler::VoicePool<f32> {
-    use tutti_sampler::testing::placed_source;
-    use tutti_sampler::{Playback, SlotId, VoicePool, VoiceWindow};
+    use tutti_sampler::testing::placed_config;
+    use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig, VoiceWindow};
     let mut wave = tutti_buffers::Wave::new(1, SampleRate::of(RATE));
     for i in 0..RATE as usize {
         wave.append(Interleaved::new(&[tone_at(i)], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = placed_source(
+    let source = placed_config(
         Arc::new(wave),
         VoiceWindow::from(tutti_units::Beat::new(0.0)),
     );
-    let mut pool = VoicePool::new();
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            pitch: tutti_units::Cents::new(cents),
-            ..Default::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width");
-    pool
+    let row = VoiceNodeConfig::placed(source)
+        .expect("a finite gain and a nonempty width")
+        .pitch(tutti_units::Cents::new(cents));
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO).expect("a stereo pool");
+    VoicePool::from(config.row(SlotId(1), row).expect("a row in the table"))
 }
 
 /// An offline session with one sampler voice ([`voice`]) on both main
@@ -249,7 +243,7 @@ fn voice(cents: f64) -> tutti_sampler::VoicePool<f32> {
 /// frames in `block`-frame device blocks.
 fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
     let mut s = offline_48k();
-    let voice = s.graph().add(tutti_graph::Unforkable(voice(cents)));
+    let voice = s.graph().add(voice(cents));
     for port in 0..2 {
         s.graph()
             .set_sources(MainOutput::channel(port), [OutputPort::new(voice, port)])

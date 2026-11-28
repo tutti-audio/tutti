@@ -33,8 +33,14 @@ use tutti_graph::{Node, Offset, Prepare, TransportChanges};
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate, Samples};
 
 use super::DiskVoice;
-use crate::testing::{MockTransport, block, block_in, placed_source};
-use crate::{DiskStreamer, DiskStreamerConfig, Loop, Manual, MemorySource, StreamHandle};
+use crate::testing::{MockTransport, block, block_in, controlled_pool, placed_source, prepared};
+use crate::{
+    DiskStreamer, DiskStreamerConfig, Loop, Manual, MemorySource, StreamHandle, Streamed,
+    VoiceNodeConfig, VoicePool, VoicePoolConfig,
+};
+use tutti_buffers::ChannelLayout;
+use tutti_graph::Published;
+use tutti_units::{Amplitude, Cents, StretchFactor};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -927,22 +933,26 @@ fn a_seek_inside_a_block_is_a_jump_on_its_frame() {
     assert_same_outside("across a seek inside a block", &got, &want, &[fade]);
 }
 
-/// A pool, prepared, holding `voice` (a streaming voice) at `id` with its
-/// `stream`; and its handle.
-fn pool_with(
-    id: crate::SlotId,
-    voice: DiskVoice<f32>,
-    stream: StreamHandle<f32>,
-) -> (crate::VoicePool<f32>, crate::VoicePoolHandle<f32>) {
-    let (mut pool, handle) = crate::VoicePool::new().with_handle();
-    pool.prepare(&Prepare::new(
-        SampleRate::of(SR),
-        MaxBlock::of(Samples::new(BLOCK)),
-    ));
-    handle
-        .add_streaming(id, voice, stream, crate::Playback::default())
-        .expect("the command queue has room in a test");
-    (pool, handle)
+/// The streamed config over `voice` and its `stream`, at unity gain.
+fn streamed(voice: DiskVoice<f32>, stream: StreamHandle<f32>) -> VoiceNodeConfig<f32, Streamed> {
+    VoiceNodeConfig::streaming(
+        voice,
+        stream,
+        Amplitude::UNITY,
+        StretchFactor::UNITY,
+        Cents::new(0.0),
+    )
+    .expect("a stereo voice at unity gain")
+}
+
+/// A pool config of `rows`.
+fn config_of(rows: Vec<(crate::SlotId, VoiceNodeConfig<f32, Streamed>)>) -> VoicePoolConfig<f32> {
+    rows.into_iter()
+        .try_fold(
+            VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo"),
+            |config, (id, row)| config.row(id, row),
+        )
+        .expect("distinct keys")
 }
 
 /// Streams `path` on a fresh hand-stepped streamer from frame 0, primed, and
@@ -963,9 +973,9 @@ fn streaming(
     (streamer, stream, reader)
 }
 
-/// A loop set through a pool's handle on a live streaming voice reaches
-/// the streamer, and the voice loops. The handle forwards it on the
-/// control thread; the pool only records it. On a ramp whose every frame
+/// A loop written to a pool's table for a live streaming row reaches the
+/// streamer, and the voice loops. The controls write it to the stream's cell on
+/// the control thread; the pool never touches it. On a ramp whose every frame
 /// is distinct, a hard loop `[1000, 3001)` played at unity: once the
 /// first wrap and its fades are behind it, every frame the pool puts out
 /// is a frame of the loop, and the loop's head comes round again.
@@ -977,10 +987,10 @@ fn a_loop_set_through_a_pool_reaches_the_streamer_and_the_voice_loops() {
     let (mut streamer, stream, reader) = streaming(&path);
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let id = crate::SlotId(1);
-    let (mut pool, handle) = pool_with(id, voice, stream);
-    handle
-        .set_loop(id, Some(loop_frames(1_000, 3_001, 0)))
-        .expect("the command queue has room in a test");
+    let row = streamed(voice, stream);
+    let (pool, controls) = controlled_pool(VoicePool::from(config_of(vec![(id, row.clone())])));
+    let mut pool = prepared(pool, SampleRate::of(SR), BLOCK);
+    controls.replace(config_of(vec![(id, row.looped(loop_frames(1_000, 3_001, 0)))]).table());
     assert!(streamer.step_until_idle(1_000) < 1_000, "the loop lands");
 
     let clock = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
@@ -1003,8 +1013,8 @@ fn a_loop_set_through_a_pool_reaches_the_streamer_and_the_voice_loops() {
     );
 }
 
-/// A loop set through a pool on one voice reaches that voice's stream and no
-/// other: two streaming voices in one pool, each with its own stream, and a
+/// A loop written to the table for one row reaches that row's stream and no
+/// other: two streaming rows in one pool, each with its own stream, and a
 /// loop for the first leaves the second's stream as it was (and the reverse).
 /// The loop is the stream's, applied by the streamer, which the ring's
 /// published control says.
@@ -1023,35 +1033,37 @@ fn a_loop_set_on_one_pool_voice_leaves_the_other_voices_stream_alone() {
     let (stream_a, reader_a) = open(&first);
     let (stream_b, reader_b) = open(&second);
     let (ring_a, ring_b) = (Arc::clone(&reader_a.ring), Arc::clone(&reader_b.ring));
-    let (ids, mut pool_handle) = (
-        [crate::SlotId(1), crate::SlotId(2)],
-        crate::VoicePool::new().with_handle(),
-    );
-    for (id, reader, stream) in [(ids[0], reader_a, stream_a), (ids[1], reader_b, stream_b)] {
-        pool_handle
-            .1
-            .add_streaming(
-                id,
-                DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
-                stream,
-                crate::Playback::default(),
-            )
-            .expect("the command queue has room in a test");
-    }
-    let handle = &mut pool_handle.1;
+    let ids = [crate::SlotId(1), crate::SlotId(2)];
+    let voice = |reader| DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
+    let rows = [
+        streamed(voice(reader_a), stream_a),
+        streamed(voice(reader_b), stream_b),
+    ];
+    let (_pool, controls) = controlled_pool(VoicePool::from(config_of(
+        ids.into_iter().zip(rows.clone()).collect(),
+    )));
     let applied = |ring: &crate::streamer::SharedReader<f32>| ring.applied().loop_;
-    let send = |id, setting| {
-        handle
-            .set_loop(id, setting)
-            .expect("the command queue has room in a test");
+    let send = |looped: [Option<Loop>; 2]| {
+        let [a, b] = looped;
+        let with = |row: VoiceNodeConfig<f32, Streamed>, looped: Option<Loop>| match looped {
+            Some(looped) => row.looped(looped),
+            None => row,
+        };
+        controls.replace(
+            config_of(vec![
+                (ids[0], with(rows[0].clone(), a)),
+                (ids[1], with(rows[1].clone(), b)),
+            ])
+            .table(),
+        );
     };
 
-    send(ids[0], loop_on(1_000.0, 3_001.0, 0));
+    send([loop_on(1_000.0, 3_001.0, 0), None]);
     assert!(streamer.step_until_idle(1_000) < 1_000);
     assert_eq!(applied(&ring_a), loop_on(1_000.0, 3_001.0, 0));
     assert_eq!(applied(&ring_b), None, "B was not asked");
 
-    send(ids[1], loop_on(500.0, 900.0, 0));
+    send([loop_on(1_000.0, 3_001.0, 0), loop_on(500.0, 900.0, 0)]);
     assert!(streamer.step_until_idle(1_000) < 1_000);
     assert_eq!(applied(&ring_b), loop_on(500.0, 900.0, 0));
     assert_eq!(

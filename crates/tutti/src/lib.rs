@@ -683,11 +683,17 @@ pub mod sampler {
         SamplerFloat, StreamFailure, StreamFile, StreamHandle, StreamHold, StreamId, StreamPhase,
         StreamReader, StreamStart, StreamStatus, VoiceNodeControls,
     };
+    // The pool a `Graph` reading is keyed by, and what it reads.
     pub use tutti_sampler::{DirectionKind, LoopingKind, SpeedKind, WindowKind};
+    pub use tutti_sampler::{
+        DiskVoice, DiskVoiceControls, Free, MemorySource, MemorySourceConfig, Placed, PoolDrops,
+        Row, Streamed, TableError, VoiceCount, VoiceCountOutOfRange, VoiceDrive, VoiceNodeConfig,
+        VoicePool, VoicePoolConfig, VoicePoolControls, VoiceTable,
+    };
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        ControlCell, GainError, Loop, LoopError, PlaceError, Playback, SendError, SlotId,
-        StreamerStartError, StreamingAddError, VoiceNodeError, VoiceWindow,
+        ControlCell, GainError, Loop, LoopError, PlaceError, Playback, SlotId, StreamerStartError,
+        VoiceNodeError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",

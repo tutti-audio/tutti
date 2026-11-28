@@ -15,10 +15,10 @@ use std::f32::consts::TAU;
 use std::sync::Arc;
 use tutti_fixtures::signal::rms;
 
-use tutti_buffers::Wave;
+use tutti_buffers::{ChannelLayout, Wave};
 use tutti_graph::contract;
-use tutti_sampler::testing::{MockTransport, placed_source};
-use tutti_sampler::{Playback, SlotId, VoicePool};
+use tutti_sampler::testing::{MockTransport, placed_config};
+use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig};
 use tutti_units::{Beat, Bpm, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
@@ -27,8 +27,6 @@ const BLOCK: usize = 64;
 /// Left channel of a 2x-stretched 440 Hz voice, seeked to beat 5 at the
 /// block starting on frame `seek_at`.
 fn render(frames: usize, seek_at: usize) -> Vec<f32> {
-    let (pool, handle) = VoicePool::new().with_handle();
-    let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut wave = Wave::new(1, SampleRate::of(SR));
     for i in 0..frames * 4 {
@@ -37,16 +35,17 @@ fn render(frames: usize, seek_at: usize) -> Vec<f32> {
         )
         .unwrap();
     }
-    handle
-        .add(
-            SlotId(1),
-            placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0))),
-            Playback {
-                stretch: StretchFactor::new(2.0),
-                ..Default::default()
-            },
-        )
-        .expect("the command queue has room in a test");
+    let voice = VoiceNodeConfig::placed(placed_config(
+        Arc::new(wave),
+        VoiceWindow::from(Beat::new(0.0)),
+    ))
+    .expect("a finite gain")
+    .stretch(StretchFactor::new(2.0));
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("stereo is a width a pool runs")
+        .row(SlotId(1), voice)
+        .expect("one row in a free key");
+    let mut pool = contract::prepared(VoicePool::from(config), SampleRate::of(SR), BLOCK);
 
     let mut out = Vec::with_capacity(frames);
     while out.len() < frames {

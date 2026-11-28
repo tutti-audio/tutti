@@ -21,7 +21,7 @@
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
-use tutti_sampler::testing::loop_frames;
+use tutti_sampler::testing::{loop_frames, placed_config};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,8 +29,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
-use tutti_sampler::{MemorySource, MemorySourceConfig, PlayDirection, Playback, SlotId, VoicePool};
-use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
+use tutti_sampler::{
+    MemorySource, MemorySourceConfig, Placed, PlayDirection, SlotId, VoiceNodeConfig, VoicePool,
+    VoicePoolConfig, VoiceWindow,
+};
+use tutti_units::{Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
 const BLOCK: usize = 64;
@@ -124,7 +127,16 @@ fn render(node: &mut dyn Node, blocks: usize) -> Vec<f32> {
 // Reverse
 // ---------------------------------------------------------------------------
 
-/// Build a free-running voice in a pool, at `direction`.
+/// A prepared stereo pool holding `voice` at `SlotId(1)`.
+fn pooled(voice: VoiceNodeConfig<f32, Placed>) -> VoicePool<f32> {
+    let config = VoicePoolConfig::<f32>::new(ChannelLayout::STEREO)
+        .expect("stereo is a pool width")
+        .row(SlotId(1), voice)
+        .expect("a free key");
+    contract::prepared(VoicePool::from(config), SampleRate::of(SR), BLOCK)
+}
+
+/// Build a placed voice in a pool, at `direction`.
 ///
 /// Reverse lives on `PlaybackSlot` (`read_clip_sample_into`), not on
 /// `MemorySource` — the source has no direction verb, and `apply_direction` is
@@ -135,24 +147,10 @@ fn reversed_pool(wave: Arc<Wave>, direction: PlayDirection) -> (VoicePool<f32>, 
     // Placed, not free-running. `PlaybackSlot` reads `seated_position()`, which
     // needs a timeline; without one the slot returns early and emits silence, so
     // the reverse arm is never reached.
-    let source = MemorySource::from(
-        MemorySourceConfig::new(wave, ChannelLayout::STEREO)
-            .expect("a placeable wave")
-            .window(tutti_sampler::VoiceWindow::default()),
-    );
-
-    let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            direction,
-            gain: Amplitude::new(1.0),
-            ..Default::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width");
-    (pool, clock)
+    let voice = VoiceNodeConfig::placed(placed_config(wave, VoiceWindow::default()))
+        .expect("a finite gain and a nonempty width")
+        .direction(direction);
+    (pooled(voice), clock)
 }
 
 /// Render a placed pool, advancing its clock once per block.
@@ -580,24 +578,12 @@ fn a_zero_length_crossfade_is_a_hard_loop() {
 fn a_reversed_voice_with_a_loop_set_stays_bounded() {
     const LEN: usize = 4096;
     let clock = Clock::new();
-    let mut source = MemorySource::from(
-        MemorySourceConfig::new(ramp(LEN), ChannelLayout::STEREO)
-            .expect("a placeable wave")
-            .window(tutti_sampler::VoiceWindow::default()),
-    );
-    source.set_loop(Some(loop_frames(500, 2500, 0)));
-
-    let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            direction: PlayDirection::Reverse,
-            gain: Amplitude::new(1.0),
-            ..Default::default()
-        },
+    let voice = VoiceNodeConfig::placed(
+        placed_config(ramp(LEN), VoiceWindow::default()).looped(loop_frames(500, 2500, 0)),
     )
-    .expect("a finite gain and a nonempty width");
+    .expect("a finite gain and a nonempty width")
+    .direction(PlayDirection::Reverse);
+    let mut pool = pooled(voice);
 
     let out = render_placed(&mut pool, &clock, 100);
     for (i, &s) in out.iter().enumerate() {

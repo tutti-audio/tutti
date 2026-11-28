@@ -13,15 +13,16 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use tutti_buffers::{Interleaved, Planes, Wave};
-use tutti_graph::contract;
-use tutti_sampler::testing::{MockTransport, placed_source, wait_for_open};
+use tutti_buffers::{ChannelLayout, Interleaved, Planes, Wave};
+use tutti_graph::{Published, contract};
+use tutti_sampler::testing::{MockTransport, controlled_pool, placed_config, wait_for_open};
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, Playback, SlotId, StepOutcome, StreamHandle, StreamStart,
-    VoicePool, VoicePoolHandle, VoiceWindow,
+    DiskStreamer, DiskVoice, Manual, Row, SlotId, StepOutcome, StreamHandle, StreamStart,
+    VoiceNodeConfig, VoicePool, VoicePoolConfig, VoicePoolControls, VoiceWindow,
 };
 use tutti_units::{
-    Beat, BeatDuration, Bpm, Cents, PlaybackRate, SamplePosition, SampleRate, StretchFactor,
+    Amplitude, Beat, BeatDuration, Bpm, Cents, PlaybackRate, SamplePosition, SampleRate,
+    StretchFactor,
 };
 
 const SR: f64 = 48_000.0;
@@ -50,19 +51,27 @@ fn bound() -> f64 {
     4.0 * 2.0 * 11.0 * f64::from(f32::EPSILON)
 }
 
-/// The pool, prepared, and the stretch to hold at unity once it has a vocoder.
-fn pool() -> (impl tutti_graph::Node, VoicePoolHandle<f32>) {
-    let (pool, handle) = VoicePool::new().with_handle();
-    (contract::prepared(pool, SampleRate::of(SR), BLOCK), handle)
+/// A pool over `row` under key 1, prepared, and its controls.
+fn pool(row: Row<f32>) -> (VoicePool<f32>, VoicePoolControls<f32>) {
+    let (pool, controls) = controlled_pool(VoicePool::from(table(row)));
+    (
+        contract::prepared(pool, SampleRate::of(SR), BLOCK),
+        controls,
+    )
 }
 
-/// A stretched voice added at 1.5 and turned back to unity: it keeps its vocoder.
-fn play(speed: f64) -> Playback {
-    Playback {
-        speed: PlaybackRate::of(speed),
-        stretch: StretchFactor::new(1.5),
-        ..Default::default()
-    }
+/// The pool config holding `row` under key 1.
+fn table(row: Row<f32>) -> VoicePoolConfig<f32> {
+    VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("stereo is a width a pool runs")
+        .row(SlotId(1), row)
+        .expect("one row in a free key")
+}
+
+/// A stretching row at unity: it owns its vocoder, where it is the identity within the
+/// transforms' rounding.
+fn unity(row: impl Into<Row<f32>>) -> Row<f32> {
+    row.into().stretching(StretchFactor::UNITY, Cents::new(0.0))
 }
 
 /// Renders `FRAMES` frames of the pool's left channel under a transport rolling from beat
@@ -114,17 +123,13 @@ fn a_memory_voice_sounds_from_the_frame_its_beat_falls_on() {
         let mut wave = Wave::new(2, SampleRate::of(SR));
         wave.append(Interleaved::new(&hit(), wave.layout()).unwrap())
             .unwrap();
-        let (mut pool, handle) = pool();
-        handle
-            .add(
-                SlotId(1),
-                placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(1.0))),
-                play(speed),
-            )
-            .expect("the command queue has room in a test");
-        handle
-            .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-            .expect("the command queue has room in a test");
+        let voice = VoiceNodeConfig::placed(placed_config(
+            Arc::new(wave),
+            VoiceWindow::from(Beat::new(1.0)),
+        ))
+        .expect("a finite gain")
+        .speed(PlaybackRate::of(speed));
+        let (mut pool, _controls) = pool(unity(voice));
         assert_onset(
             &render(&mut pool, || {}),
             speed,
@@ -159,13 +164,16 @@ fn a_disk_voice_sounds_from_the_frame_its_beat_falls_on() {
     for speed in SPEEDS {
         let dir = tempfile::tempdir().expect("a temp dir");
         let (mut streamer, stream, voice) = disk_voice(&dir.path().join("hit.wav"));
-        let (mut pool, handle) = pool();
-        handle
-            .add_streaming(SlotId(1), voice, stream, play(speed))
-            .expect("the command queue has room in a test");
-        handle
-            .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-            .expect("the command queue has room in a test");
+        let voice = VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            Amplitude::new(1.0),
+            StretchFactor::UNITY,
+            Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width")
+        .speed(PlaybackRate::of(speed));
+        let (mut pool, _controls) = pool(unity(voice));
         let out = render(&mut pool, || {
             let _ = streamer.step();
         });
@@ -185,27 +193,18 @@ fn a_voice_that_leaves_its_window_and_re_enters_sounds_from_the_re_entry_frame()
     let mut wave = Wave::new(2, SampleRate::of(SR));
     wave.append(Interleaved::new(&hit(), wave.layout()).unwrap())
         .unwrap();
-    let (mut pool, handle) = pool();
-    handle
-        .add(
-            SlotId(1),
-            placed_source(
-                Arc::new(wave),
-                VoiceWindow::span(Beat::new(0.0), BeatDuration::new(0.25)),
-            ),
-            play(1.0),
-        )
-        .expect("the command queue has room in a test");
-    handle
-        .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-        .expect("the command queue has room in a test");
+    let voice = VoiceNodeConfig::placed(placed_config(
+        Arc::new(wave),
+        VoiceWindow::span(Beat::new(0.0), BeatDuration::new(0.25)),
+    ))
+    .expect("a finite gain");
+    let (mut pool, controls) = pool(unity(voice.clone()));
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut out = Vec::new();
     while out.len() < FRAMES {
         if out.len() == 12_032 {
-            handle
-                .set_window(SlotId(1), VoiceWindow::from(Beat::new(1.0)))
-                .expect("the command queue has room in a test");
+            let moved = unity(voice.clone().window(VoiceWindow::from(Beat::new(1.0))));
+            controls.replace(table(moved).table());
         }
         let block = contract::drive_input(
             &mut pool,
@@ -241,7 +240,7 @@ fn a_voice_that_leaves_its_window_and_re_enters_sounds_from_the_re_entry_frame()
 #[test]
 fn a_disk_voice_whose_ring_has_not_caught_up_plays_on_time_and_counts_an_underrun() {
     use tutti_graph::Node;
-    use tutti_sampler::{VoiceNode, VoiceNodeConfig};
+    use tutti_sampler::VoiceNode;
     const AT: usize = 4_000;
     const RES: usize = 128;
     let dir = tempfile::tempdir().expect("a temp dir");

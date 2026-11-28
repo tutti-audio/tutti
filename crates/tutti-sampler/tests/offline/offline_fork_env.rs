@@ -6,7 +6,7 @@
 //! outcome, for every node shape (`VoicePool`, `VoiceNode`, a bare
 //! `MemorySource`, one behind another node): a fork rendered on a
 //! stopped render transport is silent while the live graph, on a rolling
-//! one, sounds; a fork holds nothing the live graph's handles reach; and a
+//! one, sounds; a fork holds nothing the live graph's controls reach; and a
 //! node that reads no transport is unaffected.
 //!
 //! Stated behaviourally, on rendered audio: "a clock lives in this field and
@@ -14,7 +14,7 @@
 //! somewhere else.
 
 use tutti_graph::testing::WireDeclared;
-use tutti_sampler::testing::{placed_source, source_config, voice_node};
+use tutti_sampler::testing::{placed_config, placed_source, source_config, voice_node};
 
 use tutti_buffers::Mono;
 use tutti_graph::EdgeId;
@@ -26,12 +26,15 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
+use tutti_graph::Published;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, ForkTarget, IntoNode, Io, Node, Prepare, RenderMode, Shape,
     Status, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::{MemorySource, Playback, SlotId, VoiceNode, VoicePool};
+use tutti_sampler::{
+    MemorySource, Playback, SlotId, VoiceNode, VoiceNodeConfig, VoicePool, VoicePoolConfig,
+};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -110,26 +113,30 @@ fn fork(ed: &Editor) -> Executor {
     exec
 }
 
-/// A fork of a pool is born empty and channel-less, and steals no command
-/// the live pool needs — each command is delivered to exactly one consumer,
-/// so a shared channel means the worker steals playback.
+/// A table written to the live pool after a fork reaches the live pool only: the
+/// fork took the rows the table held when it was taken (none), so it stays silent
+/// while the live pool sounds the row.
 #[test]
-fn a_forked_pool_steals_no_commands_from_the_live_one() {
-    let (ed, mut exec, handle) = graph(VoicePool::new(), 2);
+fn a_table_written_after_a_fork_reaches_only_the_live_pool() {
+    let empty = VoicePoolConfig::new(ChannelLayout::STEREO).expect("stereo is a width a pool runs");
+    let (ed, mut exec, controls) = graph(VoicePool::from(empty.clone()), 2);
     let mut forked = fork(&ed);
 
-    // The live handle still feeds the ORIGINAL pool.
-    handle
-        .add(SlotId(1), placed(), Playback::default())
-        .expect("the command queue has room in a test");
+    let row = VoiceNodeConfig::placed(placed_config(
+        ramp_wave(),
+        VoiceWindow::from(Beat::new(0.0)),
+    ))
+    .expect("a finite gain");
+    let written = empty.row(SlotId(1), row).expect("one row in a free key");
+    controls.replace(written.table());
 
     assert!(
         peak(&mut forked, 2, rolling()) == 0.0,
-        "the render's pool must never receive live commands"
+        "the render's pool must never hear the live table"
     );
     assert!(
         peak(&mut exec, 2, rolling()) > 1e-6,
-        "the live pool must still receive its own commands"
+        "the live pool must still hear its own table"
     );
 }
 

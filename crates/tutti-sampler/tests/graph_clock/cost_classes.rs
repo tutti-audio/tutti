@@ -15,13 +15,14 @@ use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::signal::plane_bits as bits;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
 use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::{Playback, VoiceNode, VoicePool, Wave};
+use tutti_sampler::{Playback, VoiceNode, VoicePool, VoicePoolConfig, Wave};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
@@ -169,7 +170,9 @@ fn each_node_declares_its_class() {
     assert_eq!(free_source(Arc::clone(&wave)).shape().cost, Cost::Moderate);
     assert_eq!(plain.shape().cost, Cost::Moderate);
     assert_eq!(stretched(&wave).shape().cost, Cost::Heavy);
-    assert_eq!(VoicePool::<f32>::new().shape().cost, Cost::Heavy);
+    let empty =
+        VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo is a width a pool runs");
+    assert_eq!(VoicePool::from(empty).shape().cost, Cost::Heavy);
 }
 
 /// Twelve `Moderate` reads beside two stretched voices, summed through a
