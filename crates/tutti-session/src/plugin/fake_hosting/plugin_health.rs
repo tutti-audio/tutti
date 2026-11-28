@@ -17,7 +17,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_platform::Instant;
 use tutti_units::Calls;
 
-use crate::{DetachedSession, Phase, PhaseCx, PluginHealth, Session, SessionEvent};
+use crate::{Phase, PhaseCx, PluginHealth, Session, SessionEvent};
 use crate::{PluginChange, PluginEvent};
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
@@ -118,13 +118,16 @@ fn handle_with(cause: Option<PluginFailure>) -> PluginHandle {
     )
 }
 
-/// A detached session with a fake plugin (reporting `cause`) hosted at a dc
+/// An offline session with a fake plugin (reporting `cause`) hosted at a dc
 /// node.
-fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
+fn session_with(cause: Option<PluginFailure>) -> (Session, NodeKey) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .outputs(ChannelLayout::STEREO)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(
         &mut s,
@@ -138,7 +141,7 @@ fn session_with(cause: Option<PluginFailure>) -> (DetachedSession, NodeKey) {
 }
 
 /// `Phase::Plugins` at `t0 + ms`: the deaths it reported.
-fn deaths_at(s: &mut DetachedSession, t0: Instant, ms: u64) -> Vec<(NodeKey, PluginFailure)> {
+fn deaths_at(s: &mut Session, t0: Instant, ms: u64) -> Vec<(NodeKey, PluginFailure)> {
     let mut out = Vec::new();
     s.run_phase(
         Phase::Plugins,
@@ -159,7 +162,7 @@ fn deaths_at(s: &mut DetachedSession, t0: Instant, ms: u64) -> Vec<(NodeKey, Plu
 
 /// One observation every half window, as frames at 60 Hz span it: `frames`
 /// of them. The deaths each reported.
-fn observe(s: &mut DetachedSession, frames: usize) -> Vec<(NodeKey, PluginFailure)> {
+fn observe(s: &mut Session, frames: usize) -> Vec<(NodeKey, PluginFailure)> {
     let _ = tutti_fixtures::main_thread();
     let t0 = Instant::now();
     let half = Liveness::DEFAULT_WINDOW.as_millis() as u64 / 2;
@@ -180,8 +183,11 @@ fn a_non_plugin_node_never_marks_the_graph_edited() {
     let _ = tutti_fixtures::main_thread();
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .outputs(ChannelLayout::STEREO)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     s.graph().add(ForkByClone(Const::mono(0.0)));
     s.commit();
     assert!(
@@ -308,11 +314,11 @@ fn a_live_plugin_is_never_declared_dead() {
     assert!(s.graph_ref().contains(node), "a healthy plugin stays wired");
 }
 
-/// A detached session with a fake plugin hosted at a dc node, and the
+/// An offline session with a fake plugin hosted at a dc node, and the
 /// listeners its backend reports through (firing one is the plugin
 /// reporting).
 fn session_reporting() -> (
-    DetachedSession,
+    Session,
     NodeKey,
     tutti_plugin_host::ParameterChangeSink,
     tutti_plugin_host::RefreshSink,
@@ -334,8 +340,11 @@ fn session_reporting() -> (
     .invalidate_sink(invalidate.clone());
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .outputs(ChannelLayout::STEREO)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(
         &mut s,
@@ -348,7 +357,7 @@ fn session_reporting() -> (
 }
 
 /// The plugin events one `Phase::Plugins` reported.
-fn plugin_events(s: &mut DetachedSession) -> Vec<PluginEvent> {
+fn plugin_events(s: &mut Session) -> Vec<PluginEvent> {
     let mut out = Vec::new();
     s.run_phase(Phase::Plugins, PhaseCx::at(Instant::now()), &mut out);
     out.into_iter()
@@ -535,7 +544,7 @@ fn a_graph_that_refuses_the_silent_stand_in_is_reported_and_the_node_is_not_sile
 fn a_failed_periodic_snapshot_is_counted() {
     let (mut s, node) = session_with(None);
     let token = Arc::clone(&s.graph.plugins[&node].snapshot_token);
-    let diagnostics = |s: &DetachedSession| {
+    let diagnostics = |s: &Session| {
         s.plugin_view(node)
             .expect("hosted")
             .diagnostics()
@@ -569,7 +578,7 @@ fn a_failed_periodic_snapshot_is_counted() {
 fn a_panicked_round_trip_is_counted() {
     let (s, node) = session_with(None);
     let panics = s.graph.plugins[&node].panicked_round_trips.writer();
-    let count = |s: &DetachedSession| {
+    let count = |s: &Session| {
         s.plugin_view(node)
             .expect("hosted")
             .diagnostics()

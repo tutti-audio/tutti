@@ -404,7 +404,7 @@ struct Figures {
 
 fn measure(block: usize, workers: Workers, variant: Variant) -> Figures {
     let mut s = scene(block, workers, variant);
-    let counter = s.blocks().expect("an offline engine");
+    let counter = s.blocks();
     let mut out = vec![0.0f32; block * 2];
     let blocks = |span: Seconds| span.to_samples(SampleRate::of(RATE)).get().div_ceil(block);
     let warm = blocks(WARM);

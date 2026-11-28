@@ -14,7 +14,7 @@ pub(crate) struct TransportPart {
     transport: Transport,
     /// The transport's verbs and the engine's block clock behind
     /// [`Session::playhead`](crate::Session::playhead); the clock is `None`
-    /// detached, where nothing renders.
+    /// until the builder hands it over.
     pub(crate) handle: TransportHandle,
     /// The metronome's node, when the builder inserted one.
     pub(crate) click: Option<NodeKey>,

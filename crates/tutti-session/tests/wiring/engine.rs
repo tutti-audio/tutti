@@ -354,8 +354,8 @@ fn an_offline_render_feeds_the_load_and_the_block_counts() {
     for _ in 0..4 {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     }
-    assert_eq!(s.blocks().expect("an offline engine").get().blocks, 4);
-    let mean = s.load().expect("an offline engine").get().get();
+    assert_eq!(s.blocks().get().blocks, 4);
+    let mean = s.load().get().get();
     assert!(mean > 0.0, "a render takes some time");
 }
 
@@ -548,15 +548,16 @@ fn closing_a_meter_names_one_that_is_not_open() {
     );
 }
 
-/// Closing the heard tap with none opened, or twice, is a no-op, and a
-/// detached session says it has no engine.
+/// Closing the heard tap with none opened, or twice, is a no-op.
 #[test]
 fn closing_the_heard_tap_with_none_open_is_a_no_op() {
     let mut s = offline_48k();
-    assert_eq!(s.close_heard_tap(), Ok(()), "none was opened");
-    let tap = s.open_heard_tap(Samples::new(64)).expect("an engine");
-    assert_eq!(s.close_heard_tap(), Ok(()));
-    assert_eq!(s.close_heard_tap(), Ok(()), "closed already");
+    // None was opened.
+    s.close_heard_tap();
+    let tap = s.open_heard_tap(Samples::new(64));
+    s.close_heard_tap();
+    // Closed already.
+    s.close_heard_tap();
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     assert_eq!(tap.available(), Samples::new(0), "closed before it wrote");
@@ -782,7 +783,7 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
         .taps()
         .open_main_output(Samples::new(16_384))
         .expect("the sources exist");
-    let mut heard = s.open_heard_tap(Samples::new(16_384)).expect("an engine");
+    let mut heard = s.open_heard_tap(Samples::new(16_384));
     let _ = s.update();
     let motion = s.transport_handle();
     motion.play().expect("room");
@@ -846,9 +847,9 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
         .unwrap()
         .unfaded();
     let _ = s.update();
-    let first = s.open_heard_tap(Samples::new(8)).expect("an engine");
+    let first = s.open_heard_tap(Samples::new(8));
     // The latest open wins: the first reader ends.
-    let tap = s.open_heard_tap(Samples::new(1_024)).expect("an engine");
+    let tap = s.open_heard_tap(Samples::new(1_024));
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     assert_eq!(tap.available(), Samples::new(64));

@@ -8,17 +8,17 @@ use tutti_platform::monotonic_ns;
 use tutti_timeline::{FadeOut, MotionCommand, TimedError};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
-use crate::{AppKey, Clock, Playhead, PrerollTable, Session, SetRateError, Stepped};
+use crate::{AppKey, Clock, Offline, Playhead, PrerollTable, Session, SessionFloat, SetRateError};
 
-impl<K: AppKey, C: Stepped> Session<K, C> {
+impl<K: AppKey, F: SessionFloat> Session<K, Offline<F>> {
     /// Re-prepares the graph for `rate`, and the rest of the session with it:
     /// the transport converts frame-timed commands in the new rate's frames,
     /// MIDI's outputs and every open sampler stream follow, and the figures of
-    /// the plan sent are published. With the executor local, both halves of
-    /// the re-prepare run here, now; with it taken, the second half lands on
-    /// a later update, which publishes the resumed plan's figures at its
-    /// commit (until then they are the old plan's). A session on a device
-    /// re-rates with its restart.
+    /// the plan sent are published. The re-prepare's second half lands once
+    /// a block has rendered and an update has collected, and that update
+    /// publishes the resumed plan's figures at its commit (until then they are
+    /// the old plan's, and a commit is [`Retry`](crate::Committed::Retry)). A
+    /// session on a device re-rates with its restart.
     ///
     /// # Errors
     ///
@@ -72,8 +72,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// It moves in block steps; [`beat_now`](Self::beat_now) (or
     /// [`Playhead::beat_now`] on a snapshot already held) is the beat
-    /// extrapolated to the moment a UI draws. A session with no engine
-    /// rendering (detached, or before the first block) reads
+    /// extrapolated to the moment a UI draws. A session before its first
+    /// block reads
     /// [`Playhead::default`]: stopped at the origin, with no clock reading
     /// ([`Playhead::at`] is `None`). An offline bounce renders a fork on
     /// its own timeline and never moves this one.

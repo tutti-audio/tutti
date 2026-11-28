@@ -20,11 +20,9 @@
 //! # Where the audio side lives
 //!
 //! `Editor::new` builds the pair. The executor stays here ("local") until
-//! `take_audio_side` or the session builder hands it
-//! to an engine. While it is local, a commit is applied at once on this
-//! thread and its box collected, so a detached graph never meets
-//! back-pressure, and `Session::render_frame`
-//! runs it.
+//! the session builder hands it to an engine. While it is local, a commit is
+//! applied at once on this thread and its box collected, so a graph still
+//! being built never meets back-pressure.
 //!
 //! # A param write lands on the next block, never at once
 //!
@@ -37,10 +35,6 @@ use std::any::Any;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tutti_buffers::Float;
-#[cfg(feature = "testing")]
-use tutti_buffers::InterleavedMut;
-#[cfg(feature = "testing")]
-use tutti_graph::TransportPosition;
 
 #[cfg(feature = "export")]
 use crate::fork::PendingExport;
@@ -50,8 +44,6 @@ use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
 #[cfg(feature = "device")]
 use tutti_graph::CompileError;
-#[cfg(feature = "testing")]
-use tutti_graph::fade_gains;
 use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, FeedbackFrom, NodeBus};
 use tutti_graph::{
     CommitError, EdgeGainError, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, Fade,
@@ -81,7 +73,7 @@ mod wiring;
 
 pub use observe::{MainOutputReader, Meters, NotReopened, Reopened, Taps};
 #[cfg(feature = "testing")]
-pub use testing::{AudioSide, Testing};
+pub use testing::Testing;
 pub(crate) use wiring::Pending;
 
 use crate::key::{
@@ -295,15 +287,6 @@ struct Stash {
     params: Outgoing,
 }
 
-/// The executor, while this side still holds it, and what a local render
-/// needs beside it.
-struct Local<F: Float> {
-    exec: Executor<F>,
-    /// Planar scratch, one `Vec` per main output.
-    #[cfg(feature = "testing")]
-    scratch: Vec<Vec<F>>,
-}
-
 /// A node waiting to be swapped in, its type erased.
 trait ErasedSwap<F: Float>: Send {
     /// Swap it in under `node`.
@@ -429,7 +412,9 @@ struct Placed<F: Float> {
 /// `Editor`: the edit/commit boundary stays visible.
 pub struct Graph<F: Float = f32> {
     editor: Editor<F>,
-    local: Option<Box<Local<F>>>,
+    /// The executor, while this side still holds it: from `Editor::new` until
+    /// the engine takes it.
+    local: Option<Box<Executor<F>>>,
     nodes: BTreeMap<NodeKey, Entry>,
     /// What each node's params are written through: the session's value
     /// table, which the session's `Values` share.
@@ -657,11 +642,7 @@ impl<F: Float> Graph<F> {
         main_output_meter.enable();
         Self {
             editor,
-            local: Some(Box::new(Local {
-                exec,
-                #[cfg(feature = "testing")]
-                scratch: Vec::new(),
-            })),
+            local: Some(Box::new(exec)),
             nodes: BTreeMap::new(),
             values: ValueTable::new(),
             refused: None,
@@ -747,12 +728,12 @@ impl<F: Float> Graph<F> {
         Some(Arc::new(pool))
     }
 
-    /// Hand the executor over: to the engine, or to a test's audio side.
+    /// Hand the executor over to the engine.
     fn take_executor(&mut self) -> Executor<F> {
-        self.local
+        *self
+            .local
             .take()
             .expect("the graph's audio side was already taken")
-            .exec
     }
 
     /// Build the engine over this graph's audio side, which it takes:
@@ -895,7 +876,7 @@ impl<F: Float> Graph<F> {
             if self.editor.in_flight() == 0 {
                 break;
             }
-            local.exec.apply_pending();
+            local.apply_pending();
             let retired = self.editor.collect();
             Self::bury(&mut self.retiring, &retired);
         }
@@ -3956,72 +3937,6 @@ impl<F: Float> Graph<F> {
         }
         self.refused = Some(e.clone());
         true
-    }
-
-    /// Render one frame on the local executor, under `transport`.
-    #[cfg(feature = "testing")]
-    pub(crate) fn render_local(
-        &mut self,
-        transport: &TransportPosition,
-        output: InterleavedMut<'_, F>,
-    ) {
-        let local = self
-            .local
-            .as_mut()
-            .expect("render_frame needs the audio side, and it was taken");
-        render(&mut local.exec, &mut local.scratch, transport, output);
-    }
-}
-
-/// Render one frame of `exec` into `output` (one sample per main output),
-/// with silence on every main input.
-///
-/// `output` wider than the plan reads silence past it; narrower, the extra
-/// channels are dropped — the width a caller passes is its own business.
-#[cfg(feature = "testing")]
-fn render<F: Float>(
-    exec: &mut Executor<F>,
-    scratch: &mut Vec<Vec<F>>,
-    transport: &TransportPosition,
-    mut output: InterleavedMut<'_, F>,
-) {
-    let output = output.samples_mut();
-    exec.apply_pending();
-    let Some(plan) = exec.plan() else {
-        output.fill(F::ZERO);
-        return;
-    };
-    let (ins, outs, main_output) = (
-        plan.main_inputs() as usize,
-        plan.rendered_outputs(),
-        plan.main_outputs(),
-    );
-    scratch.resize_with(outs, || vec![F::ZERO]);
-    let silence = F::ZERO;
-    let inputs: Vec<&[F]> = (0..ins).map(|_| std::slice::from_ref(&silence)).collect();
-    let fade = exec.main_output_fade();
-    let mut outputs: Vec<&mut [F]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
-    exec.process(1, transport, &inputs, &mut outputs);
-    // With no device there is no fold: the main output's channels are the output's
-    // by index, and a main output change crossfades channel by channel, the old
-    // main output's channels after the new main output's.
-    let gains = fade.map(|f| fade_gains::<F>(f.fade.law, f.done, f.fade.duration));
-    for (c, o) in output.iter_mut().enumerate() {
-        let new = scratch
-            .get(c)
-            .filter(|_| c < main_output)
-            .map_or(F::ZERO, |s| s[0]);
-        *o = match (fade, gains) {
-            (Some(f), Some((go, gn))) => {
-                let old = if c < f.width {
-                    scratch[main_output + c][0]
-                } else {
-                    F::ZERO
-                };
-                old * go + new * gn
-            }
-            _ => new,
-        };
     }
 }
 

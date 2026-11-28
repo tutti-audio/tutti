@@ -276,7 +276,7 @@ impl LoadedMidi {
     /// let mut bytes = Vec::new();
     /// file.write(&mut bytes)?;
     ///
-    /// let mut session = Session::builder().build_detached(SampleRate::SR_48K)?;
+    /// let mut session = Session::builder().sample_rate(SampleRate::SR_48K).block_dates(crate::BlockDates::Frames).build()?;
     /// let loaded = tutti_fixtures::block_on(session.midi().load_midi(bytes))?;
     /// let map = loaded.tempo()?.clone();
     /// assert_eq!(map.tempo_at(Beat::new(0.0)), Bpm::of(100.0));

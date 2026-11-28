@@ -839,12 +839,15 @@ mod tests {
     use tutti_units::{Hz, Q, SampleRate};
 
     use super::*;
-    use crate::{DetachedSession, Key, Session};
+    use crate::{Key, Session};
 
-    fn detached() -> (DetachedSession, Key<SvfFilterNode<f32>>) {
+    fn detached() -> (Session, Key<SvfFilterNode<f32>>) {
         let mut s = Session::builder()
             .outputs_floor(ChannelLayout::MONO)
-            .build_detached(SampleRate::SR_48K)
+            .outputs(ChannelLayout::MONO)
+            .sample_rate(SampleRate::SR_48K)
+            .block_dates(crate::BlockDates::Frames)
+            .build()
             .expect("builds");
         let lp = s.graph().add(SvfFilterNode::from(
             SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)

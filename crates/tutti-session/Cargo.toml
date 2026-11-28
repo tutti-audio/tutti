@@ -158,8 +158,8 @@ vst2 = ["plugin", "tutti-plugin/vst2"]
 vst3 = ["plugin", "tutti-plugin/vst3"]
 clap = ["plugin", "tutti-plugin/clap"]
 au = ["plugin", "tutti-plugin/au"]
-# What a test reads of the graph's plumbing (`Graph::testing`, `take_audio_side`,
-# `AudioSide`). Off by default; this crate's own tests turn it on through the
+# What a test reads of the graph's plumbing (`Graph::testing`). Off by default;
+# this crate's own tests turn it on through the
 # dev-dependency on itself below, as `tutti-graph` does.
 testing = ["tutti-cpal?/testing"]
 
