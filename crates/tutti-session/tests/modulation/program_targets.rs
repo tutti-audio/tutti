@@ -23,8 +23,7 @@ const RATE: f64 = 48_000.0;
 /// routed into it at `depth`, settled and rendered once. Returns the param and
 /// the route.
 fn scene(
-    s: &mut tutti_session::DetachedSession,
-    side: &mut tutti_session::AudioSide,
+    s: &mut tutti_session::Session,
     source: impl FnOnce(&mut tutti_session::Mods<'_>) -> ModSourceId,
     depth: f64,
 ) -> (ParamRef, ModSourceId, ModRouteId) {
@@ -38,7 +37,7 @@ fn scene(
         .route(RouteSpec::new(source, cutoff, Bipolar::of(depth)))
         .unwrap();
     settle(s);
-    render(side, 1_024, 128);
+    render(s, 1_024, 128);
     (cutoff, source, route)
 }
 
@@ -52,16 +51,13 @@ fn ramp(from: f64, to: f64) -> Trajectory<Hz> {
 }
 
 /// The program the lane on `cutoff` holds now.
-fn program(
-    s: &tutti_session::DetachedSession,
-    cutoff: ParamRef,
-) -> Arc<tutti_modulation::ControlProgram> {
+fn program(s: &tutti_session::Session, cutoff: ParamRef) -> Arc<tutti_modulation::ControlProgram> {
     let (_, lane) = s.mod_state().lane(cutoff.key()).expect("a lane");
     lane.program()
 }
 
 /// The clock of the one layer of the lane's program.
-fn clock(s: &tutti_session::DetachedSession, cutoff: ParamRef) -> LayerClock {
+fn clock(s: &tutti_session::Session, cutoff: ParamRef) -> LayerClock {
     program(s, cutoff).layers()[0].clock
 }
 
@@ -71,11 +67,11 @@ fn clock(s: &tutti_session::DetachedSession, cutoff: ParamRef) -> LayerClock {
 /// 0.75 and offsets by 300; bipolar `Hold` below full scale offsets by 0.
 #[test]
 fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, _, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let mut s = rig(1);
+    let (cutoff, _, route) = scene(&mut s, |m| m.macro_(0.5), 0.4);
     // The route's depth is the lane's cell, an `f32` in the program: its
     // offsets carry that rounding.
-    let offset = |s: &tutti_session::DetachedSession| {
+    let offset = |s: &tutti_session::Session| {
         let amount = program(s, cutoff).layers()[0].amount;
         tutti_modulation::Amount {
             depth: s.mods().route(route).expect("the route").depth,
@@ -116,13 +112,8 @@ fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
 /// the one in force.**
 #[test]
 fn a_get_before_the_update_is_the_pending_value() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, lfo, route) = scene(
-        &mut s,
-        &mut side,
-        |m| m.lfo(Lfo::sine().rate(Hz::new(2.0))),
-        0.5,
-    );
+    let mut s = rig(1);
+    let (cutoff, lfo, route) = scene(&mut s, |m| m.lfo(Lfo::sine().rate(Hz::new(2.0))), 0.5);
     let before = program(&s, cutoff);
     assert_eq!(s.get(route.polarity()).unwrap(), Polarity::Bipolar);
     assert_eq!(s.get(route.curve()).unwrap(), Law::Linear);
@@ -150,8 +141,8 @@ fn a_get_before_the_update_is_the_pending_value() {
 /// where it began publishes nothing.**
 #[test]
 fn two_writes_before_an_update_publish_the_second_value_once() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, _, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let mut s = rig(1);
+    let (cutoff, _, route) = scene(&mut s, |m| m.macro_(0.5), 0.4);
     let settled = program(&s, cutoff);
 
     s.set(route.polarity().to(Polarity::Unipolar)).unwrap();
@@ -184,13 +175,8 @@ fn two_writes_before_an_update_publish_the_second_value_once() {
 /// gain 5 over the next second.
 #[test]
 fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, lfo, _) = scene(
-        &mut s,
-        &mut side,
-        |m| m.lfo(Lfo::sine().rate(Hz::new(2.0))),
-        0.5,
-    );
+    let mut s = rig(1);
+    let (cutoff, lfo, _) = scene(&mut s, |m| m.lfo(Lfo::sine().rate(Hz::new(2.0))), 0.5);
     assert!(matches!(
         clock(&s, cutoff),
         LayerClock::Seconds {
@@ -201,7 +187,7 @@ fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
     ));
 
     s.set(lfo.rate().to(LfoRate::Hz(Hz::new(5.0)))).unwrap();
-    frame(&mut s, &mut side);
+    frame(&mut s);
     let LayerClock::Seconds {
         rate,
         anchor: Some(anchor),
@@ -248,10 +234,9 @@ fn an_lfo_rate_set_lands_at_the_update_and_the_phase_continues() {
 /// the layer is at `beat / per_cycle` cycles.**
 #[test]
 fn an_lfo_rate_in_beats_per_cycle_is_bar_locked() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let (cutoff, lfo, _) = scene(
         &mut s,
-        &mut side,
         |m| m.lfo(Lfo::sine().phase(tutti_units::PhaseIncrement::new(0.25))),
         0.5,
     );
@@ -274,10 +259,9 @@ fn an_lfo_rate_in_beats_per_cycle_is_bar_locked() {
 /// a beat follows the new span at once.
 #[test]
 fn an_lfo_beats_rate_change_is_bar_locked_with_no_anchor() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let (cutoff, lfo, _) = scene(
         &mut s,
-        &mut side,
         |m| m.lfo(Lfo::sine().rate(BeatsPerCycle::of(4.0))),
         0.5,
     );
@@ -303,8 +287,8 @@ fn an_lfo_beats_rate_change_is_bar_locked_with_no_anchor() {
 /// lane from walking a grid.
 #[test]
 fn a_macro_set_keeps_the_lane_steady() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, knob, _) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let mut s = rig(1);
+    let (cutoff, knob, _) = scene(&mut s, |m| m.macro_(0.5), 0.4);
     assert!(program(&s, cutoff).layers().iter().all(|l| l.is_constant()));
 
     s.set(knob.value().to(Bipolar::of(-0.25))).unwrap();
@@ -324,8 +308,8 @@ fn a_macro_set_keeps_the_lane_steady() {
 /// of another kind, so a macro keeps its value target.
 #[test]
 fn a_target_the_source_does_not_have_is_refused_at_the_call() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, knob, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let mut s = rig(1);
+    let (cutoff, knob, route) = scene(&mut s, |m| m.macro_(0.5), 0.4);
     fn refused<T>(r: Result<T, tutti_session::ValueError<&'static str>>) -> ValueErrorKind {
         r.err().expect("refused").kind
     }
@@ -436,7 +420,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
 /// curve, and a param with no automation has no target.
 #[test]
 fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
-    let (mut s, _) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(300.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -455,7 +439,7 @@ fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
         "a declared lane keeps its curve: the target sets it"
     );
     settle(&mut s);
-    let at = |s: &tutti_session::DetachedSession, beat: f64| {
+    let at = |s: &tutti_session::Session, beat: f64| {
         let program = program(s, cutoff);
         program
             .automation()
@@ -489,14 +473,14 @@ fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
 /// `0.4 * 0.5 * 1000 = 200`; set to -0.2 the offset is `-100`.
 #[test]
 fn a_depth_set_lands_at_once_with_no_republish() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, source, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let mut s = rig(1);
+    let (cutoff, source, route) = scene(&mut s, |m| m.macro_(0.5), 0.4);
     let before = program(&s, cutoff);
-    let tail = |side: &mut tutti_session::AudioSide| *render(side, 1_024, 128)[0].last().unwrap();
+    let tail = |s: &mut tutti_session::Session| *render(s, 1_024, 128)[0].last().unwrap();
     let near = |got: f32, want: f32| {
         assert!((got - want).abs() < 1e-3, "{got} is not {want}");
     };
-    near(tail(&mut side), 700.0);
+    near(tail(&mut s), 700.0);
 
     let depth = DepthTarget::of(source, cutoff);
     assert_eq!(s.get(depth).unwrap(), Bipolar::of(0.4));
@@ -504,7 +488,7 @@ fn a_depth_set_lands_at_once_with_no_republish() {
     assert_eq!(s.get(depth).unwrap(), Bipolar::of(-0.2));
     assert_eq!(s.mods().route(route).unwrap().depth, Bipolar::of(-0.2));
     // No update ran: the next block is the new figure.
-    near(tail(&mut side), 400.0);
+    near(tail(&mut s), 400.0);
     assert!(
         Arc::ptr_eq(&program(&s, cutoff), &before),
         "the program was not republished"
@@ -514,13 +498,13 @@ fn a_depth_set_lands_at_once_with_no_republish() {
         Arc::ptr_eq(&program(&s, cutoff), &before),
         "nor by the update"
     );
-    near(tail(&mut side), 400.0);
+    near(tail(&mut s), 400.0);
 
     // Inverted and zero: the offset follows the depth.
     s.set(depth.to(Bipolar::of(-0.4))).unwrap();
-    near(tail(&mut side), 300.0);
+    near(tail(&mut s), 300.0);
     s.set(depth.to(Bipolar::ZERO)).unwrap();
-    near(tail(&mut side), 500.0);
+    near(tail(&mut s), 500.0);
 }
 
 /// **A depth target names its route by source and target**, so a pair with no
@@ -528,8 +512,8 @@ fn a_depth_set_lands_at_once_with_no_republish() {
 /// between the pair is refused where it is declared.
 #[test]
 fn a_depth_target_is_named_by_its_source_and_target() {
-    let (mut s, mut side) = rig(1);
-    let (cutoff, source, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
+    let mut s = rig(1);
+    let (cutoff, source, route) = scene(&mut s, |m| m.macro_(0.5), 0.4);
     let other = s.mods_mut().macro_(0.0);
     assert_eq!(
         s.set(DepthTarget::of(other, cutoff).to(Bipolar::of(0.1)))

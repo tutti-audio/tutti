@@ -602,15 +602,12 @@ node_slot_target!(
 
 #[cfg(feature = "sampler")]
 node_slot_target!(
-    /// Where a sampler voice sits on the transport, as `sampler.window()`
-    /// names it: `Some` places it on the transport at a
-    /// [`VoiceWindow`](tutti_sampler::VoiceWindow), `None` leaves it
-    /// free-running ([`play`](tutti_sampler::VoiceNodeHandle::play) and
-    /// [`stop`](tutti_sampler::VoiceNodeHandle::stop) drive such a voice and
-    /// refuse a placed one with [`PlayError::Placed`](tutti_sampler::PlayError)).
-    /// A streamed voice is always placed: `None` leaves it at its window.
-    /// Stretch applies only to a placed voice, so a stretched clip given
-    /// `None` plays dry.
+    /// Where a placed sampler voice sits on the transport, as `sampler.window()`
+    /// names it: a [`VoiceWindow`](tutti_sampler::VoiceWindow) moves it. A
+    /// voice is placed or free-running for its node's life, so only a placed
+    /// voice has a window: a write to a free-running voice's names a value the
+    /// node does not have and fails at the call. Stretch applies only to a
+    /// placed voice.
     ///
     /// A write is staged and published by the next
     /// [`Session::update`](crate::Session::update); the voice reads the window
@@ -618,7 +615,7 @@ node_slot_target!(
     /// the one in force. A write to a node removed before the update is
     /// dropped.
     WindowTarget,
-    Option<tutti_sampler::VoiceWindow>,
+    tutti_sampler::VoiceWindow,
     Window
 );
 

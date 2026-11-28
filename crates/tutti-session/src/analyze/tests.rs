@@ -18,12 +18,16 @@ mod whole_buffer;
 use super::{AnalyzeError, MeterBindError};
 
 const CHUNK_FRAMES: usize = super::CHUNK_FRAMES.get();
-use crate::{DetachedSession, Session};
+use crate::Session;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-fn session() -> DetachedSession {
-    Session::builder().build_detached(RATE).unwrap()
+fn session() -> Session {
+    Session::builder()
+        .sample_rate(RATE)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .unwrap()
 }
 
 /// The largest absolute sample the blocks hold.

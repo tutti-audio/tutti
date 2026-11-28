@@ -10,7 +10,7 @@
 //! # The door
 //!
 //! A `VoiceNode` is a graph node whose `IntoNode` hands back a
-//! `VoiceNodeHandle` — its gain a `Param<Amplitude>` cell, addressable as
+//! `VoiceNodeControls` — its gain a `Param<Amplitude>` cell, addressable as
 //! `UnitParam::Volume` through the handle's `ParamSet` — and the node reads
 //! the cell once per block into its `Playback` record and its source. A fork
 //! starts from the value last set (the authored value).
@@ -42,7 +42,7 @@ use tutti_graph::{
 };
 use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode, VoiceNodeHandle};
+use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode, VoiceNodeControls};
 use tutti_units::{
     Amplitude, Beat, BeatsPerCycle, Bipolar, Bpm, Frame, PhaseIncrement, SampleRate, Samples,
     UnitParam,
@@ -80,7 +80,7 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// transport renders silence, and every gain comparison in this file would
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
-fn solo_voice() -> (Renderer, NodeKey, VoiceNodeHandle<f32>) {
+fn solo_voice() -> (Renderer, NodeKey, VoiceNodeControls<f32>) {
     let source = placed_source(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)));
     let (mut solo, key, handle) = Renderer::alone(
         VoiceNode::with_channels(source, Playback::default(), ChannelLayout::MONO)

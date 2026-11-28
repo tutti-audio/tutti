@@ -6,7 +6,7 @@ use tutti_graph::{MeterReader, TapReader};
 use tutti_rt::{Counter, Gauge};
 use tutti_units::Samples;
 
-use crate::{AppKey, Clock, Session, SessionHeardTapError};
+use crate::{AppKey, Clock, Session};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Opens the tap on **what the engine renders**: every output channel at
@@ -39,20 +39,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// phase. The width is the device's when the session was built: a restart
     /// onto a device of another width counts the tap's blocks lost until it is
     /// opened again.
-    ///
-    /// # Errors
-    ///
-    /// [`SessionHeardTapError::Detached`] on a session without an engine.
-    pub fn open_heard_tap(
-        &mut self,
-        capacity: Samples,
-    ) -> Result<TapReader<C::Float>, SessionHeardTapError> {
-        let (taps, layout) = self
-            .output
-            .taps
-            .as_mut()
-            .ok_or(SessionHeardTapError::Detached)?;
-        Ok(taps.open(*layout, capacity))
+    pub fn open_heard_tap(&mut self, capacity: Samples) -> TapReader<C::Float> {
+        let (taps, layout) = &mut self.output.taps;
+        taps.open(*layout, capacity)
     }
 
     /// Closes the tap [`open_heard_tap`](Self::open_heard_tap) opened, now
@@ -60,18 +49,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// dropped reader. The reader keeps what it was written, then answers `Pull::Ended`. With no tap open
     /// it does nothing. The writes stop from the first render that begins after
     /// the push, as an open's start.
-    ///
-    /// # Errors
-    ///
-    /// [`SessionHeardTapError::Detached`] on a session without an engine.
-    pub fn close_heard_tap(&mut self) -> Result<(), SessionHeardTapError> {
-        let (taps, _) = self
-            .output
-            .taps
-            .as_mut()
-            .ok_or(SessionHeardTapError::Detached)?;
-        taps.close();
-        Ok(())
+    pub fn close_heard_tap(&mut self) {
+        self.output.taps.0.close();
     }
 
     /// Claims the reader reopened under `id`
@@ -92,8 +71,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// the last read. It is an op of the plan on the outputs, declared and **on**
     /// from the build, so a host that reads it needs to ask for nothing, and every
     /// render feeds it: a device callback,
-    /// [`render`](Self::render), and a detached session's
-    /// `render_frame`. It reads before the engine's fold
+    /// [`render`](Self::render). It reads before the engine's fold
     /// to the device and its declick, aligned to the outputs' time. A block
     /// the engine refuses (rendered silent because the control side held the
     /// graph for that callback) runs no op, so it does not touch the meter:
@@ -116,21 +94,16 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// The engine's [`Load`]: each block's render time against its
     /// real-time budget, smoothed. Fed by every block the device callback (or,
-    /// offline, [`render`](Self::render)) renders; `None` on a detached
-    /// session, which has no engine. Clones read the one cell.
-    pub fn load(&self) -> Option<Gauge<Load>> {
-        self.output.readings.as_ref().map(|(load, _)| load.clone())
+    /// offline, [`render`](Self::render)) renders. Clones read the one cell.
+    pub fn load(&self) -> Gauge<Load> {
+        self.output.readings.0.clone()
     }
 
     /// What the engine's blocks amounted to: blocks timed, blocks over
     /// budget, blocks silenced and events dropped, each cumulative (an app
-    /// diffs two readings). `None` on a detached session, which has no
-    /// engine. Clones read the one cell.
-    pub fn blocks(&self) -> Option<Counter<BlockCounts>> {
-        self.output
-            .readings
-            .as_ref()
-            .map(|(_, blocks)| blocks.clone())
+    /// diffs two readings). Clones read the one cell.
+    pub fn blocks(&self) -> Counter<BlockCounts> {
+        self.output.readings.1.clone()
     }
 
     /// The engine's MIDI nodes, when the builder inserted them.

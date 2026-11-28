@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{
-    AnyPlugin, DetachedSession, Key, PluginChange, PluginEvent, PluginParamRefusal, Session,
-    SessionEvent, SetRefusal, UnitError, ValueError, ValueErrorKind,
+    AnyPlugin, Key, PluginChange, PluginEvent, PluginParamRefusal, Session, SessionEvent,
+    SetRefusal, UnitError, ValueError, ValueErrorKind,
 };
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{ForkByClone, NodeKey};
@@ -251,15 +251,15 @@ impl Health for Fake {
     fn terminate(&self, _reason: tutti_plugin_types::TerminationReason) {}
 }
 
-/// A detached session with the fake hosted at a node, its parameters not yet
+/// An offline session with the fake hosted at a node, its parameters not yet
 /// read, and the sink the fake announces a rescan through.
-fn session() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
+fn session() -> (Session, NodeKey, Arc<Fake>, RefreshSink) {
     let (s, key, fake, refresh) = session_keyed();
     (s, key.erase(), fake, refresh)
 }
 
 /// [`session`], with the plugin's key.
-fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) {
+fn session_keyed() -> (Session, Key<AnyPlugin>, Arc<Fake>, RefreshSink) {
     let fake = Fake::new();
     let refresh = RefreshSink::default();
     let handle = PluginHandle::from_backend(
@@ -272,8 +272,11 @@ fn session_keyed() -> (DetachedSession, Key<AnyPlugin>, Arc<Fake>, RefreshSink) 
     .refresh_sink(refresh.clone());
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .outputs(ChannelLayout::STEREO)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     let key = host(
         &mut s,
@@ -298,7 +301,7 @@ fn plugin_events(events: Vec<SessionEvent>) -> Vec<PluginEvent> {
 
 /// An update that starts a parameter read, the wait for its task to end, and an update
 /// that lands it; the plugin events both reported.
-fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
+fn update(s: &mut Session) -> Vec<PluginEvent> {
     let mut reported = plugin_events(s.update());
     super::await_tasks(s);
     reported.extend(plugin_events(s.update()));
@@ -306,13 +309,13 @@ fn update(s: &mut DetachedSession) -> Vec<PluginEvent> {
 }
 
 /// A session whose parameters are read.
-fn ready() -> (DetachedSession, NodeKey, Arc<Fake>, RefreshSink) {
+fn ready() -> (Session, NodeKey, Arc<Fake>, RefreshSink) {
     let (mut s, node, fake, refresh) = session();
     let _ = update(&mut s);
     (s, node, fake, refresh)
 }
 
-fn cutoff(s: &DetachedSession, node: NodeKey) -> crate::PluginParam<'_> {
+fn cutoff(s: &Session, node: NodeKey) -> crate::PluginParam<'_> {
     s.plugin_view(node).unwrap().params().get(CUTOFF).unwrap()
 }
 
@@ -468,7 +471,7 @@ fn a_rescan_that_removes_the_unit_refuses_a_unit_target_made_before_it() {
     s.set(cutoff.to(Hz::new(100.0))).unwrap();
     let written = s.get(key.param(CUTOFF)).unwrap();
 
-    let rescan = |s: &mut DetachedSession, info: ParameterInfo| {
+    let rescan = |s: &mut Session, info: ParameterInfo| {
         *fake.infos.lock() = vec![info];
         refresh.fire(PluginRefresh::ParamTitles);
         let _ = update(s);
@@ -579,7 +582,7 @@ fn a_rescan_replaces_the_declarations_and_the_values_with_them() {
 fn text_and_plain_values_go_through_the_plugin() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
-    fn level(s: &DetachedSession, key: Key<AnyPlugin>) -> crate::PluginParam<'_> {
+    fn level(s: &Session, key: Key<AnyPlugin>) -> crate::PluginParam<'_> {
         s.plugin_view(key).unwrap().params().get(LEVEL).unwrap()
     }
     assert_eq!(level(&s, key).plain(), Some(-60.0 + 72.0 * 0.25));
@@ -816,7 +819,7 @@ fn a_plugin_without_automation_state_has_no_automation_mode_target() {
 /// Replaces the plugin at `node` with `fake` as the node's plugin `plugin`, as
 /// the graph's replace does: the record takes the new handle, the old one is
 /// retired and the value table is told.
-fn replace_with(s: &mut DetachedSession, node: NodeKey, fake: &Arc<Fake>, plugin: &str) {
+fn replace_with(s: &mut Session, node: NodeKey, fake: &Arc<Fake>, plugin: &str) {
     let handle = PluginHandle::from_backend(
         Arc::clone(fake),
         None,
@@ -885,7 +888,7 @@ fn a_replace_by_another_plugin_has_no_target_until_its_read_lands() {
 fn a_write_to_a_parameter_a_rescan_dropped_is_refused_by_name_and_then_no_target() {
     let (mut s, key, fake, refresh) = session_keyed();
     let _ = update(&mut s);
-    let refused = |s: &DetachedSession| s.plugin_view(key).unwrap().losses().refused;
+    let refused = |s: &Session| s.plugin_view(key).unwrap().losses().refused;
     assert_eq!(refused(&s), 0);
 
     *fake.infos.lock() = vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];

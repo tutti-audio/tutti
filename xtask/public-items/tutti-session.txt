@@ -33,7 +33,6 @@ enum error::InletError
 enum error::MidiError
 enum error::RemoveError
 enum error::RouteDeclarer
-enum error::SessionHeardTapError
 enum error::SetRateError
 enum graph::Committed
 enum graph::Feeder
@@ -174,7 +173,6 @@ fn builder::SessionBuilder::block_dates
 fn builder::SessionBuilder::build
 fn builder::SessionBuilder::build
 fn builder::SessionBuilder::build
-fn builder::SessionBuilder::build_detached
 fn builder::SessionBuilder::build_device_on
 fn builder::SessionBuilder::device
 fn builder::SessionBuilder::device_topology
@@ -295,12 +293,7 @@ fn graph::observe::Taps::open_event
 fn graph::observe::Taps::open_main_output
 fn graph::observe::Taps::open_ports
 fn graph::observe::Taps::reopen_event
-fn graph::testing::AudioSide::render
-fn graph::testing::AudioSide::set_transport
-fn graph::testing::AudioSide::tick
-fn graph::testing::Graph::take_audio_side
 fn graph::testing::Graph::testing
-fn graph::testing::Testing::fork_live
 fn graph::testing::Testing::keeps_reclaimer
 fn graph::testing::Testing::rebuild_settling
 fn graph::testing::Testing::waiting_replacements
@@ -684,8 +677,6 @@ fn session::Session::mods
 fn session::Session::mods_mut
 fn session::Session::remove
 fn session::Session::render
-fn session::Session::render_frame
-fn session::Session::render_frame_at
 fn session::Session::stream_spec
 fn session::declared::Session::key
 fn session::declared::Session::patch
@@ -883,8 +874,6 @@ struct bounce::render_output::MainShape
 struct bounce::render_output::StemShape
 struct builder::BlockConfig
 struct builder::SessionBuilder
-struct clock::Detached
-struct clock::DetachedGraph
 struct clock::DeviceClock
 struct clock::Offline
 struct clock::OfflineEngine
@@ -906,7 +895,6 @@ struct graph::Replacement
 struct graph::observe::Meters
 struct graph::observe::NotReopened
 struct graph::observe::Taps
-struct graph::testing::AudioSide
 struct graph::testing::Testing
 struct hang::HangPolicy
 struct input::Input
@@ -1102,7 +1090,6 @@ trait bounce::render_output::StemOutput
 trait clock::Clock
 trait clock::RealTime
 trait clock::SessionFloat
-trait clock::Stepped
 trait clock::sealed::Running
 trait clock::sealed::Sealed
 trait clock::sealed::Streaming
@@ -1158,7 +1145,6 @@ trait wire_ends::sealed::end::Sealed
 trait wire_ends::sealed::start::Sealed
 type analyze::Analyzing
 type bounce::PrepareEdit
-type clock::DetachedSession
 type clock::OfflineSession
 type clock::SystemSession
 type device::LiveSession

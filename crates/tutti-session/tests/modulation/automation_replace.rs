@@ -24,7 +24,7 @@ fn hold(at: f64) -> Trajectory<Hz> {
 /// the replace, that the target reads and writes, the declaration is held and
 /// the curve plays on the incoming node.
 fn replaced_keeps_automation(replacement: impl FnOnce(ProbeUnit) -> Replacement<ProbeUnit>) {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(300.0));
     main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
@@ -34,7 +34,7 @@ fn replaced_keeps_automation(replacement: impl FnOnce(ProbeUnit) -> Replacement<
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     assert!(m.automate(cutoff, Arc::clone(&first)));
     settle(&mut s);
-    assert_eq!(*render(&mut side, 1_024, 128)[0].last().unwrap(), 800.0);
+    assert_eq!(*render(&mut s, 1_024, 128)[0].last().unwrap(), 800.0);
 
     s.graph()
         .replace(probe, replacement(ProbeUnit::new(400.0)))
@@ -47,7 +47,7 @@ fn replaced_keeps_automation(replacement: impl FnOnce(ProbeUnit) -> Replacement<
     );
     assert_eq!(s.get(target).unwrap(), first, "the target still reads");
     assert_eq!(
-        *render(&mut side, 4_096, 128)[0].last().unwrap(),
+        *render(&mut s, 4_096, 128)[0].last().unwrap(),
         800.0,
         "the kept curve drives the incoming node's param, not its knob (400)"
     );
@@ -57,7 +57,7 @@ fn replaced_keeps_automation(replacement: impl FnOnce(ProbeUnit) -> Replacement<
     assert_eq!(s.get(target).unwrap(), second);
     let _ = s.update();
     assert_eq!(
-        *render(&mut side, 4_096, 128)[0].last().unwrap(),
+        *render(&mut s, 4_096, 128)[0].last().unwrap(),
         600.0,
         "the curve drives the incoming node's param"
     );

@@ -8,9 +8,7 @@ use super::plugin_params::Fake;
 use super::{await_tasks, host};
 use std::sync::Arc;
 
-use crate::{
-    DetachedSession, MidiMap, PluginParamRefusal, Session, SetRefusal, ValueError, ValueErrorKind,
-};
+use crate::{MidiMap, PluginParamRefusal, Session, SetRefusal, ValueError, ValueErrorKind};
 use tutti_graph::{ForkByClone, NodeKey};
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::PluginHandle;
@@ -35,16 +33,16 @@ fn entry(channel: Option<MidiChannel>, source: MidiSource, param: ParamId) -> Mi
     }
 }
 
-/// A detached session with a fake plugin that lists `CUTOFF` and `LEVEL` among
+/// An offline session with a fake plugin that lists `CUTOFF` and `LEVEL` among
 /// its parameters (`plugin_params`' backend), read.
-fn hosting() -> (DetachedSession, NodeKey, FakePlugin) {
+fn hosting() -> (Session, NodeKey, FakePlugin) {
     let (s, node, fake, _) = hosting_reporting();
     (s, node, fake)
 }
 
 /// [`hosting`], and the sink the plugin's invalidations are raised on.
 fn hosting_reporting() -> (
-    DetachedSession,
+    Session,
     NodeKey,
     FakePlugin,
     tutti_plugin_host::InvalidateSink,
@@ -61,8 +59,10 @@ fn hosting_reporting() -> (
     )
     .invalidate_sink(invalidate.clone());
     let mut s = Session::builder()
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
     host(
         &mut s,
@@ -78,7 +78,7 @@ fn hosting_reporting() -> (
     (s, node, fake, invalidate)
 }
 
-fn update(s: &mut DetachedSession) {
+fn update(s: &mut Session) {
     let _ = s.update_on(tutti_fixtures::main_thread());
 }
 

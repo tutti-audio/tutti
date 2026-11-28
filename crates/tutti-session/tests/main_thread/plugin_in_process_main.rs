@@ -10,7 +10,7 @@ use crate::committed::committed;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
-use tutti_buffers::PlanesMut;
+use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
@@ -876,8 +876,10 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     let (catalog, _dir) = catalog();
     let mut s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
-        .build_detached(SampleRate::SR_48K)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let (_, node) = s
         .load_from(
             tutti_fixtures::main_thread(),
@@ -887,11 +889,10 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
             None,
         )
         .unwrap();
-    let mut side = s.graph().take_audio_side();
-    let mut out = vec![vec![0.0; 512]; 2];
+    let mut out = vec![0.0f32; 512 * 2];
     // The plugin has its Processor in the graph before the re-prepare.
     let _ = s.update();
-    side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
+    s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
     probe().set(ClapSwitch::PortLayout, 1);
@@ -900,7 +901,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     let deadline = Instant::now() + Duration::from_secs(30);
     while s.graph_ref().node_outputs(node).is_ok_and(|n| n != 3) {
         assert!(Instant::now() < deadline, "the wider node never came");
-        side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
+        s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         events.extend(s.update());
         thread::yield_now();
     }

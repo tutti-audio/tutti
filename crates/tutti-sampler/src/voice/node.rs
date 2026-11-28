@@ -1,9 +1,9 @@
 //! [`VoiceNode`] — a single [`Voice`] as its own graph node.
 //!
-//! Zero inputs, N outputs, and typed controls ([`VoiceNodeHandle`], what its
+//! Zero inputs, N outputs, and typed controls ([`VoiceNodeControls`], what its
 //! `IntoNode` hands back): its gain, a scalar cell the node reads once per
-//! block, its window, a published cell it lends once per block, and its loop,
-//! speed and play state, published values it reads once per block. For
+//! block, and its steering, window, loop, direction and speed, published
+//! values it lends once per block. For
 //! resynth, preview and a single timeline clip, where a whole pool would be
 //! ceremony. It shares `PlaybackSlot` with
 //! [`VoicePool`](super::pool::VoicePool), so the per-voice read is the same
@@ -16,11 +16,14 @@ use crate::streamer::{ControlCell, StreamHandle};
 use tutti_buffers::MAX_CHANNELS;
 
 use super::clock::{BlockClock, Clock};
-use super::command::{GainError, Steering, SteeringCell, VoiceNodeHandle, ask};
+use super::command::{GainError, ask};
 use super::disk_voice::DiskVoice;
 use super::disk_voice::VoiceHealth;
 use super::loop_span::Loop;
 use super::memory_source::{MemorySource, VoiceWindow};
+use super::node_controls::{
+    Cells, Driving, FreeRunning, Steering, SteeringCell, VoiceNodeControls,
+};
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::stretched;
 use super::types::{PlayDirection, Playback, Reach, SlotId, Voice, VoiceSource};
@@ -45,6 +48,36 @@ pub enum VoiceNodeError {
     Width(#[from] PlaceError),
 }
 
+/// How the node reads its drive, fixed for its life: a free-running voice
+/// lends a steering, a placed one a window. The audio-side half of
+/// [`Driving`].
+enum Driven {
+    /// The steering the controls publish, lent once per block, and the one
+    /// last applied, so a block applies a field once, when it changes.
+    Free(Reader<Steering>, Steering),
+    /// The window the controls publish, lent once per block, and the one last
+    /// applied.
+    Placed(Reader<VoiceWindow>, VoiceWindow),
+}
+
+impl Driven {
+    /// The drive of a voice whose source is at `window`: placed there, or
+    /// free-running. The readers are of cells nothing publishes to until
+    /// [`controlled`](VoiceNode::controlled), so a node driven by hand keeps
+    /// what it was built with.
+    fn of(window: Option<VoiceWindow>) -> Self {
+        match window {
+            Some(window) => Self::Placed(Publisher::new(window).reader(), window),
+            None => Self::Free(SteeringCell::default().reader(), Steering::default()),
+        }
+    }
+
+    /// Whether the voice is stopped by hand: only a free-running voice is.
+    fn stopped(&self) -> bool {
+        matches!(self, Self::Free(_, applied) if applied.stopped)
+    }
+}
+
 /// One [`Voice`] as a graph node in its own right: zero inputs, `channels`
 /// outputs.
 ///
@@ -56,25 +89,26 @@ pub enum VoiceNodeError {
 ///
 /// # Controls
 ///
-/// Inserted into a graph (`IntoNode`), it hands back a [`VoiceNodeHandle`]:
+/// Inserted into a graph (`IntoNode`), it hands back a [`VoiceNodeControls`]:
 ///
 /// - gain — a `Param<Amplitude>` cell, also addressable as
-///   [`UnitParam::Volume`] through the handle's [`ParamSet`]. The node reads
+///   [`UnitParam::Volume`] through the controls' [`ParamSet`]. The node reads
 ///   it once per block into the voice's `Playback` record and its source.
-/// - window: `Some` places the voice on the transport, `None` leaves it
-///   free-running ([`VoiceNodeHandle::window_cell`]); a `Publisher` cell the
-///   node lends once per block, latest wins, allocation-free.
-/// - loop, speed and play state: not scalars, so the handle publishes
-///   them to a `Publisher` cell the node reads once per block, latest wins,
-///   allocation-free. A disk voice's loop is its [`StreamHandle`]'s, which the
-///   handle owns ([`VoiceNode::streaming`]).
+/// - steering and window: a voice is free-running (steering, on its own
+///   cursor) or placed (a window on the transport) for the node's life, which
+///   its source says when it is built; the controls hold the one cell that
+///   fits ([`VoiceNodeControls::steering`], [`VoiceNodeControls::window_cell`]).
+/// - loop, direction and speed: not scalars, so the controls publish them to a
+///   cell the node reads once per block, latest wins, allocation-free. A disk
+///   voice's loop and direction are its [`StreamHandle`]'s, which the controls
+///   own ([`VoiceNode::streaming`]).
 ///
 /// # Forks
 ///
 /// The node's fork source keeps a copy of the voice as it was inserted, and a
 /// fork is that copy made to share nothing with the live node
 /// (`Voice::fork_copy`: its own gain cell; a disk voice reading its file
-/// itself), moved to the window, loop and speed the handle last published and
+/// itself), moved to the window, loop and speed the controls last published and
 /// set to the gain last set, with a vocoder of its own. It reads its render's
 /// transport from its block's `Env`. A disk voice's node
 /// forks only for an offline render.
@@ -92,34 +126,25 @@ pub struct VoiceNode<F: SamplerFloat> {
     /// Declared rather than inferred from the voice, so an edge wired against
     /// it cannot be re-arityed under a live graph.
     pub(crate) channels: ChannelLayout,
-    /// A reader of the steering the handle publishes, lent once per block,
-    /// registered on the `Publisher` the handle and the fork source share. Empty until a handle sets a field, so a node driven
-    /// by hand keeps what it was built with.
-    steering: Reader<Steering>,
-    /// The steering last applied, so a block applies a field once, when it
-    /// changes, rather than every block.
-    applied: Steering,
-    /// A reader of the window the handle publishes, lent once per block.
-    window: Reader<Option<VoiceWindow>>,
-    /// The window last applied.
-    applied_window: Option<VoiceWindow>,
-    /// A reader of the loop the handle publishes, lent once per block.
+    /// How the voice is driven, fixed for the node's life.
+    driven: Driven,
+    /// A reader of the loop the controls publish, lent once per block.
     looping: Reader<Option<Loop>>,
     /// The loop last applied.
     applied_loop: Option<Loop>,
-    /// A reader of the direction the handle publishes, lent once per block.
+    /// A reader of the direction the controls publish, lent once per block.
     direction: Reader<PlayDirection>,
     /// The direction last applied.
     applied_direction: PlayDirection,
-    /// A reader of the speed the handle publishes, lent once per block.
+    /// A reader of the speed the controls publish, lent once per block.
     speed: Reader<PlaybackRate>,
     /// The speed last applied.
     applied_speed: PlaybackRate,
-    /// The disk stream of a streaming node, until [`with_handle`](Self::with_handle)
-    /// hands it to the handle: a stream is control-thread only (its drop
+    /// The disk stream of a streaming node, until [`controlled`](Self::controlled)
+    /// hands it to the controls: a stream is control-thread only (its drop
     /// sends on a bounded queue), so the node never keeps one it plays with.
     stream: Option<StreamHandle<F>>,
-    /// The gain the handle writes; read once per block.
+    /// The gain the controls write; read once per block.
     gain: Param<Amplitude>,
     /// The transport as the voice reads it, kept across blocks so a jump is
     /// flushed where it happens.
@@ -127,7 +152,7 @@ pub struct VoiceNode<F: SamplerFloat> {
     /// The block read's lanes (`PlaybackSlot::render_into`), built here and
     /// sized from `Prepare::max_block` in `prepare`, on the control thread.
     scratch: BlockScratch<F>,
-    /// Whether a handle still reaches the node; a fork's is frozen. It
+    /// Whether controls still reach the node; a fork's is frozen. It
     /// decides how exactly the node states its ring-out
     /// ([`ring_out`](Self::ring_out)).
     reach: Reach,
@@ -198,10 +223,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
         Ok(Self {
             slot,
             channels,
-            steering: SteeringCell::default().reader(),
-            applied: Steering::default(),
-            window: Publisher::new(window).reader(),
-            applied_window: window,
+            driven: Driven::of(window),
             looping: ControlCell::new(play.loop_).reader(),
             applied_loop: play.loop_,
             direction: ControlCell::new(play.direction).reader(),
@@ -217,14 +239,14 @@ impl<F: SamplerFloat> VoiceNode<F> {
     }
 
     /// A node over a streaming voice, and the [`StreamHandle`] that feeds it: the
-    /// handle ([`with_handle`](Self::with_handle), or the graph's insert)
-    /// takes the stream, so the voice sounds for as long as the handle lives,
-    /// and its loop and direction are the stream's cells, through the handle.
+    /// controls ([`into_parts`](IntoNode::into_parts), or the graph's insert)
+    /// take the stream, so the voice sounds for as long as the controls live,
+    /// and its loop and direction are the stream's cells, through the controls.
     /// `play`'s loop and direction are published to the stream first, as
     /// [`VoicePoolHandle::add_streaming`](super::VoicePoolHandle::add_streaming)
     /// publishes them. `voice` is the one built from the stream's own reader.
     ///
-    /// A node never handed to a handle keeps the stream until it is dropped:
+    /// A node whose controls were never taken keeps the stream until it is dropped:
     /// built by hand, drop it on the control thread.
     ///
     /// # Errors
@@ -253,18 +275,27 @@ impl<F: SamplerFloat> VoiceNode<F> {
         Ok(node)
     }
 
-    /// This node with a fresh steering cell, and the handle that drives
-    /// it: what [`into_parts`](IntoNode::into_parts) hands the graph and the
-    /// caller. For a host (or a test) that calls the node by hand. What was
-    /// set through a handle taken before no longer reaches the node (its
-    /// gain still does: that cell is the node's for life). A streaming node's
-    /// stream moves into the handle.
-    pub fn with_handle(mut self) -> (Self, VoiceNodeHandle<F>) {
-        let steering = SteeringCell::default();
-        self.steering = steering.reader();
-        let window = Publisher::new(self.slot.voice.source.window());
-        self.window = window.reader();
-        self.applied_window = self.slot.voice.source.window();
+    /// This node with fresh cells, and the controls that drive them: what
+    /// [`into_parts`](IntoNode::into_parts) hands the graph and the caller.
+    /// The cells start at what the voice was built with; a free voice gets a
+    /// steering and no window, a placed one a window and no steering. A
+    /// streaming node's stream moves into the controls.
+    pub(crate) fn controlled(mut self) -> (Self, VoiceNodeControls<F>) {
+        let window = self.slot.voice.source.window();
+        let (driven, driving) = match window {
+            Some(window) => {
+                let cell = Publisher::new(window);
+                (Driven::Placed(cell.reader(), window), Driving::Placed(cell))
+            }
+            None => {
+                let cell = SteeringCell::default();
+                (
+                    Driven::Free(cell.reader(), Steering::default()),
+                    Driving::Free(FreeRunning::new(cell)),
+                )
+            }
+        };
+        self.driven = driven;
         // A streamed voice's loop and direction are its stream's cells, which
         // the streamer reads; a memory voice's are the node's alone.
         let play = self.slot.voice.play;
@@ -285,23 +316,21 @@ impl<F: SamplerFloat> VoiceNode<F> {
         let speed = Publisher::new(play.speed);
         self.speed = speed.reader();
         self.applied_speed = play.speed;
-        let params = self.param_set();
-        let handle = VoiceNodeHandle::new(
-            steering,
-            window,
+        let cells = Cells {
+            driving,
             looping,
             direction,
             speed,
-            self.gain.handle(),
-            params,
-            self.stream.take(),
-        );
-        (self, handle)
+        };
+        let params = self.param_set();
+        let controls =
+            VoiceNodeControls::new(cells, self.gain.handle(), params, self.stream.take());
+        (self, controls)
     }
 
     /// The node's params by address: its gain, as [`UnitParam::Volume`].
     /// The cells the node reads, so a set taken before the node is inserted
-    /// addresses the inserted node (it is the set the handle carries).
+    /// addresses the inserted node (it is the set the controls carry).
     pub fn param_set(&self) -> ParamSet {
         self.declared_set()
     }
@@ -320,15 +349,21 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// drives it (its last frame); `None` reads the cell.
     #[inline]
     fn drain_commands(&mut self, driven: Option<f64>) {
-        let published = *self.steering.lend();
-        if published != self.applied {
-            apply_steering(&mut self.slot.voice, &self.applied, &published);
-            self.applied = published;
-        }
-        let window = *self.window.lend();
-        if window != self.applied_window {
-            self.slot.voice.source.apply_window(window);
-            self.applied_window = window;
+        match &mut self.driven {
+            Driven::Free(steering, applied) => {
+                let published = *steering.lend();
+                if published != *applied {
+                    apply_steering(&mut self.slot.voice, applied, &published);
+                    *applied = published;
+                }
+            }
+            Driven::Placed(window, applied) => {
+                let published = *window.lend();
+                if published != *applied {
+                    self.slot.voice.source.apply_window(published);
+                    *applied = published;
+                }
+            }
         }
         let looping = *self.looping.lend();
         if looping != self.applied_loop {
@@ -394,7 +429,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     }
 
     /// The ring-out the node declares ([`Shape::tail`]): its voice's
-    /// ([`Voice::ring_out`]), promised as a ceiling while a handle can still
+    /// ([`Voice::ring_out`]), promised as a ceiling while controls can still
     /// steer the node and exactly in a fork, which none reaches.
     fn ring_out(&self) -> Tail {
         self.slot.voice.ring_out(self.reach)
@@ -481,7 +516,7 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
         for (slot, ch) in refs.iter_mut().zip(outs.iter_mut()) {
             *slot = ch;
         }
-        if self.applied.stopped {
+        if self.driven.stopped() {
             // Silent, and nothing read. A disk voice's ring read by position
             // is dropped, so the block it resumes in reads from the playhead
             // as a jump does; a free-running memory voice keeps its cursor.
@@ -548,14 +583,9 @@ struct VoiceNodeFork<F: SamplerFloat> {
     /// with `Voice::fork_copy`, which shares nothing.
     template: Voice<F>,
     channels: ChannelLayout,
-    /// The live node's steering cell, read with `current` when a fork is
-    /// taken (an owning read on the control side, never a lend).
-    steering: SteeringCell,
-    /// The live node's window, loop, direction and speed cells, read the same way.
-    window: Publisher<Option<VoiceWindow>>,
-    looping: ControlCell<Option<Loop>>,
-    direction: ControlCell<PlayDirection>,
-    speed: Publisher<PlaybackRate>,
+    /// The live node's cells, read with `current` when a fork is taken (an
+    /// owning read on the control side, never a lend).
+    cells: Cells,
     /// The node's params: a fork starts from the gain cell, which holds the
     /// gain last set (a modulation lane sends its composite to the
     /// port and never writes the cell).
@@ -565,14 +595,18 @@ struct VoiceNodeFork<F: SamplerFloat> {
 impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
     fn fork(&self, mode: RenderMode) -> Result<Forked<F>, ForkCause> {
         let mut voice = self.template.fork_copy(mode)?;
-        apply_steering(&mut voice, &Steering::default(), &self.steering.current());
-        // The window is the source's alone: `Playback` has no window field
-        // (two copies kept in sync by hand is how a fork reaches the wrong
-        // one), so there is exactly one write.
-        voice.source.apply_window(*self.window.current());
-        apply_loop(&mut voice, *self.looping.current());
-        voice.play.direction = *self.direction.current();
-        apply_speed(&mut voice, *self.speed.current());
+        match &self.cells.driving {
+            Driving::Free(steering) => {
+                apply_steering(&mut voice, &Steering::default(), &steering.current());
+            }
+            // The window is the source's alone: `Playback` has no window field
+            // (two copies kept in sync by hand is how a fork reaches the wrong
+            // one), so there is exactly one write.
+            Driving::Placed(window) => voice.source.apply_window(*window.current()),
+        }
+        apply_loop(&mut voice, *self.cells.looping.current());
+        voice.play.direction = *self.cells.direction.current();
+        apply_speed(&mut voice, *self.cells.speed.current());
         let gain = self
             .params
             .get(UnitParam::Volume)
@@ -593,47 +627,54 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
 }
 
 impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
-    type Controls = VoiceNodeHandle<F>;
+    type Controls = VoiceNodeControls<F>;
 
-    fn into_parts(self) -> NodeParts<VoiceNodeHandle<F>, F> {
-        let (node, handle) = self.with_handle();
+    fn into_parts(self) -> NodeParts<VoiceNodeControls<F>, F> {
+        let (node, controls) = self.controlled();
         let fork = VoiceNodeFork {
             template: node.slot.voice.as_ref().clone(),
             channels: node.channels,
-            steering: handle.steering.clone(),
-            window: handle.window.clone(),
-            looping: handle.looping.clone(),
-            direction: handle.direction.clone(),
-            speed: handle.speed.clone(),
-            params: handle.params.clone(),
+            cells: controls.cells.clone(),
+            params: controls.params.clone(),
         };
-        let params = handle.params().clone();
-        let window = handle.window.clone();
-        let looping = handle.looping.clone();
-        let direction = handle.direction.clone();
-        let speed = handle.speed.clone();
-        NodeParts::new(
-            Box::new(node),
-            handle.clone(),
-            Some(Box::new(fork)),
-            // The cells that are not published entries; the session sweeps
-            // the four entries below.
-            Some(Box::new(handle.steering.clone())),
-        )
-        .params(params)
-        .published::<Self, WindowKind>(Arc::new(window))
+        let params = controls.params.clone();
+        let Cells {
+            driving,
+            looping,
+            direction,
+            speed,
+        } = controls.cells.clone();
+        let parts =
+            NodeParts::new(Box::new(node), controls, Some(Box::new(fork)), None).params(params);
+        // Every cell is a published entry, which the session sweeps.
+        match driving {
+            Driving::Free(steering) => {
+                parts.published::<Self, SteeringKind>(Arc::new(steering.cell().clone()))
+            }
+            Driving::Placed(window) => parts.published::<Self, WindowKind>(Arc::new(window)),
+        }
         .published::<Self, LoopingKind>(Arc::new(looping))
         .published::<Self, DirectionKind>(Arc::new(direction))
         .published::<Self, SpeedKind>(Arc::new(speed))
     }
 }
 
-/// The kind of a voice's window on the transport: `sampler.window()`.
+/// The kind of a free-running voice's steering. A session does not address it:
+/// [`FreeRunning`] is its one writer.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum SteeringKind {}
+
+impl PublishedKind for SteeringKind {
+    type Value = Steering;
+}
+
+/// The kind of a placed voice's window on the transport: `sampler.window()`. A
+/// free-running voice publishes none.
 #[derive(Clone, Copy, Debug)]
 pub enum WindowKind {}
 
 impl PublishedKind for WindowKind {
-    type Value = Option<VoiceWindow>;
+    type Value = VoiceWindow;
 }
 
 /// The kind of a voice's loop: `sampler.looping()`.
@@ -660,6 +701,7 @@ impl PublishedKind for SpeedKind {
     type Value = PlaybackRate;
 }
 
+impl<F: SamplerFloat> HasPublished<SteeringKind> for VoiceNode<F> {}
 impl<F: SamplerFloat> HasPublished<WindowKind> for VoiceNode<F> {}
 impl<F: SamplerFloat> HasPublished<LoopingKind> for VoiceNode<F> {}
 impl<F: SamplerFloat> HasPublished<DirectionKind> for VoiceNode<F> {}
@@ -681,19 +723,22 @@ mod tests {
             SampleRate::SR_48K,
             Mono::new(&[0.0; 64]),
         ));
-        let (mut node, handle) = VoiceNode::new(free_source(wave), Playback::default())
+        let source = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
+        let (mut node, controls) = VoiceNode::new(source, Playback::default())
             .expect("a finite gain and a nonempty width")
-            .with_handle();
+            .controlled();
+        let window = controls.window_cell().expect("a placed voice has a window");
         {
             // A block in progress across the move.
-            let _held = node.window.lend();
-            handle
-                .window_cell()
-                .publish(Some(VoiceWindow::from(Beat::new(1.0))));
+            let Driven::Placed(reader, _) = &mut node.driven else {
+                panic!("a placed voice reads a window");
+            };
+            let _held = reader.lend();
+            window.publish(VoiceWindow::from(Beat::new(1.0)));
         }
-        assert_eq!(handle.window.retired_len(), 1, "pinned until a scan");
-        assert_eq!(tutti_rt::Reclaim::reclaim(&handle), 0);
-        assert_eq!(handle.window.retired_len(), 0, "freed by the reclaim");
+        assert_eq!(window.retired_len(), 1, "pinned until a scan");
+        assert_eq!(window.reclaim(), 0);
+        assert_eq!(window.retired_len(), 0, "freed by the reclaim");
     }
 
     /// A speed the node held across the next publish is freed by the next
@@ -704,22 +749,23 @@ mod tests {
             SampleRate::SR_48K,
             Mono::new(&[0.0; 64]),
         ));
-        let (mut node, handle) = VoiceNode::new(free_source(wave), Playback::default())
+        let (mut node, controls) = VoiceNode::new(free_source(wave), Playback::default())
             .expect("a finite gain and a nonempty width")
-            .with_handle();
+            .controlled();
+        let speed = controls.speed_cell();
         {
             // A block in progress across the move.
             let _held = node.speed.lend();
-            handle.speed_cell().publish(PlaybackRate::of(2.0));
+            speed.publish(PlaybackRate::of(2.0));
         }
-        assert_eq!(handle.speed.retired_len(), 1, "pinned until a scan");
-        assert_eq!(tutti_rt::Reclaim::reclaim(&handle), 0);
-        assert_eq!(handle.speed.retired_len(), 0, "freed by the reclaim");
+        assert_eq!(speed.retired_len(), 1, "pinned until a scan");
+        assert_eq!(speed.reclaim(), 0);
+        assert_eq!(speed.retired_len(), 0, "freed by the reclaim");
     }
 
     /// **A node's ring-out follows what can still steer it.** A placed voice
     /// is the programme and has none, whoever steers it; a free-running voice
-    /// that a handle can loop, slow or stretch promises no ceiling; and its
+    /// that controls can loop, slow or stretch promises no ceiling; and its
     /// fork, which nothing steers, declares its wave's length at the rate it
     /// reads, at the stretch it plays.
     #[test]
@@ -804,12 +850,12 @@ mod tests {
         }
     }
 
-    /// **A streaming node's handle owns its stream.** With every other holder
+    /// **A streaming node's controls own its stream.** With every other holder
     /// gone (the caller moved the stream into the node; nothing keeps it
-    /// apart), the stream stays served for as long as the handle lives, and
+    /// apart), the stream stays served for as long as the controls live, and
     /// ends with the last clone of it.
     #[test]
-    fn a_streaming_nodes_handle_owns_its_stream() {
+    fn a_streaming_nodes_controls_own_its_stream() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let path = dir.path().join("tone.wav");
         let samples = vec![0.25f32; 4_800];
@@ -823,19 +869,19 @@ mod tests {
         let served = Arc::clone(&reader.status);
         let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
 
-        let (node, handle) = VoiceNode::streaming(voice, stream, Playback::default())
+        let (node, controls) = VoiceNode::streaming(voice, stream, Playback::default())
             .expect("a finite gain and a nonempty width")
-            .with_handle();
-        let second = handle.clone();
+            .controlled();
+        let second = controls.clone();
         let _ = streamer.step_until_idle(1_000);
-        assert!(!served.closed(), "the handle holds the stream");
+        assert!(!served.closed(), "the controls hold the stream");
 
-        drop(handle);
+        drop(controls);
         let _ = streamer.step_until_idle(1_000);
-        assert!(!served.closed(), "a clone of the handle still holds it");
+        assert!(!served.closed(), "a clone of the controls still holds it");
         assert!(
             second.status().is_some(),
-            "a streaming handle reports its stream"
+            "streaming controls report their stream"
         );
 
         drop(second);

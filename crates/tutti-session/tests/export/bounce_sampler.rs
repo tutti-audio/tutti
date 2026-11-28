@@ -14,18 +14,18 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::ForkError;
 use tutti_sampler::{Clip, Loop, Playback, SlotId, VoicePool};
-use tutti_session::{Bounce, BounceError, BounceTail, DetachedSession, MainOutput, Range, Session};
+use tutti_session::{Bounce, BounceError, BounceTail, MainOutput, Range, Session};
 use tutti_units::{Beat, PlaybackRate, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
 
-fn session() -> DetachedSession {
-    let mut session = Session::builder()
+fn session() -> Session {
+    Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
-    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
-    session
+        .sample_rate(SampleRate::of(RATE))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 /// A mono wave of `frames` frames of `level`, at the session's rate.
@@ -40,7 +40,7 @@ fn constant(frames: usize, level: f32) -> Arc<Wave> {
 
 /// The main output's frame count of a bounce of the first `seconds`, with the
 /// tail the bounce picks without being asked.
-fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
+fn length_of(session: &mut Session, seconds: f64) -> usize {
     let bounce = Bounce::new()
         .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))

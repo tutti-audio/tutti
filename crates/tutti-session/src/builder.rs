@@ -398,80 +398,17 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         // The width of every block the host pulls.
         let mut engine = parts.graph.engine(&parts.transport, device, self.dates)?;
         Self::clock_midi(&parts, &engine);
-        let mut taps = fresh_heard_taps(&mut engine);
+        let taps = fresh_heard_taps(&mut engine);
         let readings = (engine.load(), engine.blocks());
         let clock = engine.block_clock();
-        let mut session = self.session(parts, crate::clock::OfflineEngine { engine }, true)?;
-        session.output.readings = Some(readings);
+        let mut session = self.session(
+            parts,
+            crate::clock::OfflineEngine { engine },
+            (taps, layout),
+            readings,
+        )?;
         session.transport.handle.set_clock(clock);
-        taps.notify_with(session.background.bells().handle());
-        session.output.taps = Some((taps, layout));
         Ok(session)
-    }
-
-    /// A session with no engine: the executor stays on this side, every
-    /// commit is applied at once, and `Session::render_frame` renders it
-    /// (or `Graph::take_audio_side` hands it to a test). No metronome and
-    /// no MIDI nodes are inserted, and no disk streamer is started: the
-    /// graph's main output is the declared
-    /// [`main_output_topology`](Self::main_output_topology), else the engine's
-    /// order for `outputs_floor` (at most [`MAX_CHANNELS`] wide), empty,
-    /// at `rate`, in blocks of [`LIVE_MAX_BLOCK`]. Behind `testing`: what a
-    /// host wants is [`build`](Self::build).
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Output`](crate::Error::Output) when the declared main output topology is empty.
-    ///
-    /// # Panics
-    ///
-    /// Never: the default main output is clamped to `MAX_CHANNELS`, which has a topology.
-    #[cfg(feature = "testing")]
-    pub fn build_detached(
-        mut self,
-        rate: SampleRate,
-    ) -> Result<Session<&'static str, crate::Detached<F>>> {
-        let main_output = match self.opts.main_output {
-            Some(declared) => {
-                Graph::<F>::check_main_output(&declared, None)?;
-                declared
-            }
-            None => ChannelTopology::default_for(ChannelLayout::clamped(
-                usize::from(self.opts.outputs_floor.count()).min(MAX_CHANNELS),
-            ))
-            .expect("a width within MAX_CHANNELS has a topology"),
-        };
-        let transport = Transport::new(rate);
-        let mut graph = Graph::new(
-            main_output,
-            rate,
-            LIVE_MAX_BLOCK,
-            None,
-            #[cfg(feature = "plugin")]
-            transport.settings().tempo_reader(),
-        );
-        graph.set_render_workers(self.opts.render_workers);
-        let (executor, background) = Self::session_executor()?;
-        let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
-        self.session(
-            Parts {
-                executor,
-                bells,
-                background,
-                graph,
-                transport,
-                click: None,
-                click_settings: Arc::new(ClickSettings::new()),
-                #[cfg(feature = "midi")]
-                midi: None,
-                #[cfg(feature = "midi-hardware")]
-                midi_io: None,
-                #[cfg(feature = "midi-hardware")]
-                device_events: None,
-            },
-            crate::clock::DetachedGraph,
-            false,
-        )
     }
 }
 
@@ -511,7 +448,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             .engine(&parts.transport, device, BlockDates::Os)?;
         Self::clock_midi(&parts, &engine);
         let readings = (engine.load(), engine.blocks());
-        let mut taps = fresh_heard_taps(&mut engine);
+        let taps = fresh_heard_taps(&mut engine);
         let clock = engine.block_clock();
         let spec = tutti_engine::OutputSpec::new(rate, layout, F::FORMAT)
             .with_quantum(tutti_engine::OutputQuantum::try_from(max_block)?);
@@ -528,11 +465,9 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
                 #[cfg(feature = "device")]
                 audio_host: self.opts.host,
             },
-            true,
+            (taps, layout),
+            readings,
         )?;
-        session.output.readings = Some(readings);
-        taps.notify_with(session.background.bells().handle());
-        session.output.taps = Some((taps, layout));
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, which the timer reports as zero.
         #[cfg(feature = "midi")]
@@ -645,15 +580,14 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             .graph
             .engine(&parts.transport, device, BlockDates::Os)?;
         Self::clock_midi(&parts, &engine);
+        let readings = (engine.load(), engine.blocks());
+        let taps = fresh_heard_taps(&mut engine);
         let mut session: crate::LiveSession<&'static str, F> = self.session(
             parts,
             crate::device::DeviceHandle::vacant(self.opts.host),
-            true,
+            (taps, spec.channels),
+            readings,
         )?;
-        session.output.readings = Some((engine.load(), engine.blocks()));
-        let mut taps = fresh_heard_taps(&mut engine);
-        taps.notify_with(session.background.bells().handle());
-        session.output.taps = Some((taps, spec.channels));
         let clock = engine.block_clock();
         // The outputs are timed by the session's one clock reader and the
         // stream's latency, read on every drain.
@@ -1025,20 +959,25 @@ impl<C: Clock> SessionBuilder<C> {
         Ok((executor, background))
     }
 
-    /// The session over `parts`, `engine` its offline engine if any, with
-    /// (`sampler`) a disk streamer when `streamer`.
+    /// The session over `parts` and the `running` engine's heard tap (at the
+    /// device width it was built for) and readings, with (`sampler`) a disk
+    /// streamer.
     fn session<N: Clock<Float = C::Float>>(
         &mut self,
         mut parts: Parts<N::Float>,
         running: N::Running,
-        streamer: bool,
+        (mut taps, device_width): (tutti_engine::HeardTaps<N::Float>, ChannelLayout),
+        readings: (
+            tutti_rt::Gauge<tutti_engine::Load>,
+            tutti_rt::Counter<tutti_engine::BlockCounts>,
+        ),
     ) -> Result<Session<&'static str, N>> {
         let executor = parts.executor.clone();
         let midi = crate::session::parts::MidiPart::new(&mut parts, &self.opts);
         let bells = parts.bells;
         parts.graph.notify_with(bells.handle());
+        taps.notify_with(bells.handle());
         let sampler = crate::session::parts::SamplerPart::new(
-            streamer,
             parts.graph.prepared().sample_rate(),
             &executor,
             &bells,
@@ -1060,6 +999,8 @@ impl<C: Clock> SessionBuilder<C> {
             output: crate::session::parts::OutputPart::new(
                 *parts.graph.main_output_topology(),
                 crate::policy::output_cell(table.output_facts()),
+                (taps, device_width),
+                readings,
             ),
             reports: Default::default(),
             midi,
@@ -1175,10 +1116,7 @@ mod tests {
         assert_eq!(prepared.max_block(), LIVE_MAX_BLOCK);
         assert_eq!(session.graph_ref().outputs(), 2);
         assert_eq!(session.sample_rate(), SampleRate::SR_48K);
-        assert_eq!(
-            session.output.taps.as_ref().map(|(_, layout)| *layout),
-            Some(ChannelLayout::STEREO)
-        );
+        assert_eq!(session.output.taps.1, ChannelLayout::STEREO);
     }
 
     /// **The setters are honoured, not the defaults.** A rate, a width and a
@@ -1197,6 +1135,6 @@ mod tests {
         assert_eq!(prepared.sample_rate(), SampleRate::SR_44K1);
         assert_eq!(prepared.max_block(), block);
         assert_eq!(session.graph_ref().outputs(), 4);
-        assert_eq!(session.output.taps.as_ref().map(|(_, l)| *l), Some(quad));
+        assert_eq!(session.output.taps.1, quad);
     }
 }

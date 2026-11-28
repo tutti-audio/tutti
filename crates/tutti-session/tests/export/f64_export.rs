@@ -17,13 +17,16 @@ use tutti_units::{Amplitude, SampleRate, Seconds};
 mod f64_nodes;
 use f64_nodes::{Dc, FINE, Gain};
 
-/// A detached `f64` session of `0.75 * FINE` on one output: a gain set through
+/// An offline `f64` session of `0.75 * FINE` on one output: a gain set through
 /// `Session::set`, so the fork starts from the value set.
-fn session() -> tutti_session::DetachedSession<&'static str, f64> {
+fn session() -> tutti_session::OfflineSession<&'static str, f64> {
     let mut s = Session::builder()
         .float::<f64>()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("an f64 session builds");
     let dc = s.graph().add(ForkByClone(Dc(FINE)));
     let gain = s.graph().add(Params(Gain(Param::new(Amplitude::new(1.0)))));

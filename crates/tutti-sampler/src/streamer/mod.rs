@@ -465,8 +465,11 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     ///
     /// Every open stream keeps its file and its position (in file frames, which
     /// the rate does not touch) and has its conversion ratio re-derived against
-    /// the new rate, so it plays on at the right pitch and speed; a stream
-    /// opened later derives its ratio against the new rate too, and
+    /// the new rate, which paces its read-ahead: the refill reads ahead at the
+    /// rate the voice will consume. The voice's pitch follows its own rate,
+    /// which its graph's re-prepare gives it; a voice not yet prepared reads the
+    /// stream's ratio until it is. A stream opened later derives its ratio
+    /// against the new rate too, and
     /// [`sample_rate`](Self::sample_rate) reports it at once. The
     /// ratios are the streamer's own to write, so the re-derivation happens on
     /// its thread when it takes the command this sends: at its next cycle (a
@@ -477,9 +480,9 @@ impl<D, F: RingFloat> DiskStreamer<D, F> {
     /// Waits while the streamer's bounded queue is full, as every stream
     /// command does; a streamer that is gone has no ratio to re-derive.
     ///
-    /// Control thread only. Nothing changes for a disk voice already in the
-    /// graph beyond its ratio: its placement gate converts beats to file frames
-    /// at the file's own rate, which is not the session's.
+    /// Control thread only. A disk voice's placement gate converts beats to file
+    /// frames at the file's own rate, which is not the session's, so the rate
+    /// leaves it unchanged.
     pub fn set_sample_rate(&self, sample_rate: impl Into<SampleRate>) {
         self.shared.session_rate.set(sample_rate.into());
         // The rate is stored before the command is sent, so whichever the

@@ -175,8 +175,6 @@ const EXCLUDED: &[&str] = &["Sealed", "Result"];
 
 /// `(crate, type)` rows behind a `testing` feature of the owning crate.
 const TESTING: &[(&str, &str)] = &[
-    ("tutti_session", "AudioSide"),
-    ("tutti_session", "Detached"),
     ("tutti_session", "Testing"),
     ("tutti_plugin_types", "FakeController"),
     ("tutti_plugin_types", "FakeLoaded"),
@@ -1048,7 +1046,7 @@ pub use tutti_nodes::SvfType;
         let api = "pub struct tutti_graph::Node\n\
                    pub fn tutti_graph::Node::a(&self) -> tutti_graph::Result<()>\n\
                    pub trait tutti_graph::Node: tutti_graph::private::Sealed\n\
-                   pub fn tutti_graph::Node::b(&self, tutti_session::Detached)\n";
+                   pub fn tutti_graph::Node::b(&self, tutti_session::Testing)\n";
         assert_eq!(missing(api), none());
     }
 

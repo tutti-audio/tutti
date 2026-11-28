@@ -5,7 +5,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::WavePlanes;
 use tutti_graph::{Cx, ForkByClone, ForkError, Io, Node, Prepare, SampleRates, Shape, Status};
 use tutti_session::ToMemory;
-use tutti_session::{Bounce, BounceError, DetachedSession, MainOutput, Range, Session};
+use tutti_session::{Bounce, BounceError, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
 use crate::bounced::bounced;
@@ -27,7 +27,7 @@ impl Node for Rated {
     fn reset(&mut self) {}
 }
 
-fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, BounceError> {
+fn bounce_at(session: &mut Session, rate: SampleRate) -> Result<usize, BounceError> {
     let bounce = Bounce::new()
         .main_output(ToMemory::new())
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.25)))
@@ -42,8 +42,10 @@ fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, B
 fn a_bounce_at_a_rate_a_node_does_not_run_at_is_refused() {
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::SR_48K)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_48K);
     let node = session.graph().add(ForkByClone(Rated(rates)));
     session.graph().connect(node, MainOutput).unwrap().unfaded();

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_midi_runtime::{ClipEvents, ClipEventsKind, TimedMidiEvent};
-use tutti_session::{ChangedBy, DetachedSession, NodeDecl, Session};
+use tutti_session::{ChangedBy, NodeDecl, Session};
 use tutti_ump::MidiChannel;
 use tutti_units::{Beat, Hz, SampleRate};
 
@@ -56,10 +56,13 @@ fn clip(notes: u8) -> Arc<ClipEvents> {
     )
 }
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 

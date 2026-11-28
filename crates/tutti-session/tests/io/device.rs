@@ -92,7 +92,7 @@ fn the_session_reads_the_load_its_callback_measures() {
             .render_block(Samples::new(64))
             .expect("the stream is open");
     }
-    let blocks = session.blocks().expect("a device's engine");
+    let blocks = session.blocks();
     assert_eq!(blocks.get().blocks, 3);
 }
 
@@ -768,7 +768,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .expect("builds with no device");
-    let across = s.open_heard_tap(Samples::new(1_024)).expect("opens");
+    let across = s.open_heard_tap(Samples::new(1_024));
     assert_eq!(across.width(), 2);
 
     let six = OutputSpec::new(
@@ -791,7 +791,7 @@ fn the_heard_tap_reopens_at_the_width_of_the_device_after_a_restart() {
     );
 
     drop(across);
-    let after = s.open_heard_tap(Samples::new(1_024)).expect("reopens");
+    let after = s.open_heard_tap(Samples::new(1_024));
     assert_eq!(after.width(), 6, "the device's width now");
     new.render_block(Samples::new(64)).expect("open");
     assert_eq!(after.available(), Samples::new(64));

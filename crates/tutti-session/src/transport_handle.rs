@@ -30,7 +30,7 @@ use crate::Playhead;
 #[derive(Clone, Debug)]
 pub struct TransportHandle {
     transport: Transport,
-    /// The engine's block clock; `None` detached, where nothing renders.
+    /// The engine's block clock; `None` until the builder hands it over.
     clock: Option<BlockClockReader>,
     /// The last motion sent for the next block that starts or stops the
     /// transport, and the frame the next render call was to start at when it

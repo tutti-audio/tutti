@@ -11,7 +11,6 @@
 setter  crates/tutti-session/src/graph.rs::Graph::set_feed  wiring of an event feed, a declaration: goes with the wiring declarations (11b)
 setter  crates/tutti-session/src/session/transport.rs::Session::set_sample_rate  the rate of a session with no device, a configuration of the session: goes with the builder's rate (11a)
 setter  crates/tutti-session/src/graph.rs::Graph::set_sources  wiring, a declaration: goes with the wiring declarations (11b)
-setter  crates/tutti-session/src/graph/testing.rs::AudioSide::set_transport  a hand-driven transport for the detached graph, behind feature `testing`: the detached graph's test double has no session verb for the transport
 setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallback  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/midi.rs::Midi::set_routes  goes with the MIDI routing declarations (11b)
 setter  crates/tutti-session/src/modulation.rs::Mods::set_source  which source a route reads, a declaration: goes at 11e

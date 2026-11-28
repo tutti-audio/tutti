@@ -3518,7 +3518,7 @@ mod tests {
     }
 
     struct Rig {
-        session: crate::DetachedSession,
+        session: crate::Session,
         node: NodeKey,
         saves: Arc<AtomicUsize>,
         dead: Arc<AtomicBool>,
@@ -3531,7 +3531,7 @@ mod tests {
         closed: Arc<AtomicBool>,
     }
 
-    /// A detached session snapshotting every second, hosting a fake that
+    /// An offline session snapshotting every second, hosting a fake that
     /// answers `state` at a dc node.
     fn rig(state: Option<Vec<u8>>) -> Rig {
         build_rig(state, Mode::Plain)
@@ -3557,7 +3557,9 @@ mod tests {
     fn build_rig(state: Option<Vec<u8>>, mode: Mode) -> Rig {
         let mut session = Session::builder()
             .snapshot_interval(Duration::from_secs(1))
-            .build_detached(SampleRate::SR_48K)
+            .sample_rate(SampleRate::SR_48K)
+            .block_dates(crate::BlockDates::Frames)
+            .build()
             .unwrap();
         let weak = session.plugins.executor.clone();
         let saves = Arc::new(AtomicUsize::new(0));

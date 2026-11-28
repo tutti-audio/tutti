@@ -574,8 +574,8 @@ pub mod session {
         MainOutputTopologyStatus, MainSink, Meters, NotReopened, Outlet, OutputPlacement,
         OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent, PeerResourceId,
         Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError, Reopened,
-        ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError, SetRateError,
-        SetSources, Taps, Weighted, Wire, main_output_width,
+        ReplaceRefused, Replacement, Resource, ResourceFact, SetRateError, SetSources, Taps,
+        Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -679,15 +679,15 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart, SamplerFloat,
-        StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
-        StreamStatus, VoiceNodeHandle,
+        Block, FreeRunning, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart,
+        SamplerFloat, StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader,
+        StreamStart, StreamStatus, VoiceNodeControls,
     };
     pub use tutti_sampler::{DirectionKind, LoopingKind, SpeedKind, WindowKind};
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
-        SlotId, StreamerStartError, StreamingAddError, VoiceNodeError, VoiceWindow,
+        ControlCell, GainError, Loop, LoopError, PlaceError, Playback, SendError, SlotId,
+        StreamerStartError, StreamingAddError, VoiceNodeError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",
