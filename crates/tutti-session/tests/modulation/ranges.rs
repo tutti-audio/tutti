@@ -199,7 +199,7 @@ fn a_range_write_is_refused_at_the_call() {
 /// while the knob reads 500 throughout; widened again it is 700.
 #[test]
 fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
@@ -209,11 +209,11 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
     m.route(RouteSpec::new(source, probe.cutoff(), Bipolar::of(0.4)))
         .unwrap();
     settle(&mut s);
-    let tail = |side: &mut _| *render(side, 1_024, 128)[0].last().unwrap();
+    let tail = |s: &mut tutti_session::Session| *render(s, 1_024, 128)[0].last().unwrap();
     let near = |got: f32, want: f32| {
         assert!((got - want).abs() < 1e-3, "{got} is not {want}");
     };
-    near(tail(&mut side), 700.0);
+    near(tail(&mut s), 700.0);
 
     s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(600.0)))
         .unwrap();
@@ -222,7 +222,7 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
         Hz::new(0.0)..Hz::new(600.0)
     );
     settle(&mut s);
-    near(tail(&mut side), 600.0);
+    near(tail(&mut s), 600.0);
     assert_eq!(
         s.get(probe.cutoff()).unwrap(),
         Hz::new(500.0),
@@ -232,7 +232,7 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
     s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(1_000.0)))
         .unwrap();
     settle(&mut s);
-    near(tail(&mut side), 700.0);
+    near(tail(&mut s), 700.0);
     assert_eq!(s.get(probe.cutoff()).unwrap(), Hz::new(500.0));
 }
 
@@ -240,7 +240,7 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
 /// into the lane's range.
 #[test]
 fn a_range_write_republishes_no_program() {
-    let (mut s, mut side) = rig(1);
+    let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));
     main_output(&mut s, &[probe.erase()]);
     let mut m = s.mods_mut();
@@ -250,8 +250,8 @@ fn a_range_write_republishes_no_program() {
     m.route(RouteSpec::new(source, probe.cutoff(), Bipolar::of(0.4)))
         .unwrap();
     settle(&mut s);
-    render(&mut side, 1_024, 128);
-    let lane = |s: &tutti_session::DetachedSession| {
+    render(&mut s, 1_024, 128);
+    let lane = |s: &tutti_session::Session| {
         s.mod_state()
             .lane(ParamRef::unit(probe, UnitParam::Cutoff).key())
             .expect("a lane")
@@ -259,18 +259,18 @@ fn a_range_write_republishes_no_program() {
             .clone()
     };
     let before = lane(&s).program();
-    let tail = |side: &mut _| *render(side, 1_024, 128)[0].last().unwrap();
+    let tail = |s: &mut tutti_session::Session| *render(s, 1_024, 128)[0].last().unwrap();
     let near = |got: f32, want: f32| {
         assert!((got - want).abs() < 1e-3, "{got} is not {want}");
     };
     // 500 + 0.5 * 0.4 * 1000.
-    near(tail(&mut side), 700.0);
+    near(tail(&mut s), 700.0);
     s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(800.0)))
         .unwrap();
     settle(&mut s);
     // The lane reads the new range's span, inside the bound: 500 + 0.5 *
     // 0.4 * 800 (700 would be the old span).
-    near(tail(&mut side), 660.0);
+    near(tail(&mut s), 660.0);
     assert!(Arc::ptr_eq(&before, &lane(&s).program()));
 }
 
