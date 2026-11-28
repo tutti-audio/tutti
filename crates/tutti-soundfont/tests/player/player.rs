@@ -25,7 +25,9 @@ fn dry() -> Rig {
 
 /// A unit prepared by a graph at `rate`, the way `Node::prepare` re-rates it.
 fn prepared_at(rate: SampleRate) -> SoundFontUnit<f32> {
-    let mut unit = SoundFontUnit::try_from(SoundFontConfig::new(timgm6mb())).unwrap();
+    let mut unit = SoundFontUnit::from(
+        SoundFontConfig::new(timgm6mb()).expect("a font with a playable preset"),
+    );
     unit.prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(64))));
     unit
 }
@@ -33,7 +35,9 @@ fn prepared_at(rate: SampleRate) -> SoundFontUnit<f32> {
 /// The unit's declared rates are the range `prepare` re-rates within.
 #[test]
 fn the_shape_declares_the_rates_the_unit_runs_at() {
-    let unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(timgm6mb())).unwrap();
+    let unit = SoundFontUnit::<f32>::from(
+        SoundFontConfig::new(timgm6mb()).expect("a font with a playable preset"),
+    );
     assert_eq!(
         Node::<f32>::shape(&unit).rates(),
         SampleRates::of(SampleRate::of(16_000.0), SampleRate::of(192_000.0))
@@ -44,9 +48,10 @@ fn the_shape_declares_the_rates_the_unit_runs_at() {
 /// outside them at the rate the unit has (a graph refuses to hand one in).
 #[test]
 fn a_graph_re_rates_the_unit_within_its_rates_and_leaves_it_outside() {
-    let initial = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(timgm6mb()))
-        .unwrap()
-        .sample_rate();
+    let initial = SoundFontUnit::<f32>::from(
+        SoundFontConfig::new(timgm6mb()).expect("a font with a playable preset"),
+    )
+    .sample_rate();
     for hz in [16_000_u32, 48_000, 192_000] {
         let rate = SampleRate::from_hz(hz).unwrap();
         assert_eq!(prepared_at(rate).sample_rate(), rate, "{hz} Hz");
@@ -84,7 +89,9 @@ fn a_note_sounds_its_pitch_at_every_rate_in_range() {
 fn a_pool_of_one_voice_gives_way_to_the_next_note() {
     let font = support::font::one_preset(vec![vec![]]);
     let level = |voices: usize| {
-        let config = SoundFontConfig::new(Arc::clone(&font)).polyphony(Polyphony::of(voices));
+        let config = SoundFontConfig::new(Arc::clone(&font))
+            .expect("a font with a playable preset")
+            .polyphony(Polyphony::of(voices));
         let mut rig = Rig::with(config);
         rig.note_on(0, 60, 100);
         rig.energy(4096);
@@ -103,15 +110,9 @@ fn a_pool_of_one_voice_gives_way_to_the_next_note() {
 }
 
 // A count of voices past `Polyphony::MAX` is not a polyphony (`usize::MAX` would
-// overflow the pool's allocation); the maximum itself and one voice build.
+// overflow the pool's allocation).
 #[test]
-fn a_polyphony_past_the_maximum_is_refused_and_the_maximum_builds() {
-    let at = |voices: usize| {
-        let config = SoundFontConfig::new(timgm6mb()).polyphony(Polyphony::of(voices));
-        SoundFontUnit::<f32>::try_from(config)
-    };
-    assert!(at(1).is_ok());
-    assert!(at(Polyphony::MAX).is_ok());
+fn a_polyphony_past_the_maximum_is_refused() {
     for too_many in [Polyphony::MAX + 1, usize::MAX] {
         assert_eq!(Polyphony::new(too_many), None, "{too_many}");
         assert_eq!(
@@ -929,7 +930,7 @@ fn a_font_with_nothing_playable_is_refused() {
             zones: vec![vec![]],
         }],
     );
-    let error = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(font)).unwrap_err();
+    let error = SoundFontConfig::new(font).unwrap_err();
     assert!(matches!(error, Error::NoPlayablePreset), "{error:?}");
 }
 
@@ -1129,7 +1130,8 @@ fn a_sample_stating_rate_zero_plays_at_the_nearest_practical_rate() {
 fn a_program_change_to_a_missing_preset_is_counted() {
     use support::Hand;
     let font = support::font::one_preset(vec![vec![]]);
-    let unit = SoundFontUnit::try_from(SoundFontConfig::new(font)).unwrap();
+    let unit =
+        SoundFontUnit::from(SoundFontConfig::new(font).expect("a font with a playable preset"));
     let missing = unit.missing_presets();
     let mut rig = Rig {
         hand: Hand::new(unit),

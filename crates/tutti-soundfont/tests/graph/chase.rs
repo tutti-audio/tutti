@@ -37,7 +37,7 @@ fn font() -> Arc<SoundFont> {
 }
 
 fn unit() -> SoundFontUnit<f32> {
-    SoundFontUnit::try_from(SoundFontConfig::new(font())).expect("builds")
+    SoundFontUnit::from(SoundFontConfig::new(font()).expect("a font with a playable preset"))
 }
 
 fn cc(channel: u8, controller: u8, value: u8) -> Ump {

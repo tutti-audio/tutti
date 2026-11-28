@@ -84,7 +84,9 @@ fn energy(rig: &mut Rig) -> (f32, f32) {
 #[test]
 fn master_volume_scales_every_plane_by_the_square_of_the_value() {
     let font = font_with(false);
-    let config = SoundFontConfig::new(Arc::clone(&font)).device(SysexDeviceId::of(5));
+    let config = SoundFontConfig::new(Arc::clone(&font))
+        .expect("a font with a playable preset")
+        .device(SysexDeviceId::of(5));
     let mut rig = Rig::with(config);
     rig.note_on(0, 69, 100);
     let (l0, r0) = energy(&mut rig);
@@ -100,7 +102,9 @@ fn master_volume_scales_every_plane_by_the_square_of_the_value() {
 #[test]
 fn only_the_all_call_and_the_units_own_id_are_heard() {
     let font = font_with(false);
-    let config = SoundFontConfig::new(Arc::clone(&font)).device(SysexDeviceId::of(5));
+    let config = SoundFontConfig::new(Arc::clone(&font))
+        .expect("a font with a playable preset")
+        .device(SysexDeviceId::of(5));
     let mut rig = Rig::with(config);
     rig.note_on(0, 69, 100);
     let (l0, _) = energy(&mut rig);

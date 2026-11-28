@@ -583,10 +583,9 @@ mod soundfont {
         assert!(declared > 0);
         let font = tutti_fixtures::block_on(session().load_soundfont(path)).unwrap();
         assert_eq!(font.font().presets().len(), declared);
-        let unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(std::sync::Arc::clone(
-            font.font(),
-        )));
-        assert!(unit.is_ok(), "{:?}", unit.err());
+        let config = SoundFontConfig::new(std::sync::Arc::clone(font.font()))
+            .expect("a font with a playable preset");
+        let _unit = SoundFontUnit::<f32>::from(config);
     }
 
     #[test]

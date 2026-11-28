@@ -53,7 +53,8 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
         ))
         .expect("the built font parses"),
     );
-    let unit = SoundFontUnit::try_from(SoundFontConfig::new(font)).expect("builds");
+    let unit =
+        SoundFontUnit::from(SoundFontConfig::new(font).expect("a font with a playable preset"));
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)

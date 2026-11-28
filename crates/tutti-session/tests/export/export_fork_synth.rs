@@ -97,8 +97,9 @@ fn font() -> Arc<SoundFont> {
 
 /// A SoundFont unit on [`PRESET`].
 fn sf2(font: &Arc<SoundFont>) -> SoundFontUnit<f32> {
-    let mut unit =
-        SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).expect("the unit builds");
+    let mut unit = SoundFontUnit::from(
+        SoundFontConfig::new(Arc::clone(font)).expect("a font with a playable preset"),
+    );
     unit.program_change(MidiChannel::FIRST, PRESET);
     unit
 }
