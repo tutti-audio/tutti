@@ -378,6 +378,26 @@ impl AudioState {
         }
     }
 
+    /// The server answered the flush that was request `ord`, in its window or
+    /// late, with `outcome`: whether it handed the writes over
+    /// ([`answered`](Self::answered)). One it
+    /// [kept](ApplyOutcome::Held) for the next block is neither lost nor
+    /// applied: the request ends with nothing published and nothing owed, and
+    /// the next block's answer, whose drain is later, covers them.
+    fn flush_answered(&mut self, channels: &Channels, ord: u64, outcome: ApplyOutcome) -> bool {
+        match outcome {
+            ApplyOutcome::Held => {
+                self.flights.retain(|f| f.ord != ord);
+                false
+            }
+            outcome => {
+                let handed = outcome == ApplyOutcome::Applied;
+                self.answered(channels, ord, handed);
+                handed
+            }
+        }
+    }
+
     /// The writes a flush sends, one change per parameter on the first frame:
     /// what no block has taken (the slots, newest) and what is owed, preceded by
     /// what skipped blocks kept ([`carry`](Self::carry)); the request's number,
@@ -510,7 +530,7 @@ impl AudioState {
             }
             Heard::Abandoned(AbandonedAudio::Params { ord }) => {
                 if let AudioReply::ParametersApplied { outcome, .. } = reply {
-                    self.answered(channels, ord, outcome == ApplyOutcome::Applied);
+                    self.flush_answered(channels, ord, outcome);
                 }
                 Ok(None)
             }
@@ -999,9 +1019,7 @@ pub(super) fn handle_audio(
             // as the flush may not have landed.
             let took = match wait_audio(stream, state, channels, key)? {
                 Some(AudioReply::ParametersApplied { outcome, .. }) => {
-                    let got = outcome == ApplyOutcome::Applied;
-                    state.answered(channels, ord, got);
-                    got
+                    state.flush_answered(channels, ord, outcome)
                 }
                 _ => false,
             };

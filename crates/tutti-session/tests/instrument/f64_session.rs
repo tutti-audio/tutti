@@ -40,7 +40,7 @@ fn render(session: &mut OfflineSession<&'static str, f64>, blocks: usize) -> Vec
 }
 
 fn sine_synth() -> PolySynth<f64> {
-    PolySynth::new(
+    PolySynth::from(
         SynthConfig::new()
             .polyphony(std::num::NonZeroUsize::new(4).unwrap())
             .oscillator(OscillatorType::Sine)

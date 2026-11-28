@@ -50,12 +50,12 @@ use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{
     ApplyOutcome, AudioReply, AudioRequest, BlockWrites, SlabLayout, SlabWriter,
 };
-use tutti_plugin_types::Samples;
 use tutti_plugin_types::{
     BlockStatus, Features, IpcError, IpcResult, MidiEventVec, PluginIo, PluginResult,
     ProcessOutput, Processor,
 };
 use tutti_plugin_types::{EditWriter, ParameterChanges};
+use tutti_plugin_types::{Flushed, Samples};
 use tutti_rt::{
     Overflow, PushError, Returned, RingReader, RingWriter, Rt, Tally, TallyWriter, ring, tally,
 };
@@ -132,7 +132,9 @@ pub(crate) trait RenderEnd: Render + Send {
     /// Delivers parameter changes between blocks by the format's own route
     /// ([`Processor::flush_parameters`]), and says what became of them: a
     /// plugin whose Processor is not here has nothing to deliver them to
-    /// ([`Unseated`](ApplyOutcome::Unseated)).
+    /// ([`Unseated`](ApplyOutcome::Unseated)), and one that keeps writes for
+    /// the next block ([`Flushed::Held`]) has not delivered them
+    /// ([`Held`](ApplyOutcome::Held)).
     fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome;
 }
 
@@ -196,7 +198,8 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
     fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome {
         match self.rt.held() {
             Some(processor) => match processor.flush_parameters(changes) {
-                Ok(()) => ApplyOutcome::Applied,
+                Ok(Flushed::Held) => ApplyOutcome::Held,
+                Ok(Flushed::Applied) => ApplyOutcome::Applied,
                 Err(_) => ApplyOutcome::Refused,
             },
             None => ApplyOutcome::Unseated,

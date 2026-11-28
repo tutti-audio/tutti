@@ -1060,6 +1060,69 @@ fn a_served_save_states_a_pending_write_and_a_restore_replays_it() {
     });
 }
 
+/// **A served write of a `REQUIRES_PROCESS` parameter waits for a block, and
+/// every save until then states it pending**: the server's flush keeps the
+/// value for the next block, never handing it to `params.flush`, and answers
+/// that it did, so the client publishes no applied mark for it. A write of
+/// another parameter in the same flush reaches the plugin at the flush. Once a
+/// block has run the plugin holds both and nothing is pending.
+#[test]
+fn a_served_requires_process_write_waits_for_a_block() {
+    const CUTOFF: ParamId = ParamId::new(101);
+    const MANUAL: ParamId = ParamId::new(tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID);
+    let own = |saved: &tutti_session::Saved, id: ParamId| {
+        tutti_clap_test_plugin::saved_normalized(saved.state().bytes(), id.get())
+            .expect("the state holds the parameter")
+    };
+    let (catalog, _dir) = catalog();
+    let mut s = session(false);
+    let (_, node) = in_a_node(&mut s, &catalog, &first_id());
+    let save = |s: &Session| {
+        let SaveState::OutOfProcess(save) = s.save_state(&node, StateUse::Project).unwrap() else {
+            panic!("a served plugin's save is awaited");
+        };
+        tutti_fixtures::block_on(save).expect("a state")
+    };
+    let target = |s: &Session, id: ParamId| {
+        s.plugin_view(node)
+            .unwrap()
+            .params()
+            .get(id)
+            .expect("the plugin declares the parameter")
+            .target()
+    };
+    let (cutoff, manual) = (target(&s, CUTOFF), target(&s, MANUAL));
+    s.set(manual.to(Normalized::of(1.0))).unwrap();
+    s.set(cutoff.to(Normalized::of(0.9))).unwrap();
+
+    // The first save's flush is answered before its state is read, so the
+    // second save is made after the flush that a wrong answer would publish.
+    let _ = save(&s);
+    let held = save(&s);
+    assert!(
+        own(&held, MANUAL).abs() < 1e-4,
+        "the plugin lacks the write that needs a block"
+    );
+    assert!(
+        (own(&held, CUTOFF) - 0.9).abs() < 1e-4,
+        "the flush delivered the other write"
+    );
+    assert!(
+        held.pending().contains(&(MANUAL, Normalized::of(1.0))),
+        "no block has applied it: {:?}",
+        held.pending()
+    );
+
+    s.graph()
+        .connect(node, tutti_session::MainOutput)
+        .unwrap()
+        .unfaded();
+    pump_until(&mut s, "a block applies the write", |s| {
+        let saved = save(s);
+        (own(&saved, MANUAL) - 1.0).abs() < 1e-4 && saved.pending().is_empty()
+    });
+}
+
 /// **A save awaited on a spawned thread returns the plugin's state**, which a
 /// new plugin loaded from it holds: no main thread ran the round trip.
 #[test]

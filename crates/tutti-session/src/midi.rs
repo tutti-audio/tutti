@@ -14,7 +14,7 @@
 //!
 //! [`Phase::MidiOut`]: crate::Phase::MidiOut
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 use tutti_platform::Instant;
@@ -725,14 +725,13 @@ impl<T> MidiRouteRule<T> {
     }
 }
 
-/// One clip: the MPE transform between it and its target, and the target it
-/// feeds. The target is fed by the transform, which the clip feeds.
+/// One clip: the MPE transform between it and its target. The target is fed
+/// by the transform, which the clip feeds.
 #[derive(Debug)]
 struct Clip {
     /// The transform node, which is part of the clip's wiring: it goes with
     /// the clip.
     transform: NodeKey,
-    target: NodeKey,
 }
 
 /// One live input: the target it feeds, and its keys until [`Midi::input`]
@@ -764,8 +763,6 @@ pub(crate) struct MidiState {
     fallback: Option<NodeKey>,
     /// Names the session's own route rules.
     minted: Mint,
-    /// The sinks the last route compile fed.
-    routed: BTreeSet<NodeKey>,
     /// Whether a host's last `set_routes` declared any rule or fallback:
     /// the routes are then the host's, and the session's own are refused.
     host_routes: bool,
@@ -813,7 +810,6 @@ impl std::fmt::Debug for MidiState {
             .field("rules", &self.rules)
             .field("fallback", &self.fallback)
             .field("minted", &self.minted)
-            .field("routed", &self.routed)
             .field("host_routes", &self.host_routes)
             .finish_non_exhaustive()
     }
@@ -855,7 +851,6 @@ impl MidiState {
     #[must_use = "the clip's other node is still in the graph"]
     pub(crate) fn forget_node(&mut self, node: NodeKey) -> Option<NodeKey> {
         self.live.remove(&node);
-        self.routed.remove(&node);
         if let Some(clip) = self.clips.remove(&node) {
             return Some(clip.transform);
         }
@@ -915,15 +910,7 @@ impl MidiState {
         let inputs = self.input_nodes();
         let rules = std::mem::take(&mut self.rules);
         let fallback = self.fallback;
-        compile_feeds(
-            graph,
-            &mut self.routed,
-            layout,
-            &inputs,
-            rules.values(),
-            fallback,
-            Some,
-        );
+        compile_feeds(graph, layout, &inputs, rules.values(), fallback, Some);
         self.rules = rules;
     }
 
@@ -1139,10 +1126,9 @@ pub(crate) fn drain_events<D: Destination>(
 /// the graph, takes nothing (and still covers its rule's ports): a host's table
 /// may name a target it has not made yet or has removed, so this is the one
 /// place a missing target is skipped, not refused. A sink fed
-/// before and not now is unwired. `routed` holds the sinks the last compile fed.
+/// before and not now is unwired.
 fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
     graph: &mut Graph<F>,
-    routed: &mut BTreeSet<NodeKey>,
     layout: MidiInputPorts,
     inputs: &[NodeKey],
     rules: impl IntoIterator<Item = &'r MidiRouteRule<T>>,
@@ -1166,14 +1152,15 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
         };
         wanted.entry(sink).or_default().extend(ports);
     }
-    for &fed in routed.iter() {
-        // A sink removed since has no feed left to clear.
-        if !wanted.contains_key(&fed) && graph.contains(fed) {
-            let unfed = graph.set_feed(fed, Feeder::Routes, Vec::new());
-            debug_assert!(unfed.is_ok(), "the sink is in the graph");
-        }
+    let stale: Vec<NodeKey> = graph
+        .feed_sinks(Feeder::Routes)
+        .map(|(sink, _)| sink)
+        .filter(|sink| !wanted.contains_key(sink))
+        .collect();
+    for fed in stale {
+        let unfed = graph.set_feed(fed, Feeder::Routes, Vec::new());
+        debug_assert!(unfed.is_ok(), "the sink is in the graph");
     }
-    *routed = wanted.keys().copied().collect();
     for (sink, mut sources) in wanted {
         sources.sort();
         sources.dedup();
@@ -1428,7 +1415,7 @@ impl<F: Float> Midi<'_, F> {
                     vec![EventOutputPort::new(clip, 0)],
                 );
                 debug_assert!(fed.is_ok(), "the transform just added is in the graph");
-                self.state.clips.insert(clip, Clip { transform, target });
+                self.state.clips.insert(clip, Clip { transform });
                 clip
             }
         };
@@ -1516,8 +1503,7 @@ impl<F: Float> Midi<'_, F> {
     }
 
     /// The node of `ours` that `feeder` feeds `target` with: the feed is
-    /// the truth (a host's `Graph::move_feeds` moves it), each entry's
-    /// `target` only what [`retarget`](Self::retarget) unfeeds.
+    /// the truth (a host's `Graph::move_feeds` moves it).
     fn fed_by<'s, V>(
         &self,
         target: NodeKey,
@@ -1546,12 +1532,11 @@ impl<F: Float> Midi<'_, F> {
         let node = node.into();
         let target = target.into();
         self.takes_midi(target)?;
-        let Some(clip) = self.state.clips.get_mut(&node) else {
+        let Some(clip) = self.state.clips.get(&node) else {
             return Err(MidiError::NotSessionMidi(node));
         };
-        let old = std::mem::replace(&mut clip.target, target);
         let transform = clip.transform;
-        self.refeed(transform, old, target, Feeder::Sequencer);
+        self.refeed(transform, target, Feeder::Sequencer);
         Ok(())
     }
 
@@ -1576,19 +1561,20 @@ impl<F: Float> Midi<'_, F> {
             return Err(MidiError::NoLiveInput(from));
         };
         live.target = to;
-        self.refeed(node, from, to, Feeder::LiveInput);
+        self.refeed(node, to, Feeder::LiveInput);
         Ok(())
     }
 
-    /// Moves the feed of `node`'s event output from `old` to `target`.
-    fn refeed(&mut self, node: NodeKey, old: NodeKey, target: NodeKey, feeder: Feeder) {
-        if old != target
-            && self
-                .graph
-                .feed(old, feeder)
-                .is_ok_and(|fed| fed.contains(&EventOutputPort::new(node, 0)))
-        {
-            // `old` is in the graph, as `feed` just answered.
+    /// Moves the feed of `node`'s event output from the sink `feeder` feeds
+    /// it into to `target`.
+    fn refeed(&mut self, node: NodeKey, target: NodeKey, feeder: Feeder) {
+        let source = EventOutputPort::new(node, 0);
+        let old = self
+            .graph
+            .feed_sinks(feeder)
+            .find_map(|(sink, fed)| fed.contains(&source).then_some(sink));
+        if let Some(old) = old.filter(|&old| old != target) {
+            // `old` is in the graph, as a feed names it.
             let unfed = self.graph.set_feed(old, feeder, Vec::new());
             debug_assert!(unfed.is_ok(), "the sink was just read");
         }
@@ -1742,15 +1728,7 @@ impl<F: Float> Midi<'_, F> {
         resolve: impl Fn(T) -> Option<NodeKey>,
     ) {
         let layout = self.input_ports();
-        compile_feeds(
-            self.graph,
-            &mut self.state.routed,
-            layout,
-            &[input],
-            rules,
-            fallback,
-            resolve,
-        );
+        compile_feeds(self.graph, layout, &[input], rules, fallback, resolve);
     }
 
     // --- Tapping what is played ---
