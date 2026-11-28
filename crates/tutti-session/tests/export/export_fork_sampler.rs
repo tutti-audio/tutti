@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::Interleaved;
 use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_fixtures::WavePlanes;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
 
@@ -55,7 +56,7 @@ fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
-        .into_planes()
+        .to_planes()
 }
 
 /// The planes of `node`'s stem of `bounce`, in memory, rendered beside the
@@ -71,7 +72,7 @@ fn render_stem(
         .expect("the bounce renders")
         .into_parts();
     match keys.as_slice() {
-        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").into_planes(),
+        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").to_planes(),
         other => panic!("expected one stem held in memory, got {other:?}"),
     }
 }

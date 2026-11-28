@@ -623,6 +623,64 @@ fn a_dropped_in_place_encoder_leaves_a_wav_whose_header_describes_the_frames() {
     assert_eq!(hound::WavReader::open(&path).unwrap().len(), 20);
 }
 
+/// A WAV or AIFF writer back-patches its sizes every 2 s of audio: an in-place encoder that is
+/// leaked, as in a crash, leaves a header describing the frames up to the first block boundary
+/// at or past 2 s, and the frames written after it are not yet in the header.
+#[cfg(any(feature = "encode-wav", feature = "encode-aiff"))]
+#[test]
+fn a_leaked_in_place_encoder_leaves_a_header_refreshed_every_two_seconds_of_audio() {
+    // 2 s at 8 kHz is 16 000 frames; 1 000-frame blocks (under the encoder's 1 024-frame chunk) reach
+    // it at the sixteenth, and four more follow.
+    const BLOCK: usize = 1_000;
+    const REFRESHED: usize = 16 * BLOCK;
+    let dir = tempfile::tempdir().unwrap();
+    for (ext, format) in formats().into_iter().filter(|(ext, _)| *ext != "flac") {
+        let path = dir.path().join(format!("crash.{ext}"));
+        let spec = at_rate(format, 8_000.0);
+        let mut encoder = EncoderOptions::new(&spec)
+            .file(&path)
+            .in_place()
+            .create()
+            .unwrap();
+        let block = saw(2, BLOCK);
+        for _ in 0..20 {
+            encoder
+                .write(Interleaved::new(&block, spec.layout()).unwrap())
+                .unwrap();
+        }
+        std::mem::forget(encoder);
+        let bytes = std::fs::read(&path).unwrap();
+        let frames = match ext {
+            "wav" => {
+                // The `data` size of the 44-byte header, in bytes of 16-bit stereo.
+                let data = u32::from_le_bytes(bytes[40..44].try_into().unwrap()) as usize;
+                #[cfg(feature = "encode-wav")]
+                assert_eq!(
+                    hound::WavReader::open(&path).unwrap().duration() as usize,
+                    REFRESHED,
+                    "{ext}: the frames hound reads"
+                );
+                data / 4
+            }
+            _ => {
+                // COMM's frame count, and the SSND size: 8 bytes of offset and block size
+                // and the frames.
+                assert_eq!(&bytes[12..16], b"COMM", "{ext}");
+                assert_eq!(&bytes[38..42], b"SSND", "{ext}");
+                let comm = u32::from_be_bytes(bytes[22..26].try_into().unwrap()) as usize;
+                let ssnd = u32::from_be_bytes(bytes[42..46].try_into().unwrap()) as usize;
+                assert_eq!(ssnd, 8 + comm * 4, "{ext}: the SSND size");
+                comm
+            }
+        };
+        assert_eq!(frames, REFRESHED, "{ext}: the frames in the header");
+        assert!(
+            bytes.len() > 44 + REFRESHED * 4,
+            "{ext}: the frames after the refresh are on disk, and not in the header"
+        );
+    }
+}
+
 /// A spec the format cannot write leaves no in-place file behind.
 #[test]
 fn a_spec_that_cannot_be_written_creates_no_in_place_file() {

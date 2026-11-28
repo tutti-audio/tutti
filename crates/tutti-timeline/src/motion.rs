@@ -33,7 +33,8 @@ use super::loop_region::{LoopOwner, LoopReader, LoopRegion};
 use super::settings::TransportSettings;
 use super::state::PendingSeek;
 use super::timed::{
-    CommandQueue, RECORDING_CAPACITY, Recording, TakeId, TimedError, TransportCommand,
+    CommandQueue, CommandQueueAudio, RECORDING_CAPACITY, Recording, TakeId, TimedError,
+    TransportCommand,
 };
 use std::sync::atomic::AtomicU8;
 use tutti_rt::Mint;
@@ -443,9 +444,16 @@ impl MotionFsm {
         self.timed.late()
     }
 
-    /// The command queue, for the engine.
-    pub(crate) fn timed(&self) -> &CommandQueue {
-        &self.timed
+    /// The device rate is changing: every command scheduled from here on is
+    /// in the new rate's frames ([`CommandQueue::mark_rate_change`]).
+    pub(crate) fn mark_rate_change(&self) {
+        self.timed.mark_rate_change();
+    }
+
+    /// The audio side's view of the command queue, for the engine: one
+    /// holder at a time owns the pending list.
+    pub(crate) fn queue_audio(&self) -> CommandQueueAudio {
+        CommandQueueAudio::new(self.timed.clone())
     }
 
     /// Requests a transition on the next block:
@@ -593,13 +601,20 @@ impl MotionAudio {
 
     fn set_motion(&self, motion: MotionState) {
         self.motion.store(motion.into(), Ordering::Release);
-        self.settings
-            .paused
-            .store(motion == MotionState::Stopped, Ordering::Release);
+        self.hold(motion == MotionState::Stopped);
+    }
+
+    /// The clock holds position while `stopped`, and advances otherwise.
+    fn hold(&self, stopped: bool) {
+        if stopped {
+            self.settings.pause();
+        } else {
+            self.settings.resume();
+        }
     }
 
     fn locate_to(&self, pos: Beat) {
-        self.settings.beat.store(pos.get(), Ordering::Release);
+        self.settings.locate(pos);
         self.seek.request(pos);
     }
 
@@ -628,9 +643,7 @@ impl MotionAudio {
         if let DeclickOutcome::Locate { pos, .. } = outcome {
             self.locate_to(pos);
         }
-        self.settings
-            .paused
-            .store(outcome.landing() == Settled::Stopped, Ordering::Release);
+        self.hold(outcome.landing() == Settled::Stopped);
     }
 
     /// Publish `motion` to the UI mirror only, leaving the playhead's
@@ -658,7 +671,6 @@ impl MotionAudio {
 #[cfg(test)]
 pub(crate) mod harness {
     use super::*;
-    use crate::timed::CommandQueueAudio;
 
     /// The audio half the engine would own, with the queue its walk applies
     /// from: `drain` applies what was sent, in send order, as a block whose
@@ -672,7 +684,7 @@ pub(crate) mod harness {
         pub(crate) fn of(m: &MotionFsm) -> Self {
             Self {
                 motion: m.audio().expect("no engine holds it"),
-                queue: CommandQueueAudio::new(m.timed().clone()),
+                queue: m.queue_audio(),
             }
         }
 
@@ -872,7 +884,7 @@ mod tests {
             Some(Beat::new(8.0)),
             "the clock must see a seek"
         );
-        assert_eq!(m.settings.beat.load(Ordering::Acquire), 8.0);
+        assert_eq!(m.settings.beat().get(), 8.0);
     }
 
     #[test]
@@ -908,14 +920,14 @@ mod tests {
         let (m, mut a) = fsm();
         let _ = m.send(MotionCommand::Play);
         a.drain();
-        m.settings.set_beat(Beat::new(12.0));
+        m.settings.locate(Beat::new(12.0));
 
         let _ = m.send(MotionCommand::stop_then_locate(Beat::new(0.0)));
         a.drain();
 
         assert_eq!(m.motion(), MotionState::DeclickToLocate);
         assert_eq!(m.seek.take(), Some(Beat::new(0.0)), "the jump lands now");
-        assert_eq!(m.settings.beat.load(Ordering::Acquire), 0.0);
+        assert_eq!(m.settings.beat().get(), 0.0);
         assert!(m.settings.is_paused(), "and the playhead holds there");
 
         a.complete_declick();
@@ -943,7 +955,7 @@ mod tests {
     #[test]
     fn stop_and_return_from_a_stop_jumps_immediately() {
         let (m, mut a) = fsm();
-        m.settings.set_beat(Beat::new(9.0));
+        m.settings.locate(Beat::new(9.0));
 
         let _ = m.send(MotionCommand::stop_then_locate(Beat::new(0.0)));
         a.drain();
@@ -955,12 +967,12 @@ mod tests {
     #[test]
     fn paused_tracks_motion() {
         let (m, mut a) = fsm();
-        assert!(m.settings.paused.load(Ordering::Acquire));
+        assert!(m.settings.is_paused());
 
         let _ = m.send(MotionCommand::Play);
         a.drain();
         assert!(
-            !m.settings.paused.load(Ordering::Acquire),
+            !m.settings.is_paused(),
             "paused is derived from motion, not set separately"
         );
     }

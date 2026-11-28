@@ -46,4 +46,6 @@ pub use hrtf::{
     HRTF_LATENCY, HRTF_STEP, HrirMeasurement, HrirSphere, HrtfBinaural, HrtfBinauralError,
     MAX_PREPARED_RATE, MAX_SPHERE_RATE, MIN_SPHERE_RATE,
 };
-pub use vbap::{GainsLengthMismatch, SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel};
+pub use vbap::{
+    BedLayout, GainsLengthMismatch, SpeakerGeometryError, SpeakerLayout, VbapGains, VbapKernel,
+};

@@ -251,6 +251,7 @@ fn topology::Speakers::new
 fn topology::Speakers::unassigned
 fn wave::Wave::append
 fn wave::Wave::append_planes
+fn wave::Wave::apply_gain
 fn wave::Wave::at
 fn wave::Wave::channel
 fn wave::Wave::channel_mut
@@ -272,6 +273,7 @@ fn wave::Wave::reserve
 fn wave::Wave::sample_rate
 fn wave::Wave::set
 fn wave::Wave::topology
+fn wave::Wave::try_reserve
 fn wave::Wave::with_capacity
 fn wave::Wave::with_placement
 fn wave::Wave::with_topology

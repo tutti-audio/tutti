@@ -166,7 +166,7 @@ impl Setup {
 ///     .into_finished()
 ///     .expect("nothing cancels it");
 /// let out = done.buffers(&planes).expect("a key of these outputs");
-/// assert_eq!(out.frames().get(), 4_800);
+/// assert_eq!(out.len().get(), 4_800);
 /// ```
 #[derive(Debug)]
 pub struct RenderGraph<F: Float = f32> {

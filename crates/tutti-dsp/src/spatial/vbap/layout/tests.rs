@@ -549,6 +549,31 @@ fn a_bed_pans_to_each_of_its_speakers_at_unity() {
     );
 }
 
+/// A bed with two or more speakers is a `BedLayout` holding the bed and a layout of its
+/// placed speakers; the one-speaker mono bed is refused with the speakers it lacks.
+#[test]
+fn a_bed_layout_holds_a_bed_with_speakers_to_pan_between_and_refuses_mono() {
+    for bed in Bed::ALL.into_iter().filter(|&bed| bed != Bed::Mono) {
+        let held = BedLayout::try_from(bed).unwrap_or_else(|e| panic!("{bed:?}: {e}"));
+        let placed = bed
+            .topology()
+            .positions()
+            .unwrap()
+            .iter()
+            .filter(|&&s| bed.direction(s).is_some())
+            .count();
+        assert_eq!(held.bed(), bed);
+        assert_eq!(held.layout().speaker_count(), placed, "{bed:?}");
+    }
+    assert_eq!(
+        BedLayout::try_from(Bed::Mono).unwrap_err(),
+        SpeakerGeometryError::InsufficientSpeakers {
+            provided: 1,
+            required: 2
+        }
+    );
+}
+
 /// A direction that is not a number gives silence, with no panic: the solve
 /// finds no energy at any height and answers all zeros, spread included.
 #[test]

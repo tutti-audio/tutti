@@ -17,7 +17,6 @@ enum output::Feed
 enum output::Gain
 enum output::TargetError
 enum outputs::DoneError
-enum rendered::RenderedError
 fn Written::new
 fn control::CancelToken::cancel
 fn control::CancelToken::is_cancelled
@@ -52,7 +51,7 @@ fn job::Job::new
 fn job::Job::rate
 fn job::Job::tail
 fn job::TailPolicy::bound
-fn normalize::Normalize::gain_for_rendered
+fn normalize::Normalize::gain_for_wave
 fn normalize::Normalize::lufs
 fn normalize::Normalize::peak
 fn output::BufferTarget::channels
@@ -70,6 +69,7 @@ fn output::Placement::new
 fn output::Placement::of_width
 fn output::Placement::topology
 fn outputs::Done::buffers
+fn outputs::Done::dropped_events
 fn outputs::Done::file
 fn outputs::Done::take_buffers
 fn outputs::Done::take_file
@@ -78,17 +78,6 @@ fn outputs::Outputs::file
 fn outputs::Outputs::new
 fn outputs::Outputs::sink
 fn render
-fn rendered::Rendered::apply_gain
-fn rendered::Rendered::channels
-fn rendered::Rendered::dropped_events
-fn rendered::Rendered::frames
-fn rendered::Rendered::interleaved
-fn rendered::Rendered::interleaved_into
-fn rendered::Rendered::into_planes
-fn rendered::Rendered::layout
-fn rendered::Rendered::new
-fn rendered::Rendered::planes
-fn rendered::Rendered::sample_rate
 fn sink_target::SinkTarget::new
 struct Written
 struct control::CancelToken
@@ -105,7 +94,6 @@ struct outputs::BufferKey
 struct outputs::Done
 struct outputs::FileKey
 struct outputs::Outputs
-struct rendered::Rendered
 struct sink_target::SinkTarget
 trait graph::RtLogSink
 type error::Result

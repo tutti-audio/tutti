@@ -456,33 +456,62 @@ fn sf2_inventory(root: &Path) -> Result<(), String> {
     };
     let spec = sf2_spec::extract(&sf2_spec_text()?)?;
     let path = "testing/conformance/sf2.txt";
-    let regen = conformance::regenerate_sf2(&repo.read(path).unwrap_or_default(), &spec.items)?;
+    let regen = conformance::Regen::sf2(&repo.read(path).unwrap_or_default(), &spec.items)?;
     let texts = spec.items.iter().map(|i| (i.id.as_str(), i.text.as_str()));
-    write_regenerated(root, path, regen, texts, spec.items.len())
+    regen.write(root, path, texts, spec.items.len())
 }
 
-/// Write a regenerated inventory and say what it did. A row whose sentence
-/// changed under hand columns, and an old row with hand columns that no
-/// sentence claims, are printed with their old words and fail the recipe: the
-/// file is written either way, and the gate refuses it until they are dealt with.
-fn write_regenerated<'a>(
-    root: &Path,
-    path: &str,
-    regen: conformance::Regen,
-    texts: impl Iterator<Item = (&'a str, &'a str)>,
-    rows: usize,
-) -> Result<(), String> {
-    let file = root.join(path);
-    fs::create_dir_all(file.parent().expect("a file path has a parent"))
-        .and_then(|()| fs::write(&file, regen.text()))
-        .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
-    println!("wrote {path}: {rows} rows");
-    let text_of: std::collections::BTreeMap<&str, &str> = texts.collect();
-    let (lines, verdict) = regen.account(path, &text_of);
-    for line in lines {
-        println!("{line}");
+impl conformance::Regen {
+    /// Write a regenerated inventory and say what it did. A row whose sentence
+    /// changed under hand columns, and an old row with hand columns that no
+    /// sentence claims, are printed with their old words and fail the recipe: the
+    /// file is written either way, and the gate refuses it until they are dealt with.
+    fn write<'a>(
+        self,
+        root: &Path,
+        path: &str,
+        texts: impl Iterator<Item = (&'a str, &'a str)>,
+        rows: usize,
+    ) -> Result<(), String> {
+        let file = root.join(path);
+        fs::create_dir_all(file.parent().expect("a file path has a parent"))
+            .and_then(|()| fs::write(&file, &self.text))
+            .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
+        println!("wrote {path}: {rows} rows");
+        let text_of: std::collections::BTreeMap<&str, &str> = texts.collect();
+        for id in &self.added {
+            println!(
+                "added {id} (side todo, no paraphrase): {}",
+                text_of[id.as_str()]
+            );
+        }
+        for id in &self.removed {
+            println!("removed {id}: its row is gone from the file; check its tests' tags");
+        }
+        for (id, old) in &self.changed {
+            println!(
+                "CHANGED {id}: requirement text changed under hand columns; they are blanked (side changed). New sentence: {}\n  was: side {} | {}",
+                text_of[id.as_str()],
+                old.side,
+                old.paraphrase
+            );
+        }
+        for old in &self.orphans {
+            println!(
+                "ORPHAN {}: hand columns no sentence claims any more (side {} | {})",
+                old.id, old.side, old.paraphrase
+            );
+        }
+        if self.changed.is_empty() && self.orphans.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{path}: {} rows changed under hand columns, {} orphaned; reread them and rewrite their hand columns",
+                self.changed.len(),
+                self.orphans.len()
+            ))
+        }
     }
-    verdict
 }
 
 fn midi_inventory(root: &Path) -> Result<(), String> {
@@ -503,9 +532,9 @@ fn midi_inventory(root: &Path) -> Result<(), String> {
 fn midi_doc_inventory(root: &Path, repo: &RealTree, doc: &midi_spec::Doc) -> Result<(), String> {
     let items = midi_spec::extract(doc, &midi_spec_text(doc)?)?;
     let path = format!("testing/conformance/{}", doc.file);
-    let regen = conformance::regenerate_midi(doc, repo.read(&path).as_deref(), &items)?;
+    let regen = conformance::Regen::midi(doc, repo.read(&path).as_deref(), &items)?;
     let texts = items.iter().map(|i| (i.id.as_str(), i.text.as_str()));
-    write_regenerated(root, &path, regen, texts, items.len())
+    regen.write(root, &path, texts, items.len())
 }
 
 /// Write `xtask/building-baseline.txt` with its stale rows deleted.

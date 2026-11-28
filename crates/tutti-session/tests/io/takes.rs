@@ -18,6 +18,7 @@ use tutti_buffers::{Interleaved, Sink, SinkFailed};
 use tutti_codec::{Encoding, Format, IntDepth, IntPcm, Pcm, Resample, ToFile};
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
+use tutti_fixtures::WavePlanes;
 use tutti_graph::{InletRing, TapWriter};
 use tutti_nodes::MetronomeMode;
 use tutti_session::{
@@ -715,7 +716,8 @@ fn a_file_take_makes_a_clip() {
     assert!(from_file.is_ok(), "{:?}", from_file.err());
 }
 
-/// **A take records and finishes, and the file holds the frames the input played.** The
+/// **A take records and finishes, and the file holds the frames the input played; it is at its
+/// path while it rolls.** The
 /// pump runs on tutti's thread, woken by the tap's bell: the ramp the test pushed (frame `i` is `[i, -i]`) comes back frame for frame from the
 /// first frame the take kept.
 #[test]
@@ -729,6 +731,11 @@ fn a_take_records_and_its_file_holds_the_frames_written() {
         .record(Record::new(&rig.input, to_wav(path.clone())))
         .expect("armed");
     let take = rig.rolling(take);
+    assert!(
+        path.exists(),
+        "the take is written at its path while it rolls"
+    );
+    assert_eq!(names(&dir), [std::ffi::OsString::from("ramp.wav")]);
     for _ in 0..16 {
         rig.step(BLOCK);
     }
@@ -774,8 +781,8 @@ fn an_idle_take_never_stalls_update() {
 /// **Dropping a session commits every take before it returns.** The pump awaits its
 /// tap's bell; the graph's drop drops the tap's writer, which rings that bell, and the
 /// session's drop closes the landings, rings each pump's bell and joins the pump, which
-/// closes its sink: the take's file is at its path, complete, holding the ramp's frames,
-/// when the drop returns. Until then the path does not exist.
+/// closes its sink: the take's file, at its path from the start, is complete, holding the
+/// ramp's frames, when the drop returns.
 #[test]
 fn dropping_a_session_commits_every_take_before_it_returns() {
     let dir = tempfile::tempdir().unwrap();
@@ -790,17 +797,11 @@ fn dropping_a_session_commits_every_take_before_it_returns() {
     for _ in 0..16 {
         rig.step(BLOCK);
     }
-    assert!(!path.exists(), "the file is committed when the pump ends");
 
     drop(rig);
-    // The drop finishes the take's commit before it returns.
-    assert!(
-        path.exists(),
-        "the drop returned before the take was committed"
-    );
-
+    // The drop closes the take's file before it returns.
     let frames = read(&path);
-    assert!(!frames.is_empty(), "the committed file holds the take");
+    assert!(!frames.is_empty(), "the closed file holds the take");
     let first = frames[0][0];
     for (k, frame) in frames.iter().enumerate() {
         let want = first + k as f32;
@@ -1123,14 +1124,14 @@ fn a_take_into_memory_holds_the_frames_and_folds_onto_its_channels() {
 
     let planes = whole.output();
     assert_eq!(planes.sample_rate(), SampleRate::of(RATE));
-    assert_eq!(planes.frames(), Samples::new(300));
+    assert_eq!(planes.len(), Samples::new(300));
     let ramp: Vec<f32> = (3_000..3_300).map(|i| i as f32).collect();
     let negated: Vec<f32> = ramp.iter().map(|x| -x).collect();
-    assert_eq!(planes.planes(), [ramp, negated]);
+    assert_eq!(planes.to_planes(), [ramp, negated]);
 
     let planes = folded.output();
     assert_eq!(planes.channels(), 1);
-    assert_eq!(planes.planes(), [vec![0.0f32; 300]]);
+    assert_eq!(planes.to_planes(), [vec![0.0f32; 300]]);
 }
 
 /// **A dither seed an encoding states is used as given.** Two takes of one input over the same

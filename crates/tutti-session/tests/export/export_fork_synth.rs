@@ -9,6 +9,7 @@
 use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
+use tutti_fixtures::WavePlanes;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
 
@@ -57,7 +58,7 @@ fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
-        .into_planes()
+        .to_planes()
 }
 
 /// The planes of the one stem `bounce` names, in memory: the main output is
@@ -67,7 +68,7 @@ fn render_stem(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>)
         .expect("the bounce renders")
         .into_parts();
     match keys.as_slice() {
-        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").into_planes(),
+        [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").to_planes(),
         other => panic!("expected one stem held in memory, got {other:?}"),
     }
 }

@@ -12,7 +12,7 @@
 //! - An `Output` is a `Feed` (the graph's outputs, or a plan tap, `Feed::Tap`, read
 //!   after every block and placed by a `Placement`) and a target: a file
 //!   (`FileTarget`: a `tutti_codec::Encoding`, a `ToFile` and the normalize) or planes in
-//!   memory (`BufferTarget`, returned as a `Rendered`) or a caller's sink (`SinkTarget`).
+//!   memory (`BufferTarget`, returned as a `tutti_buffers::Wave`) or a caller's sink (`SinkTarget`).
 //!   `Outputs` holds them by kind: `Outputs::file` and `Outputs::buffers` each return the key
 //!   (`FileKey`, `BufferKey`) its result is read by, from the `Done` that `render` returns
 //!   (`Done::file`, `Done::buffers`); `Outputs::sink` returns none, its result is the sink.
@@ -29,7 +29,7 @@
 //!   was. The renames are the one step that is not undone: if one fails after others
 //!   succeeded the error is `RenderError::NotCommitted`, which names the files in place.
 //! - Planes a caller already holds are written with `tutti_codec::write`, which takes the
-//!   same `Encoding` (a `Rendered` converts into a `Wave`).
+//!   same `Encoding` (a buffer output is a `Wave`, which is what it writes).
 //!
 //! `Control` is how a host watches and stops the render: a `CancelToken` that is
 //! checked (before every block, between stages, during the measurement and the
@@ -110,17 +110,17 @@
 //! let job = Job::new(rate, Seconds::new(0.5).to_samples(rate), Samples::new(0), TailPolicy::Frames(Samples::ZERO))
 //!     .expect("a half second");
 //!
-//! // To buffers: planar, one `Vec` per channel, and `frames()` is FRAMES per
-//! // plane rather than the total sample count.
+//! // To buffers: a `Wave`, planar, one channel per plane, and `len()` is FRAMES per
+//! // channel rather than the total sample count.
 //! let mut outputs = Outputs::new();
 //! let planes = outputs.buffers(Output::main_output(BufferTarget::new(ChannelLayout::STEREO)));
 //! let done = render(&mut tone(), &job, &FrozenClock, outputs, &mut Control::none())
 //!     .expect("a 0.5 s stereo render")
 //!     .into_finished()
 //!     .expect("nothing cancels it");
-//! let rendered = done.buffers(&planes).expect("a key of these outputs");
-//! assert_eq!(rendered.channels(), 2);
-//! assert_eq!(rendered.frames().get(), 24_000);
+//! let wave = done.buffers(&planes).expect("a key of these outputs");
+//! assert_eq!(wave.channels(), 2);
+//! assert_eq!(wave.len().get(), 24_000);
 //!
 //! // Or straight to files, which streams — no PCM is held whole. One pass can
 //! // write several, each in its own format.
@@ -157,8 +157,8 @@
 //! reading it came from, `Written::measured`.
 //!
 //! For a gain that is logged, gated, or derived some other way, compose the steps
-//! directly: render into a `BufferTarget`, take `Normalize::gain_for_rendered`,
-//! apply it with `Rendered::apply_gain`, and write with `tutti_codec::write`.
+//! directly: render into a `BufferTarget`, take `Normalize::gain_for_wave`,
+//! apply it with `tutti_buffers::Wave::apply_gain`, and write with `tutti_codec::write`.
 //!
 //! ## Features
 //!
@@ -171,7 +171,7 @@
 //! normalizing output's measurement runs the same `tutti_codec::Converter`. Resampling is
 //! unconditional: it is not a codec, so it is not gated.
 //!
-//! A render is written from any `tutti_dsp::FftFloat` (`Rendered<F>`, `f32` by default). A float
+//! A render is written from any `tutti_dsp::FftFloat` (`Wave<F>`, `f32` by default). A float
 //! file takes it as it is; an integer file is quantized by the encoder, which adds the
 //! dither noise its `tutti_codec::IntPcm` names, converts by the rule in
 //! `tutti_buffers::Sample` and counts the values that clipped (`Written::clipped_samples`).
@@ -187,9 +187,6 @@ pub use control::{CancelToken, Control, Outcome, Progress, Stage};
 mod job;
 pub use job::{EventLossPolicy, Job, JobError, MAX_FRAMES, TailPolicy};
 
-mod rendered;
-pub use rendered::{Rendered, RenderedError};
-
 mod output;
 pub use output::{BufferTarget, Feed, FileTarget, Gain, Output, Placement, TargetError};
 
@@ -201,8 +198,6 @@ pub use outputs::{BufferKey, Done, DoneError, FileKey, Outputs};
 
 mod normalize;
 pub use normalize::Normalize;
-
-mod planar;
 
 mod spill;
 

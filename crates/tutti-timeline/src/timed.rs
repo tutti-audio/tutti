@@ -185,6 +185,20 @@ impl From<At> for Due {
     }
 }
 
+/// A rate change the control thread announced, as the audio side consumes it.
+#[derive(Clone, Copy)]
+struct RateChange {
+    /// The first `seq` written in the new rate's frames.
+    first_new: u64,
+}
+
+impl RateChange {
+    /// Whether `command` was written in the old rate's frames.
+    fn rescales(self, command: &Scheduled) -> bool {
+        command.seq < self.first_new
+    }
+}
+
 /// One command in flight.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scheduled {
@@ -348,10 +362,7 @@ impl CommandQueueAudio {
     /// builds one; the transport hands out one) starts with an empty list
     /// of its own, allocated here.
     pub(crate) fn new(shared: CommandQueue) -> Self {
-        let pending = shared
-            .carry
-            .pop()
-            .unwrap_or_else(|| Vec::with_capacity(IN_FLIGHT_MAX));
+        let pending = shared.take_carried();
         Self { shared, pending }
     }
 
@@ -360,16 +371,14 @@ impl CommandQueueAudio {
     /// allocation.
     pub(crate) fn hand_back(&mut self) {
         let pending = std::mem::take(&mut self.pending);
-        if pending.capacity() > 0 {
-            let _ = self.shared.carry.push(pending);
-        }
+        self.shared.carry(pending);
     }
 
     /// Move what was sent into the pending list and drop what was cancelled.
     /// Never allocates: the list was reserved at its in-flight maximum, and
     /// the credit keeps it under that.
     pub(crate) fn drain_commands(&mut self) {
-        while let Some(cmd) = self.shared.queue.pop() {
+        while let Some(cmd) = self.shared.pop_sent() {
             debug_assert!(
                 self.pending.len() < self.pending.capacity(),
                 "credit bounds the list"
@@ -389,7 +398,37 @@ impl CommandQueueAudio {
         self.shared.release(before - self.pending.len());
     }
 
-    /// The commands sent and not yet applied, as of the last [`drain_commands`](Self::drain_commands).
+    /// The pending command that comes first by `due`, as of the last
+    /// [`drain_commands`](Self::drain_commands): `due` answers `Some((k, late))`
+    /// for a command that is due `k` frames on (or `late`), and the least `k`
+    /// wins, send order breaking ties. Returns `(k, index, late)`, the index
+    /// [`take`](Self::take) removes.
+    pub(crate) fn earliest(
+        &self,
+        mut due: impl FnMut(&Scheduled) -> Option<(usize, bool)>,
+    ) -> Option<(usize, usize, bool)> {
+        let mut best: Option<(usize, usize, bool)> = None;
+        for (i, cmd) in self.pending.iter().enumerate() {
+            let Some((k, late)) = due(cmd) else { continue };
+            let earlier = best.is_none_or(|(best_k, best_i, _)| {
+                k < best_k || (k == best_k && cmd.seq < self.pending[best_i].seq)
+            });
+            if earlier {
+                best = Some((k, i, late));
+            }
+        }
+        best
+    }
+
+    /// The least of what `read` makes of each pending command that it reads
+    /// one off.
+    pub(crate) fn least<T: Ord>(&self, read: impl FnMut(&Scheduled) -> Option<T>) -> Option<T> {
+        self.pending.iter().filter_map(read).min()
+    }
+
+    /// The commands sent and not yet applied, as of the last
+    /// [`drain_commands`](Self::drain_commands).
+    #[cfg(test)]
     pub(crate) fn pending(&self) -> &[Scheduled] {
         &self.pending
     }
@@ -430,10 +469,10 @@ impl CommandQueueAudio {
     /// mark, every command in flight is taken to be old. The mark is consumed
     /// here. Never allocates.
     pub(crate) fn rescale(&mut self, ratio: f64) {
-        let before = self.shared.rescale_before.swap(u64::MAX, Ordering::AcqRel);
+        let change = self.shared.take_rate_change();
         self.drain_commands();
         for cmd in self.pending.iter_mut() {
-            if cmd.seq >= before {
+            if !change.rescales(cmd) {
                 continue;
             }
             if let Due::Frame { exact } = &mut cmd.due {
@@ -444,6 +483,36 @@ impl CommandQueueAudio {
 }
 
 impl CommandQueue {
+    /// Audio thread: the oldest command sent and not yet taken off the ring.
+    fn pop_sent(&self) -> Option<Scheduled> {
+        self.queue.pop()
+    }
+
+    /// The pending list the last audio side handed back, or a fresh one
+    /// allocated here (control thread).
+    fn take_carried(&self) -> Vec<Scheduled> {
+        self.carry
+            .pop()
+            .unwrap_or_else(|| Vec::with_capacity(IN_FLIGHT_MAX))
+    }
+
+    /// Keeps `pending` for the next audio side; a list without capacity (one
+    /// already handed back) holds nothing and is dropped.
+    fn carry(&self, pending: Vec<Scheduled>) {
+        if pending.capacity() > 0 {
+            let _ = self.carry.push(pending);
+        }
+    }
+
+    /// The rate change announced since the last call, consumed: whether a
+    /// command was written before it, in the old rate's frames. With none
+    /// announced, every command is taken to be old.
+    fn take_rate_change(&self) -> RateChange {
+        RateChange {
+            first_new: self.rescale_before.swap(u64::MAX, Ordering::AcqRel),
+        }
+    }
+
     fn release(&self, n: usize) {
         if n > 0 {
             self.credit.fetch_sub(n, Ordering::AcqRel);

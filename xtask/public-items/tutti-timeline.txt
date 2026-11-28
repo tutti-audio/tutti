@@ -20,9 +20,10 @@ fn audio::TransportAudio::advance
 fn audio::TransportAudio::apply_command
 fn audio::TransportAudio::begin_block
 fn audio::TransportAudio::drain_commands
+fn audio::TransportAudio::earliest_due
 fn audio::TransportAudio::follow_rate
+fn audio::TransportAudio::least_pending
 fn audio::TransportAudio::meter
-fn audio::TransportAudio::pending
 fn audio::TransportAudio::position_after_tempo_change
 fn audio::TransportAudio::publish_position
 fn audio::TransportAudio::seconds_at
@@ -85,8 +86,10 @@ fn project_meter::TimeSignatureSlotReader::lend
 fn render_graph
 fn settings::TransportSettings::current_tempo
 fn settings::TransportSettings::is_paused
+fn settings::TransportSettings::meter_map
 fn settings::TransportSettings::new
 fn settings::TransportSettings::project_meter
+fn settings::TransportSettings::reclaim_meter
 fn settings::TransportSettings::reclaim_tempo
 fn settings::TransportSettings::segment_generation
 fn settings::TransportSettings::set_tempo

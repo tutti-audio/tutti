@@ -8,11 +8,11 @@
 
 use std::sync::{Arc, Weak};
 
-use tutti_buffers::Float;
+use tutti_buffers::{Float, Wave};
 
 use crate::SinkTarget;
+use crate::Written;
 use crate::output::{BufferTarget, FileTarget, Output};
-use crate::{Rendered, Written};
 
 /// The identity of one [`Outputs`], carried by its keys.
 ///
@@ -123,7 +123,7 @@ impl<F: Float> Outputs<F> {
         key
     }
 
-    /// Adds a buffer output; the key reads its [`Rendered`] from the finished render.
+    /// Adds a buffer output; the key reads its [`Wave`] from the finished render.
     pub fn buffers(&mut self, output: Output<BufferTarget, F>) -> BufferKey {
         let key = BufferKey {
             brand: self.brand(),
@@ -185,11 +185,17 @@ impl<F: Float> Parts<F> {
 
 impl Stamp {
     /// The results of the render, branded as the outputs' keys are.
-    pub(crate) fn done<F: Float>(self, files: Vec<Written>, buffers: Vec<Rendered<F>>) -> Done<F> {
+    pub(crate) fn done<F: Float>(
+        self,
+        files: Vec<Written>,
+        buffers: Vec<Wave<F>>,
+        dropped_events: u64,
+    ) -> Done<F> {
         Done {
             brand: self.0,
             files: files.into_iter().map(Some).collect(),
             buffers: buffers.into_iter().map(Some).collect(),
+            dropped_events,
         }
     }
 }
@@ -199,7 +205,8 @@ impl Stamp {
 pub struct Done<F: Float = f32> {
     brand: Brand,
     files: Vec<Option<Written>>,
-    buffers: Vec<Option<Rendered<F>>>,
+    buffers: Vec<Option<Wave<F>>>,
+    dropped_events: u64,
 }
 
 impl<F: Float> Done<F> {
@@ -214,13 +221,13 @@ impl<F: Float> Done<F> {
         self.files[key.index].as_ref().ok_or(DoneError::Taken)
     }
 
-    /// The planes `key` names.
+    /// The audio `key` names.
     ///
     /// # Errors
     ///
     /// [`DoneError::Foreign`] when another [`Outputs`] made `key`;
     /// [`DoneError::Taken`] after [`take_buffers`](Self::take_buffers).
-    pub fn buffers(&self, key: &BufferKey) -> Result<&Rendered<F>, DoneError> {
+    pub fn buffers(&self, key: &BufferKey) -> Result<&Wave<F>, DoneError> {
         self.check(&key.brand)?;
         self.buffers[key.index].as_ref().ok_or(DoneError::Taken)
     }
@@ -236,14 +243,24 @@ impl<F: Float> Done<F> {
         self.files[key.index].take().ok_or(DoneError::Taken)
     }
 
-    /// Moves the planes `key` names out; the other results stay.
+    /// Moves the audio `key` names out; the other results stay.
     ///
     /// # Errors
     ///
     /// As [`buffers`](Self::buffers); a second take is [`DoneError::Taken`].
-    pub fn take_buffers(&mut self, key: &BufferKey) -> Result<Rendered<F>, DoneError> {
+    pub fn take_buffers(&mut self, key: &BufferKey) -> Result<Wave<F>, DoneError> {
         self.check(&key.brand)?;
         self.buffers[key.index].take().ok_or(DoneError::Taken)
+    }
+
+    /// Events the graph lost during the render (not a note-off it refused and
+    /// sent again), whichever output read them: nonzero only under
+    /// [`EventLossPolicy::Allow`](crate::EventLossPolicy::Allow) (under `Fail` the render is
+    /// an error instead). A lost note-on or note-off makes every output wrong.
+    /// Each [`Written`] states the same figure.
+    #[must_use]
+    pub fn dropped_events(&self) -> u64 {
+        self.dropped_events
     }
 
     fn check(&self, brand: &Brand) -> Result<(), DoneError> {
