@@ -105,6 +105,7 @@ enum recovery::ReloadCause
 enum sampler::OpenStreamError
 enum sampler::SamplerError
 enum session::declared::PatchError
+enum session::declared::instrument::LeaseError
 enum session::event::SessionEvent
 enum session::main_output::MainOutputTopologyStatus
 enum session::phases::Phase
@@ -528,6 +529,10 @@ fn modulation::state::ModState::problems
 fn modulation::state::ModState::resyncs_dropped
 fn modulation::state::ModState::source_node
 fn modulation::state::Problem::route
+fn patch::InstrumentDecl::initial_gain
+fn patch::InstrumentDecl::key
+fn patch::InstrumentDecl::new
+fn patch::InstrumentDecl::unfaded
 fn patch::NodeDecl::fade
 fn patch::NodeDecl::key
 fn patch::NodeDecl::new
@@ -683,6 +688,7 @@ fn session::Session::render
 fn session::Session::stream_spec
 fn session::declared::Session::key
 fn session::declared::Session::patch
+fn session::declared::instrument::Session::take_keys
 fn session::main_output::Session::declare_main_output_topology
 fn session::main_output::Session::main_output_topology
 fn session::main_output::Session::main_output_topology_status
@@ -846,6 +852,9 @@ fn watch::Follow::step
 fn watch::Follow::want
 fn wire_ends::Chain::initial_gain
 fn wire_ends::Connected::initial_gain
+fn wire_ends::InstrumentDecl::bus_output
+fn wire_ends::InstrumentDecl::event_input
+fn wire_ends::InstrumentDecl::output
 fn wire_ends::Mention::bus_input
 fn wire_ends::Mention::bus_output
 fn wire_ends::Mention::event_input
@@ -977,6 +986,7 @@ struct modulation::Scale
 struct modulation::SourceInfo
 struct modulation::state::ModState
 struct patch::Declarations
+struct patch::InstrumentDecl
 struct patch::NodeDecl
 struct patch::Sealed
 struct patch::Section

@@ -9,10 +9,14 @@ use std::fmt;
 
 use thiserror::Error;
 use tutti_buffers::Float;
+#[cfg(feature = "midi")]
+use tutti_graph::InstrumentNode;
 use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, Shape, Shapes};
 use tutti_units::{Gain, Samples};
 
 use crate::graph::Split;
+#[cfg(feature = "midi")]
+use crate::patch::PlaceInstrument;
 use crate::patch::{
     Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireDecl,
     WireEnds, WireId,
@@ -21,11 +25,19 @@ use crate::value::{declared_param, declared_published, declared_setting};
 use crate::{AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session};
 
 mod check;
+#[cfg(feature = "midi")]
+mod instrument;
+#[cfg(not(feature = "midi"))]
+#[path = "declared/instrument_none.rs"]
+mod instrument;
 mod section;
 mod wire;
 use check::check;
+#[cfg(feature = "midi")]
+pub use instrument::LeaseError;
+use instrument::{NewParts, Parts};
 use section::{Decided, KeptSection, Kind, decide};
-use wire::{KeptWire, Resolved};
+use wire::{KeptWire, Resolved, Role};
 
 /// The session's graph is where declarations go: a config is built at the
 /// graph's float.
@@ -56,6 +68,7 @@ where
         Built {
             node: Box::new(split),
             shape,
+            main: None,
         }
     }
 
@@ -71,6 +84,25 @@ where
     ) -> Result<(), ReplaceRefused> {
         self.replace_split(key, split_of::<C, F>(built), fade)
             .map(drop)
+    }
+}
+
+#[cfg(feature = "midi")]
+impl<F: Float, C> PlaceInstrument<C> for Graph<F>
+where
+    C: NodeConfig<F>,
+    C::Node: InstrumentNode<F> + IntoNode<F, Controls: Send + 'static>,
+{
+    fn build_instrument(config: &C, host: &HostValues) -> Built {
+        let node = config.build(host);
+        let main = node.main_outputs();
+        let split = Split::<C::Node, F>::of(node);
+        let shape: Shape = split.shape();
+        Built {
+            node: Box::new(split),
+            shape,
+            main: Some(main),
+        }
     }
 }
 
@@ -175,6 +207,8 @@ struct PlannedNode<K, F: Float> {
     declaration: Declaration<Graph<F>>,
     fate: Fate,
     id: NodeKey,
+    /// The queue and strip an instrument's new node gets.
+    parts: Option<NewParts<F>>,
 }
 
 /// A patch's declarations planned: the shapes of the nodes it builds, and the
@@ -183,6 +217,18 @@ struct Planned<K, F: Float> {
     nodes: Vec<PlannedNode<K, F>>,
     shapes: Shapes,
     at: BTreeMap<K, NodeKey>,
+    /// The strip of each instrument key once the patch is applied.
+    strips: BTreeMap<K, NodeKey>,
+}
+
+impl<K: Ord, F: Float> Planned<K, F> {
+    /// The node `key` names at a wire's end.
+    fn of(&self, key: &K, role: Role) -> NodeKey {
+        match (role, self.strips.get(key)) {
+            (Role::Strip, Some(&strip)) => strip,
+            _ => self.at[key],
+        }
+    }
 }
 
 /// What a patch declared of one key, and the node it made.
@@ -198,11 +244,25 @@ pub(crate) struct Kept<K, F: Float> {
     wires: BTreeMap<WireId<K>, KeptWire>,
     /// The sections the last patch evaluated or carried, by their keys.
     sections: BTreeMap<K, KeptSection<K>>,
+    /// The queue and strip of each key declared as an instrument; its node is
+    /// in `nodes`.
+    instruments: BTreeMap<K, Parts>,
+}
+
+impl<K: Ord, F: Float> Kept<K, F> {
+    /// The node `key` names at a wire's end.
+    fn at(&self, key: &K, role: Role) -> NodeKey {
+        match (role, self.instruments.get(key)) {
+            (Role::Strip, Some(parts)) => parts.strip(),
+            _ => self.nodes[key].node,
+        }
+    }
 }
 
 impl<K, F: Float> Default for Kept<K, F> {
     fn default() -> Self {
         Self {
+            instruments: BTreeMap::new(),
             nodes: BTreeMap::new(),
             wires: BTreeMap::new(),
             sections: BTreeMap::new(),
@@ -286,6 +346,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// the node and wires it made stay. A section whose wires mention a key
     /// outside it that the patch no longer declares, or declares with another
     /// structure or config type, runs.
+    ///
+    /// An [`InstrumentDecl`](crate::InstrumentDecl) also makes the instrument's
+    /// event queue and bus strip, which have no app key: they go with the
+    /// node, and [`take_keys`](Self::take_keys) lends the keys that fill the
+    /// queue.
     ///
     /// A node or an edge that [`Graph::add`](crate::Graph::add) or
     /// [`Graph::connect`](crate::Graph::connect) made is not declared: a patch
@@ -379,8 +444,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             .collect();
         drop(seen);
         for key in gone {
-            let removed = kept.nodes.remove(&key).is_some_and(|s| self.take_out(&s));
-            if removed {
+            let Some(stored) = kept.nodes.remove(&key) else {
+                continue;
+            };
+            if let Some(parts) = kept.instruments.remove(&key) {
+                self.take_out_parts(&parts, stored.declaration.fading);
+            }
+            if self.take_out(&stored) {
                 patched.removed.push(key);
             }
         }
@@ -435,9 +505,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             nodes: Vec::with_capacity(nodes.len()),
             shapes: Shapes::new(),
             at: BTreeMap::new(),
+            strips: BTreeMap::new(),
         };
         for key in carried {
             planned.at.insert(key.clone(), kept.nodes[key].node);
+            if let Some(parts) = kept.instruments.get(key) {
+                planned.strips.insert(key.clone(), parts.strip());
+            }
         }
         for (key, declaration, kind) in nodes {
             let fate = Self::fate(kind, &declaration, host);
@@ -448,12 +522,28 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             if let Fate::Add(built) | Fate::Readd(built) | Fate::Swap(built) = &fate {
                 planned.shapes.insert(id, built.shape);
             }
+            let new_parts = matches!(fate, Fate::Add(_) | Fate::Readd(_))
+                .then(|| declaration.config.played().map(NewParts::new))
+                .flatten();
+            // A kept key's node keeps its queue and strip.
+            let kept_strip = matches!(fate, Fate::Values | Fate::Swap(_))
+                .then(|| kept.instruments.get(&key))
+                .flatten()
+                .map(Parts::strip);
+            let strip = new_parts.as_ref().map(NewParts::strip).or(kept_strip);
+            if let Some(parts) = &new_parts {
+                planned.shapes.insert(parts.strip(), parts.shape());
+            }
+            if let Some(strip) = strip {
+                planned.strips.insert(key.clone(), strip);
+            }
             planned.at.insert(key.clone(), id);
             planned.nodes.push(PlannedNode {
                 key,
                 declaration,
                 fate,
                 id,
+                parts: new_parts,
             });
         }
         planned
@@ -484,7 +574,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 .flatten()
                 .all(|key| kept.nodes.contains_key(key))
             {
-                let resolved = Resolved::of(id, |key| kept.nodes[key].node);
+                let resolved = Resolved::of(id, |key, role| kept.at(key, role));
                 let _ = resolved.disconnect(&mut self.graph, old.unfaded);
             }
         }
@@ -503,7 +593,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ) -> BTreeMap<WireId<K>, KeptWire> {
         let mut made = BTreeMap::new();
         for (id, options) in wires {
-            let resolved = Resolved::of(&id, |key| kept.nodes[key].node);
+            let resolved = Resolved::of(&id, |key, role| kept.at(key, role));
             if let Err(cause) = resolved.check(&self.graph, None) {
                 patched.dormant.push((id.ends, cause));
                 continue;
@@ -575,11 +665,16 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             declaration,
             fate,
             id,
+            parts,
         } = planned;
         let new = &declaration.config;
         match fate {
             Fate::Add(built) => {
+                let main = built.main;
                 new.add(&mut self.graph, id, built);
+                if let (Some(parts), Some(main)) = (parts, main) {
+                    self.add_parts(kept, key.clone(), id, main, parts);
+                }
                 kept.nodes.insert(
                     key,
                     Stored {
@@ -591,9 +686,16 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             Fate::Readd(built) => {
                 // Taking out a node that is gone finds nothing.
                 if let Some(old) = kept.nodes.get(&key) {
+                    if let Some(parts) = kept.instruments.remove(&key) {
+                        self.take_out_parts(&parts, old.declaration.fading);
+                    }
                     self.take_out(old);
                 }
+                let main = built.main;
                 new.add(&mut self.graph, id, built);
+                if let (Some(parts), Some(main)) = (parts, main) {
+                    self.add_parts(kept, key.clone(), id, main, parts);
+                }
                 patched.readded.push(key.clone());
                 kept.nodes.insert(
                     key,
@@ -605,11 +707,15 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             }
             Fate::Swap(built) => {
                 let old = kept.nodes.get_mut(&key).expect("a swap has its old node");
+                let main = built.main;
                 // A replace seeds each param from the outgoing node only where
                 // both declared one initial (`ValueTable::address`), so an
                 // initial this patch changed is already the incoming node's.
                 match new.replace(&mut self.graph, built, old.node, declaration.fading) {
                     Ok(()) => {
+                        if let (Some(parts), Some(main)) = (kept.instruments.get_mut(&key), main) {
+                            self.rejoin(parts, old.node, main);
+                        }
                         patched.rebuilt.push(key);
                         old.declaration = declaration;
                     }
@@ -626,6 +732,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     &declaration.config.initials(),
                     writes,
                 );
+                if let (Some(parts), Some(gain)) = (kept.instruments.get(&key), new.played())
+                    && old.declaration.config.played() != Some(gain)
+                {
+                    writes.push(parts.set_gain(gain));
+                }
                 old.declaration = declaration;
             }
         }
