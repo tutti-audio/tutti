@@ -103,7 +103,6 @@ impl<F: FftFloat> Writer<F> for FileWriter<F> {
 #[derive(Debug)]
 pub struct MemoryWriter<F: Float> {
     wave: Wave<F>,
-    width: ChannelLayout,
     /// Built when the take was armed.
     fold: Option<Fold<F>>,
     folded: Vec<F>,
@@ -118,7 +117,6 @@ impl<F: Float> MemoryWriter<F> {
         let (set, fold) = to.fold(&ChannelSet::default_for(layout))?;
         Ok(Self {
             wave: Wave::with_placement(set, to.placement(), rate),
-            width: set.width(),
             fold,
             folded: Vec::new(),
         })
@@ -132,13 +130,13 @@ impl<F: Float> Writer<F> for MemoryWriter<F> {
         let spread = match &self.fold {
             None => frames,
             Some(fold) => {
+                let width = self.wave.layout();
                 self.folded.clear();
                 self.folded
-                    .resize(self.width.interleaved_len(frames.frames()), F::ZERO);
-                let to =
-                    InterleavedMut::new(&mut self.folded, self.width).map_err(|_| SinkFailed)?;
+                    .resize(width.interleaved_len(frames.frames()), F::ZERO);
+                let to = InterleavedMut::new(&mut self.folded, width).map_err(|_| SinkFailed)?;
                 fold.fold(frames, to).map_err(|_| SinkFailed)?;
-                Interleaved::new(&self.folded, self.width).map_err(|_| SinkFailed)?
+                Interleaved::new(&self.folded, width).map_err(|_| SinkFailed)?
             }
         };
         self.wave.append(spread).map_err(|_| SinkFailed)
