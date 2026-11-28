@@ -68,7 +68,6 @@ use tutti_buffers::{ChannelLayout, Float, FoldError, Interleaved, InterleavedMut
 use tutti_dsp::FftFloat;
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
-use tutti_platform::StagedCommitError;
 use tutti_rt::{Bell, Listener};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{Recording, TakeId};
@@ -552,20 +551,14 @@ pub enum TakeError {
     /// The planes' channels cannot be folded from the input's.
     #[error("the take's channels cannot be folded from the input's: {0}")]
     Fold(#[from] FoldError),
-    /// The finished file could not be put in place (a path appeared after the take was
-    /// armed, or the file system refused the move). The
-    /// whole take is kept at [`kept`](StagedCommitError::kept) and the path is
-    /// untouched; the file is the app's to move or delete.
-    #[error(transparent)]
-    Commit(#[from] StagedCommitError),
     /// The sink failed: a write, or closing it. What was written before the
     /// failure is in the sink.
     ///
-    /// A take written to a file keeps the file beside its path in `unfinished`
-    /// (a full disk on a write, a failed header or close) and leaves the path alone: the frames so far are
-    /// there, and the app owns the file, to move or delete. It is unfinished:
-    /// a FLAC file may end in a cut frame, and a WAV's or
-    /// AIFF's header states the whole frames on disk only if
+    /// A take written to a file keeps the file in `unfinished` (a full disk on a write, a
+    /// failed header, close or sync): the take is written in place, so `unfinished` names the
+    /// path itself, with the frames so far, and the app owns the file, to move or delete. It is
+    /// unfinished: a FLAC file may end in a cut frame, and a WAV's or AIFF's header states the
+    /// whole frames on disk only if
     /// [`header_describes_frames`](tutti_codec::Unfinished::header_describes_frames) says so.
     /// `unfinished` is `None` for a destination that is not a file.
     #[error("the take's sink failed")]

@@ -8,7 +8,7 @@ use tutti_buffers::{
     ChannelLayout, ChannelSet, Float, Fold, Interleaved, InterleavedMut, Placement, Sink,
     SinkFailed,
 };
-use tutti_codec::{Chain, EncodeError, Kept, ToFile};
+use tutti_codec::{Chain, EncodeError, Kept, ToFile, Unfinished};
 use tutti_dsp::FftFloat;
 use tutti_export::{Rendered, Written};
 use tutti_units::SampleRate;
@@ -38,8 +38,8 @@ pub trait Writer<F: Float>: Send + 'static {
     fn close(self) -> Result<Self::Output, TakeError>;
 }
 
-/// A file: the frames go through the encoding's stages into a file beside its path, which the
-/// close puts in place.
+/// A file: the frames go through the encoding's stages into a file at its path, written in
+/// place from the start; the close finishes it.
 #[derive(Debug)]
 pub struct FileWriter<F: FftFloat> {
     chain: Chain<F>,
@@ -71,28 +71,38 @@ impl<F: FftFloat> Writer<F> for FileWriter<F> {
         self.chain.block(frames).map_err(|_| SinkFailed)
     }
 
-    /// A file that cannot be closed whole is kept unfinished beside its path
-    /// ([`TakeError::Sink`]), and one that cannot be put in place is kept whole
-    /// ([`TakeError::Commit`]): a take never deletes its recording.
+    /// A file that cannot be closed or synced is [`TakeError::Sink`], whose `unfinished`
+    /// names where the file is: a take never deletes its recording.
     fn close(self) -> Result<Written, TakeError> {
         let Self {
             chain,
             path,
             placement,
         } = self;
+        // A complete file kept somewhere: its header describes its frames.
+        let complete = |at: &std::path::Path, source: EncodeError| TakeError::Sink {
+            source: Arc::new(source),
+            unfinished: Some(Unfinished {
+                path: at.to_path_buf(),
+                header_describes_frames: true,
+            }),
+        };
         let closed = chain.finalize().map_err(|kept| match kept {
-            Kept::Commit(commit) => TakeError::Commit(commit),
+            Kept::Commit(commit) => {
+                let at = commit.kept().to_path_buf();
+                complete(&at, EncodeError::Commit(commit))
+            }
             Kept::Unfinished { source, unfinished } => TakeError::Sink {
                 source: Arc::new(source),
                 unfinished: Some(unfinished),
             },
         })?;
         let landed = closed.commit().map_err(|e| match e {
-            EncodeError::Commit(commit) => TakeError::Commit(commit),
-            other => TakeError::Sink {
-                source: Arc::new(other),
-                unfinished: None,
-            },
+            EncodeError::Commit(commit) => {
+                let at = commit.kept().to_path_buf();
+                complete(&at, EncodeError::Commit(commit))
+            }
+            other => complete(&path, other),
         })?;
         Ok(Written::new(path, landed, placement))
     }
