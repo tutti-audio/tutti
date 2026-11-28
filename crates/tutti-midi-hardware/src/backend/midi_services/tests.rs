@@ -1,10 +1,11 @@
 use super::watch::change_of;
 use super::*;
+use crate::capability::legacy;
 use tutti_midi_device::{OsChange, PortDirection};
 use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, UmpVersion};
 use tutti_winmidi2_ffi::Change;
 
-fn declared(midi1: bool, midi2: bool) -> Declared {
+fn declared(midi1: bool, midi2: bool, protocol: Option<Protocol>) -> Declared {
     Declared {
         info: EndpointInfoNotification {
             version: UmpVersion::V1_1,
@@ -16,6 +17,7 @@ fn declared(midi1: bool, midi2: bool) -> Declared {
             tx_jr: false,
         },
         blocks: Vec::new(),
+        protocol,
     }
 }
 
@@ -24,7 +26,7 @@ fn endpoint(id: &str) -> Endpoint {
         id: id.to_owned(),
         name: "Loopback".to_owned(),
         loopback: None,
-        declared: declared(true, true),
+        declared: Some(declared(true, true, Some(Protocol::Midi2))),
     }
 }
 
@@ -121,14 +123,32 @@ fn buffered_changes_apply_in_order_after_the_list() {
     );
 }
 
-/// **An endpoint that supports MIDI 2.0 speaks it, and one that supports only MIDI 1.0
-/// speaks that**, each supporting what it declares.
+/// **An endpoint speaks the protocol the service and it agreed on, whatever it supports**,
+/// and MIDI 1.0 while none is agreed: an endpoint that supports MIDI 2.0 is not in it until
+/// they agree. Each supports what it declares.
 #[test]
-fn an_endpoint_speaks_midi2_when_it_supports_it() {
-    let both = described(&declared(true, true)).endpoint;
-    assert_eq!(both.active().protocol, Protocol::Midi2);
-    assert!(both.capabilities().midi1 && both.capabilities().midi2);
-    let only1 = described(&declared(true, false)).endpoint;
+fn an_endpoint_speaks_the_protocol_it_agreed() {
+    let agreed2 = described(Some(&declared(true, true, Some(Protocol::Midi2)))).endpoint;
+    assert_eq!(agreed2.active().protocol, Protocol::Midi2);
+    assert!(agreed2.capabilities().midi1 && agreed2.capabilities().midi2);
+    let agreed1 = described(Some(&declared(true, true, Some(Protocol::Midi1)))).endpoint;
+    assert_eq!(agreed1.active().protocol, Protocol::Midi1);
+    assert!(agreed1.capabilities().midi1 && agreed1.capabilities().midi2);
+    let not_agreed = described(Some(&declared(true, true, None))).endpoint;
+    assert_eq!(not_agreed.active().protocol, Protocol::Midi1);
+    assert!(not_agreed.capabilities().midi1 && not_agreed.capabilities().midi2);
+    let only1 = described(Some(&declared(true, false, Some(Protocol::Midi1)))).endpoint;
     assert_eq!(only1.active().protocol, Protocol::Midi1);
     assert!(only1.capabilities().midi1 && !only1.capabilities().midi2);
+}
+
+/// **An endpoint the service could not describe is a legacy MIDI 1.0 endpoint**: MIDI 1.0 in
+/// use and supported, with no Function Blocks.
+#[test]
+fn an_endpoint_with_no_declaration_is_described_as_midi1() {
+    let described = described(None);
+    assert_eq!(described.endpoint, legacy());
+    assert_eq!(described.endpoint.active().protocol, Protocol::Midi1);
+    assert!(described.endpoint.capabilities().midi1 && !described.endpoint.capabilities().midi2);
+    assert_eq!(described.blocks_left_out, 0);
 }

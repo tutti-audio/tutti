@@ -10,15 +10,19 @@
 //!   of that path, never a list position, and a listing is read afresh to resolve one:
 //!   opening an endpoint that has left fails with
 //!   [`NotFound::Endpoint`](crate::NotFound::Endpoint). Each endpoint is described by what the
-//!   service declares of it: its Endpoint Info and its Function Blocks (`described`). The
-//!   service translates between the protocols for an app, so an endpoint that supports
-//!   MIDI 2.0 is described as speaking it, and any other as MIDI 1.0.
+//!   service declares of it: its Endpoint Info, its Function Blocks and the protocol the
+//!   service and the endpoint agreed on (`described`). The protocol in use is the agreed one,
+//!   MIDI 1.0 while none is agreed, whatever the endpoint supports; an endpoint whose
+//!   properties the service could not read is described as MIDI 1.0 with no blocks.
 //! - **Input** is a message-received callback on the service's own thread, behind a
 //!   [`Guard`](crate::guard::Guard). A message the service delivered that cannot be read is
 //!   counted in the port's losses.
 //! - **Output** sends each packet through a connection that registers no handler, each at
-//!   its time: the service holds a message with a time ahead of its clock until then, and a
-//!   message whose time is too far ahead for it to schedule is not taken yet.
+//!   its time: the service holds a message with a time ahead of its clock until then. It
+//!   refuses a time more than 20 s ahead, which the session's output plan never sends (it
+//!   schedules at most [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead), so
+//!   a refusal is a clock fault: the packet is refused and counted in the port's losses,
+//!   never offered again.
 //! - **The device watch** is the service's endpoint watcher: an endpoint added, removed or
 //!   updated reaches the list from the notification, with no re-list. A watcher that
 //!   stops, or a change it cannot read, ends the watch with the cause.
@@ -83,18 +87,17 @@ fn endpoint_id(id: &str) -> EndpointId {
     ))
 }
 
-/// What the service declares of an endpoint, as the endpoint it describes: the protocols
-/// it supports and the Function Blocks it declares. The service translates between the
-/// protocols for an app, so the protocol in use is MIDI 2.0 for an endpoint that supports
-/// it and MIDI 1.0 otherwise.
-fn described(declared: &Declared) -> Described {
-    let protocol = if declared.info.midi2 {
-        Protocol::Midi2
-    } else {
-        Protocol::Midi1
+/// What the service declares of an endpoint, as the endpoint it describes: the protocols it
+/// supports, the protocol the service and the endpoint agreed on, and the Function Blocks it
+/// declares. The protocol in use is the agreed one, and MIDI 1.0 while none is agreed: what an
+/// endpoint supports does not choose it. An endpoint the service could not describe (`None`) is
+/// a legacy MIDI 1.0 endpoint.
+fn described(declared: Option<&Declared>) -> Described {
+    let Some(declared) = declared else {
+        return from_os(Protocol::Midi1, None, std::iter::empty());
     };
     from_os(
-        protocol,
+        declared.protocol.unwrap_or(Protocol::Midi1),
         Some(&declared.info),
         declared
             .blocks
@@ -105,7 +108,7 @@ fn described(declared: &Declared) -> Described {
 
 /// An endpoint the service lists, as the endpoint it describes.
 fn os_endpoint(endpoint: &Endpoint) -> OsEndpoint {
-    let described = described(&endpoint.declared);
+    let described = described(endpoint.declared.as_ref());
     OsEndpoint {
         id: endpoint_id(&endpoint.id),
         identity: OsEndpointIdentity::MidiServices(endpoint.id.clone()),

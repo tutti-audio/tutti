@@ -4,6 +4,7 @@ use windows_core::HSTRING;
 
 use super::Error;
 use super::call::{call, statics};
+use super::error::call as call_error;
 use super::properties;
 use crate::bindings::Windows::Devices::Midi2::Diagnostics::{
     IMidiDiagnosticsStatics, MidiDiagnostics,
@@ -35,8 +36,10 @@ pub struct Endpoint {
     pub name: String,
     /// Which diagnostic loopback endpoint it is, if it is one.
     pub loopback: Option<Loopback>,
-    /// What the service declares of it: its Endpoint Info and Function Blocks.
-    pub declared: Declared,
+    /// What the service declares of it: its Endpoint Info and Function Blocks. `None` when
+    /// the service could not answer for this endpoint, for example one that left while its
+    /// properties were read.
+    pub declared: Option<Declared>,
 }
 
 /// Starts the MIDI service if it is stopped and answers whether it is running.
@@ -96,7 +99,9 @@ impl LoopbackIds {
         } else {
             None
         };
-        let declared = properties::read(information)?;
+        // One endpoint's unreadable properties leave that endpoint undescribed, not the
+        // listing, a resolve or a watch failed.
+        let declared = properties::read(information).ok();
         Ok(Endpoint {
             id,
             name,
@@ -111,8 +116,9 @@ impl LoopbackIds {
 ///
 /// # Errors
 ///
-/// `Error::ApiMissing` when the API is not present, `Error::Call` when a read fails and
-/// `Error::Refused` when the service answers with no list.
+/// `Error::ApiMissing` when the API is not present, `Error::Call` when the list or an
+/// endpoint's id or name cannot be read and `Error::Refused` when the service answers with no
+/// list.
 pub fn endpoints() -> Result<Vec<Endpoint>, Error> {
     let loopbacks = LoopbackIds::read()?;
     let information =
@@ -127,7 +133,14 @@ pub fn endpoints() -> Result<Vec<Endpoint>, Error> {
         ) -> Option<IVectorView<MidiEndpointDeviceInformation>>
     )?
     .ok_or(Error::Refused { call: "FindAll" })?;
-    list.into_iter()
-        .map(|endpoint| loopbacks.describe(&endpoint))
+    // Read by index: the collection's `IntoIterator` unwraps a failed read.
+    let count = list.Size().map_err(call_error("IVectorView::Size"))?;
+    (0..count)
+        .map(|index| {
+            let endpoint = list
+                .GetAt(index)
+                .map_err(call_error("IVectorView::GetAt"))?;
+            loopbacks.describe(&endpoint)
+        })
         .collect()
 }

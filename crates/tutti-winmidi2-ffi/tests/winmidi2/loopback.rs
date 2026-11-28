@@ -163,9 +163,17 @@ fn a_message_sent_to_b_arrives_stamped_no_earlier_than_its_send() {
 /// until, never a speed asserted.
 const AHEAD: Duration = Duration::from_millis(250);
 
-/// **A message sent at a future `Instant` is held by the service until then**: it arrives
-/// stamped no earlier than that instant, and its handler runs no earlier than it. A message
-/// the service delivered at once would run its handler `AHEAD` early.
+/// How early the service's scheduler may release a message: it sends once the time is within
+/// its send window, `MIDI_SCHEDULER_LOCK_AND_SEND_FUNCTION_LATENCY_TICKS` (100) plus
+/// `MIDI_SCHEDULER_ENQUEUE_OVERHEAD_LATENCY_TICKS` (10) ticks of its 10 MHz clock, and its
+/// output latency compensation for the endpoint on top of that, which a loopback does not
+/// declare. 110 ticks are 11 microseconds.
+const SEND_WINDOW: Duration = Duration::from_micros(11);
+
+/// **A message sent at a future `Instant` is held by the service until then**: its handler
+/// runs no earlier than that instant, less the scheduler's send window. A message the service
+/// delivered at once would run its handler `AHEAD` early. The stamp is not pinned: the service
+/// echoes the timestamp it was sent with.
 #[test]
 fn a_message_sent_ahead_does_not_arrive_before_its_time() {
     let pair = pair(Loopback::A);
@@ -176,11 +184,10 @@ fn a_message_sent_ahead_does_not_arrive_before_its_time() {
         .expect("the service takes the message");
     let [got] = receive_all(&pair, 1).try_into().ok().expect("one message");
     assert_eq!(got.ump, ump);
-    let stamp = got
-        .stamp
-        .expect("a timestamp of the service's clock is an Instant");
-    assert!(stamp >= at, "stamped {AHEAD:?} ahead, before its time");
-    assert!(got.arrived >= at, "the message arrived before its time");
+    assert!(
+        got.arrived + SEND_WINDOW >= at,
+        "the message arrived before its time"
+    );
 }
 
 /// **A message sent at an `Instant` that has passed is sent at once**: the service takes it

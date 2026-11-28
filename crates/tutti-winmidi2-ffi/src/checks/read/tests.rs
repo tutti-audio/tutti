@@ -3,7 +3,9 @@ use crate::checks::declared::{
     DIRECTION_BIDIRECTIONAL, DIRECTION_INPUT, DIRECTION_OUTPUT, MIDI1_RESTRICTED,
     MIDI1_UNRESTRICTED, UI_HINT_SENDER,
 };
-use tutti_ump::{BlockDirection, FunctionBlockCount, FunctionBlocks, Midi1Port, UmpVersion};
+use tutti_ump::{
+    BlockDirection, FunctionBlockCount, FunctionBlocks, Midi1Port, Protocol, UmpVersion,
+};
 
 fn info() -> PlatformInfo {
     PlatformInfo {
@@ -46,8 +48,7 @@ fn each_endpoint_info_flag_is_the_notifications_flag_of_its_name() {
         block_count: 3,
         version_major: 1,
         version_minor: 1,
-    })
-    .unwrap();
+    });
     assert_eq!(
         read,
         EndpointInfoNotification {
@@ -64,21 +65,40 @@ fn each_endpoint_info_flag_is_the_notifications_flag_of_its_name() {
         midi2: true,
         tx_jr: true,
         ..info()
-    })
-    .unwrap();
+    });
     assert!(other.midi2 && other.tx_jr && !other.midi1 && !other.rx_jr);
 }
 
-/// M2-104 §7.1.2: a count of Function Blocks above 32 is reserved, and is kept as read.
+/// M2-104 §7.1.2: a count of Function Blocks above 32 is more than the field holds, and
+/// reads as the most it does, 32, as a count read from ALSA does.
 #[test]
-fn a_block_count_above_32_is_the_reserved_count() {
+fn a_block_count_above_32_saturates_to_32() {
     let read = endpoint_info(&PlatformInfo {
         block_count: 40,
         ..info()
-    })
-    .unwrap();
-    assert!(matches!(read.function_blocks, FunctionBlocks::Reserved(_)));
-    assert_eq!(read.function_blocks.count(), None);
+    });
+    assert_eq!(
+        read.function_blocks,
+        FunctionBlocks::Count(FunctionBlockCount::saturating(32))
+    );
+    assert_eq!(read.function_blocks.count().map(|c| c.get()), Some(32));
+}
+
+/// The service's `MidiProtocol` is `Midi1` = 1 and `Midi2` = 2; `Default` = 0, which it
+/// reports until protocol negotiation has run, and any other number are no agreement, which
+/// is neither protocol.
+#[test]
+fn only_midi1_and_midi2_are_an_agreed_protocol() {
+    assert_eq!(
+        [0, 1, 2, 3, -1].map(agreed_protocol),
+        [
+            None,
+            Some(Protocol::Midi1),
+            Some(Protocol::Midi2),
+            None,
+            None
+        ]
+    );
 }
 
 /// M2-104 §7.1.8: the service's direction and MIDI 1.0 port numbers are the spec's, and a

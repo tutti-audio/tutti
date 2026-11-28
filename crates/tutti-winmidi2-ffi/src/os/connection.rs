@@ -115,7 +115,8 @@ impl Connection {
     /// # Errors
     ///
     /// `Error::Closed` for a closed connection, `Error::Timestamp` for an `at` that is not
-    /// a timestamp, `Error::TooFarAhead` for one the service does not yet schedule, `Error::BufferFull` when the service cannot take the message now and
+    /// a timestamp, `Error::TooFarAhead` for one more than 20 s ahead, which the service
+    /// refuses, `Error::BufferFull` when the service cannot take the message now and
     /// `Error::MessageRefused` for any other refusal.
     pub fn send(&self, at: Option<Instant>, ump: &Ump) -> Result<(), Error> {
         if self.closed.load(Ordering::Acquire) {

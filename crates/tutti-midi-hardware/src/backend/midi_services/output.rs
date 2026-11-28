@@ -31,8 +31,15 @@ pub(super) struct MidiServicesOutput {
 impl MidiServicesOutput {
     /// Sends `ump` at `send`: the service's timestamp of the message is that time, and the
     /// service holds it until then. A time the clock has passed, or that is before its origin
-    /// and so cannot be a timestamp, goes now; a time too far ahead for the service to
-    /// schedule is refused, so the packet is not taken and is offered again.
+    /// and so cannot be a timestamp, goes now.
+    ///
+    /// # Errors
+    ///
+    /// The service's refusal. [`Error::TooFarAhead`] is one `queue_timed` counts as a loss
+    /// instead of offering again: the service refuses a time more than 20 s ahead
+    /// (`MIDI_MAX_ALLOWED_SCHEDULER_SECONDS_INTO_FUTURE`), which is past the
+    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) the session's output plan schedules ahead, so the time is a clock
+    /// fault, and a later offer would be refused again.
     fn send(&self, send: SendAt, ump: &Ump) -> core::result::Result<(), Error> {
         let at = match send {
             SendAt::Now => None,
@@ -49,20 +56,32 @@ impl MidiOut for MidiServicesOutput {
     /// Each packet goes to the service at its time. The service takes a packet whole or
     /// not at all, so a message of several packets is cut only between two of them, by the
     /// service's buffer filling up: its head is out, it is taken, and its tail is counted
-    /// in [`losses`](DeviceOut::losses) ([`by_message`]).
+    /// in [`losses`](DeviceOut::losses) ([`by_message`]). A packet whose time is too far
+    /// ahead is refused for good: its message is taken and its packets that did not go are
+    /// counted as lost.
     fn queue_timed(&self, events: &[Outgoing]) -> Taken {
+        let mut too_far = Losses::NONE;
         let sent = by_message(events, "Windows MIDI Services", |message| {
             for (sent, event) in message.packets().iter().enumerate() {
-                if let Err(error) = self.send(event.send, &event.ump) {
-                    if error == Error::Closed {
-                        self.alive.store(false, Ordering::Release);
+                match self.send(event.send, &event.ump) {
+                    Ok(()) => {}
+                    Err(Error::TooFarAhead) => {
+                        too_far += Losses::lost((message.len() - sent) as u64);
+                        return Ok(());
                     }
-                    return Err(Refused { error, sent });
+                    Err(error) => {
+                        if error == Error::Closed {
+                            self.alive.store(false, Ordering::Release);
+                        }
+                        return Err(Refused { error, sent });
+                    }
                 }
             }
             Ok(())
         });
-        self.lost.lock().add(sent.losses);
+        let mut lost = sent.losses;
+        lost += too_far;
+        self.lost.lock().add(lost);
         sent.taken
     }
 }

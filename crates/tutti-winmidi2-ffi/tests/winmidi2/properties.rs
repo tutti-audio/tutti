@@ -17,11 +17,14 @@ fn loopback(which: Loopback) -> Endpoint {
 /// (`MidiEndpointCapabilities_SupportsMidi1Protocol | ..Midi2Protocol`, which the service
 /// keeps as the endpoint's supported protocols until discovery says otherwise), and it runs no
 /// UMP Endpoint discovery, so it declares no JR Timestamps, no UMP version, no Function Block
-/// and no static flag.
+/// and no static flag. What stream configuration it agrees is not pinned: the diagnostics
+/// transport sets none, and the service's source does not state the value a client reads.
 #[test]
 fn a_loopback_endpoint_declares_both_protocols_and_nothing_else() {
     for which in [Loopback::A, Loopback::B] {
-        let declared = loopback(which).declared;
+        let declared = loopback(which)
+            .declared
+            .expect("the service answers for a diagnostic loopback endpoint");
         assert!(
             declared.info.midi1 && declared.info.midi2,
             "{which:?}: {declared:?}"

@@ -5,21 +5,23 @@ use windows_core::HSTRING;
 
 use super::Error;
 use super::call::call;
+use super::error::call as call_error;
 use crate::bindings::Windows::Devices::Midi2::Enumeration::{
-    MidiDeclaredEndpointInfo, MidiEndpointDeviceInformation, MidiFunctionBlock,
-    MidiFunctionBlockDirection, MidiFunctionBlockRepresentsMidi10Connection,
-    MidiFunctionBlockUIHint,
+    MidiDeclaredEndpointInfo, MidiDeclaredStreamConfiguration, MidiEndpointDeviceInformation,
+    MidiFunctionBlock, MidiFunctionBlockDirection, MidiFunctionBlockRepresentsMidi10Connection,
+    MidiFunctionBlockUIHint, MidiProtocol,
 };
 use crate::bindings::Windows::Devices::Midi2::MidiGroup;
 use crate::checks::declared::{PlatformBlock, PlatformInfo};
-use crate::checks::read::{Declared, endpoint_info, function_block};
+use crate::checks::read::{Declared, agreed_protocol, endpoint_info, function_block};
 
 /// The properties `information` declares.
 ///
 /// # Errors
 ///
-/// `Error::Call` when a read fails and `Error::Refused` when the service answers with no
-/// object.
+/// `Error::Call` when a read fails, the block list's reads (its size and each block) and
+/// the stream configuration's included, and `Error::Refused` when the service answers with
+/// no object.
 pub(super) fn read(information: &MidiEndpointDeviceInformation) -> Result<Declared, Error> {
     let declared = call!(
         "GetDeclaredEndpointInfo",
@@ -67,15 +69,28 @@ pub(super) fn read(information: &MidiEndpointDeviceInformation) -> Result<Declar
     .ok_or(Error::Refused {
         call: "GetDeclaredFunctionBlocks",
     })?;
-    let blocks = list
-        .into_iter()
-        .map(|block| platform_block(&block).map(|block| function_block(&block)))
+    let count = list.Size().map_err(call_error("IVectorView::Size"))?;
+    let blocks = (0..count)
+        .map(|index| {
+            let block = list
+                .GetAt(index)
+                .map_err(call_error("IVectorView::GetAt"))?;
+            platform_block(&block).map(|block| function_block(&block))
+        })
         .collect::<Result<_, _>>()?;
+    let stream = call!(
+        "GetDeclaredStreamConfiguration",
+        *information,
+        GetDeclaredStreamConfiguration() -> Option<MidiDeclaredStreamConfiguration>
+    )?
+    .ok_or(Error::Refused {
+        call: "GetDeclaredStreamConfiguration",
+    })?;
+    let protocol = call!("Protocol", stream, Protocol() -> MidiProtocol)?.0;
     Ok(Declared {
-        info: endpoint_info(&info).ok_or(Error::Refused {
-            call: "endpoint info",
-        })?,
+        info: endpoint_info(&info),
         blocks,
+        protocol: agreed_protocol(protocol),
     })
 }
 

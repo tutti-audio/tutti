@@ -71,9 +71,7 @@ impl Session {
     }
 
     /// Opens a connection to the endpoint with device id `endpoint_id` that only sends: no
-    /// handler is registered, so nothing reads what the endpoint sends. The API has no flag
-    /// for a connection that the service does not deliver to; the service delivers, and the
-    /// API's event, with no handler, drops it.
+    /// handler is registered, so nothing reads what the endpoint sends.
     ///
     /// # Errors
     ///

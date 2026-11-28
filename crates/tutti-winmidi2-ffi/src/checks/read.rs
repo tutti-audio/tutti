@@ -6,8 +6,8 @@
 //! the mapping runs on every target.
 
 use tutti_ump::{
-    EndpointInfoNotification, Message, OsFunctionBlock, Stream, Sysex8StreamCount, UiHint, Ump,
-    read_function_block,
+    EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, OsFunctionBlock, Protocol,
+    Sysex8StreamCount, UiHint, UmpVersion, read_function_block,
 };
 
 use super::declared::{Block, PlatformBlock, PlatformInfo};
@@ -23,23 +23,39 @@ pub struct Declared {
     pub info: EndpointInfoNotification,
     /// The Function Blocks it declares, in the service's order.
     pub blocks: Vec<Block>,
+    /// The protocol the service and the endpoint agreed on, filled in by MIDI 2.0 protocol
+    /// negotiation. `None` when they have agreed on none (yet), which is neither MIDI 1.0 nor
+    /// MIDI 2.0.
+    pub protocol: Option<Protocol>,
 }
 
-/// The Endpoint Info Notification `info` reads as: its Endpoint Info words decoded, so a
-/// count of Function Blocks above 32 is the reserved count as read.
-///
-/// `None` only if the words do not decode as an Endpoint Info Notification, which words built
-/// here always do.
-pub(crate) fn endpoint_info(info: &PlatformInfo) -> Option<EndpointInfoNotification> {
-    let word0 = 0xF001_0000 | (u32::from(info.version_major) << 8) | u32::from(info.version_minor);
-    let word1 = (u32::from(info.static_blocks) << 31)
-        | (u32::from(info.block_count & 0x7F) << 24)
-        | (u32::from(info.midi2) << 9)
-        | (u32::from(info.midi1) << 8)
-        | (u32::from(info.rx_jr) << 1)
-        | u32::from(info.tx_jr);
-    match Ump([word0, word1, 0, 0]).decode() {
-        Ok(Message::Stream(Stream::EndpointInfo(info))) => Some(info),
+/// The Endpoint Info Notification `info` reads as. A count of Function Blocks above 32
+/// saturates to the most the field holds, as a count read from ALSA does.
+pub(crate) fn endpoint_info(info: &PlatformInfo) -> EndpointInfoNotification {
+    EndpointInfoNotification {
+        version: UmpVersion::new(info.version_major, info.version_minor),
+        static_function_blocks: info.static_blocks,
+        function_blocks: FunctionBlocks::Count(FunctionBlockCount::saturating(usize::from(
+            info.block_count,
+        ))),
+        midi2: info.midi2,
+        midi1: info.midi1,
+        rx_jr: info.rx_jr,
+        tx_jr: info.tx_jr,
+    }
+}
+
+/// `MidiProtocol` as the service numbers it: `Midi1` is `1` and `Midi2` is `2`.
+pub(crate) const PROTOCOL_MIDI1: i32 = 1;
+pub(crate) const PROTOCOL_MIDI2: i32 = 2;
+
+/// The protocol the service and the endpoint agreed on, as `MidiProtocol` numbers it. `Default`
+/// (`0`), which the service reports until protocol negotiation has run, and any other number
+/// are no agreement: `None`.
+pub(crate) fn agreed_protocol(protocol: i32) -> Option<Protocol> {
+    match protocol {
+        PROTOCOL_MIDI1 => Some(Protocol::Midi1),
+        PROTOCOL_MIDI2 => Some(Protocol::Midi2),
         _ => None,
     }
 }
