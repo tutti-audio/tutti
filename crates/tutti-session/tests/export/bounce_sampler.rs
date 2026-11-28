@@ -7,12 +7,13 @@ use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 use tutti_fixtures::WavePlanes;
+use tutti_sampler::testing::{free_source, placed_source};
 use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::ForkError;
-use tutti_sampler::{Clip, Loop, MemorySource, Playback, SlotId, VoicePool};
+use tutti_sampler::{Clip, Loop, Playback, SlotId, VoicePool};
 use tutti_session::{Bounce, BounceError, BounceTail, MainOutput, Range, Session};
 use tutti_units::{Beat, PlaybackRate, SampleRate, Samples, Seconds};
 
@@ -74,7 +75,7 @@ fn a_free_running_voice_rings_out_its_wave() {
     let frames = 12_000;
     let at = |speed: f64, looped: Option<Loop>| {
         let mut session = session();
-        let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
+        let mut source = free_source(constant(frames, 0.25));
         source.set_speed(PlaybackRate::clamped(speed));
         source.set_loop(looped);
         let voice = session.graph().add(source);
@@ -91,7 +92,7 @@ fn a_free_running_voice_rings_out_its_wave() {
 
     let looped = Loop::new(Samples::new(0)..Samples::new(frames)).expect("a loop");
     let mut session = session();
-    let mut source = MemorySource::new(constant(frames, 0.25)).expect("a placeable wave");
+    let mut source = free_source(constant(frames, 0.25));
     source.set_loop(Some(looped));
     let voice = session.graph().add(source);
     session
@@ -119,11 +120,10 @@ fn a_free_running_voice_rings_out_its_wave() {
 fn a_pool_built_with_its_voices_bounces_them() {
     let mut session = session();
     let mut pool = VoicePool::new();
-    let source = MemorySource::placed(
+    let source = placed_source(
         constant(RATE as usize, 0.25),
         tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
-    )
-    .expect("a placeable wave");
+    );
     pool.insert(SlotId(1), source, Playback::default())
         .expect("a finite gain and a nonempty width");
     let pool = session.graph().add(pool);
@@ -153,11 +153,10 @@ fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
     let mut session = session();
     let pool = session.graph().add(VoicePool::new());
     session.graph().connect(pool, MainOutput).unwrap().unfaded();
-    let source = MemorySource::placed(
+    let source = placed_source(
         constant(RATE as usize, 0.25),
         tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
-    )
-    .expect("a placeable wave");
+    );
     session
         .graph_ref()
         .handle(&pool)

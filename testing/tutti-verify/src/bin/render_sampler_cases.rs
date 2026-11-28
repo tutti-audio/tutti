@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use tutti_buffers::Wave;
 use tutti_graph::contract;
-use tutti_sampler::testing::MockTransport;
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
+use tutti_sampler::testing::{MockTransport, placed_source};
+use tutti_sampler::{Playback, SlotId, VoicePool};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
@@ -55,8 +55,7 @@ fn render(stretch: f64, cents: f64, seek_at: Option<usize>) -> Vec<f32> {
     // and look like an attenuation bug.
     let wave = tone(440.0, FRAMES * 4);
 
-    let source =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
+    let source = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
     let play = Playback {
         stretch: StretchFactor::new(stretch),
         pitch: Cents::new(cents),

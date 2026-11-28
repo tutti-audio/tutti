@@ -58,7 +58,7 @@ use tutti_sampler::testing::{MockTransport, wait_for_open};
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, Manual, StepOutcome, StreamHandle, StreamStart,
 };
-use tutti_sampler::{DiskVoice, MemorySource, VoiceWindow};
+use tutti_sampler::{DiskVoice, MemorySource, MemorySourceConfig, VoiceWindow};
 use tutti_units::{Beat, Bpm, PlaybackRate, SamplePosition, SampleRate};
 
 const SR: f64 = 48_000.0;
@@ -374,18 +374,11 @@ fn the_disk_and_memory_tiers_render_the_same_material() {
     // ---- memory tier -----------------------------------------------------
     let mem_clock = Clock::new(120.0);
     let wave = load_wave(&path);
-    let mem = MemorySource::with_config(
-        wave,
-        tutti_sampler::MemorySourceConfig {
-            placement: Some(VoiceWindow {
-                start: Beat::new(0.0),
-                duration: None,
-            }),
-            channels: ChannelLayout::STEREO,
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let mem = MemorySource::from(
+        MemorySourceConfig::new(wave, ChannelLayout::STEREO)
+            .expect("a placeable wave")
+            .window(VoiceWindow::from(Beat::new(0.0))),
+    );
     let mut mem = contract::prepared(mem, SampleRate::of(SR), BLOCK);
 
     // ---- disk tier -------------------------------------------------------
@@ -772,19 +765,12 @@ fn the_tiers_agree_under_varispeed() {
 
         // --- memory, same speed, fresh so neither tier's history leaks in ---
         let mem_clock = Clock::new(120.0);
-        let mem = MemorySource::with_config(
-            load_wave(&path),
-            tutti_sampler::MemorySourceConfig {
-                placement: Some(VoiceWindow {
-                    start: Beat::new(0.0),
-                    duration: None,
-                }),
-                channels: ChannelLayout::STEREO,
-                speed: PlaybackRate::of(factor),
-                ..Default::default()
-            },
-        )
-        .expect("a placeable wave");
+        let mem = MemorySource::from(
+            MemorySourceConfig::new(load_wave(&path), ChannelLayout::STEREO)
+                .expect("a placeable wave")
+                .window(VoiceWindow::from(Beat::new(0.0)))
+                .speed(PlaybackRate::of(factor)),
+        );
         let mut mem = contract::prepared(mem, SampleRate::of(SR), BLOCK);
         let mem_out = render(&mut mem, &mem_clock, 128);
         let mem_left: Vec<f32> = mem_out.iter().map(|&(l, _)| l).collect();

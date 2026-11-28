@@ -87,6 +87,28 @@ fn roll(s: &mut Session, frames: usize) {
     blocks(s, frames.div_ceil(512));
 }
 
+/// The 512-frame blocks in ten seconds at [`RATE`]: how long [`roll_until_heard`] renders
+/// before it gives up, a guard against a hang only.
+const HANG_GUARD_BLOCKS: usize = 10 * 48_000 / 512;
+
+/// Plays and renders blocks until the synth has heard the Note Ons `want`, failing with
+/// `what` if [`HANG_GUARD_BLOCKS`] go by first, then renders 4,096 frames more and fails if
+/// anything else was heard. A device's event is put on the frame its arrival's wall-clock
+/// time maps to, and blocks render faster than real time, so how many frames pass before it
+/// plays grows with the time the test spent since its last block.
+fn roll_until_heard(s: &mut Session, seen: &Seen, want: &[u8], what: &str) {
+    play(s);
+    for _ in 0..HANG_GUARD_BLOCKS {
+        if note_ons(seen) == want {
+            break;
+        }
+        blocks(s, 1);
+    }
+    assert_eq!(note_ons(seen), want, "{what}");
+    roll(s, 4_096);
+    assert_eq!(note_ons(seen), want, "{what}, once");
+}
+
 fn key(channel: u8, n: u8) -> tutti_ump::Ump {
     midi::note_on(MidiChannel::of(channel), n, MF)
 }
@@ -791,8 +813,7 @@ fn the_same_handle_hears_a_device_that_returns() {
     let port = input(&mut s, &keys);
     roll(&mut s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
-    roll(&mut s, 4_096);
-    assert_eq!(note_ons(&seen), [60]);
+    roll_until_heard(&mut s, &seen, &[60], "the device is heard");
 
     unplug(&fake, 1);
     let _ = s.update();
@@ -801,8 +822,7 @@ fn the_same_handle_hears_a_device_that_returns() {
     let _ = s.update();
     assert_eq!(port.presence(), Presence::Live);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 62), Instant::now()));
-    roll(&mut s, 4_096);
-    assert_eq!(note_ons(&seen), [60, 62], "the returned device is heard");
+    roll_until_heard(&mut s, &seen, &[60, 62], "the returned device is heard");
 }
 
 /// How many times the sustain pedal went up (a controller 64 of value 0) in what
@@ -1598,8 +1618,7 @@ fn an_open_is_ready_on_the_first_poll_and_its_apply_installs_a_live_input() {
 
     roll(&mut s, 1_024);
     assert!(fake.send_input(EndpointId::from_raw(1), key(0, 60), Instant::now()));
-    roll(&mut s, 4_096);
-    assert_eq!(note_ons(&seen), [60], "the installed port hears its device");
+    roll_until_heard(&mut s, &seen, &[60], "the installed port hears its device");
 }
 
 /// **A call that cannot bind fails at the call, with a named error and no

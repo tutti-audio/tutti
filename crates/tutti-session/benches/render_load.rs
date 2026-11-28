@@ -84,6 +84,7 @@ use tutti_nodes::{
     BusStripConfig, BusStripNode, ConvolverConfig, ConvolverNode, ImpulseResponses, IrLayout,
     LimiterConfig, LimiterControls, LimiterNode,
 };
+use tutti_sampler::testing::placed_source;
 
 /// How the sampler voices transpose, and whether the reverb is in the
 /// scene.
@@ -131,7 +132,7 @@ use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unf
 use tutti_platform::Instant;
 use tutti_polysynth::{Adsr, FilterType, LadderSaturation, OscillatorType, PolySynth, SynthConfig};
 use tutti_rt::SplitMix64;
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
+use tutti_sampler::{Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_session::{InputPort, MainOutput, OutputPort, Session, Workers};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{
@@ -291,8 +292,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         for v in 0..SAMPLER_VOICES {
             pool.insert(
                 SlotId(v as u128 + 1),
-                MemorySource::placed(Arc::clone(&tone), VoiceWindow::from(Beat::new(0.0)))
-                    .expect("a placeable wave"),
+                placed_source(Arc::clone(&tone), VoiceWindow::from(Beat::new(0.0))),
                 {
                     let k = (t * SAMPLER_VOICES + v) as f64;
                     let interval = Cents::new(-350.0 + 25.0 * k + 3.0);

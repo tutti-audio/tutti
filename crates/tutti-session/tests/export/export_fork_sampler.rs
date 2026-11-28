@@ -22,10 +22,10 @@ use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_sampler::testing::wait_for_open;
+use tutti_sampler::testing::{placed_source, wait_for_open};
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, StreamHandle, StreamReader,
-    StreamStart, VoiceNode, VoiceWindow,
+    DiskStreamer, DiskVoice, Manual, Playback, StreamHandle, StreamReader, StreamStart, VoiceNode,
+    VoiceWindow,
 };
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Range, Session, Stem, StemKey,
@@ -120,8 +120,7 @@ fn a_node_export_follows_a_90_bpm_timeline() {
             .unwrap();
     }
     let voice = {
-        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)));
         let node = session.graph().add(source);
         session.graph().connect(node, MainOutput).unwrap();
         node
@@ -132,8 +131,7 @@ fn a_node_export_follows_a_90_bpm_timeline() {
             wave.append(Interleaved::new(&[tone(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
         session.graph().add(source)
     };
 
@@ -263,8 +261,7 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
                 .unwrap();
         }
         let memory = VoiceNode::new(
-            MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
-                .expect("a placeable wave"),
+            placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(3.0))),
             Playback::default(),
         )
         .expect("a finite gain and a nonempty width");

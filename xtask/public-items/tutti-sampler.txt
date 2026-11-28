@@ -86,7 +86,9 @@ fn testing::MockTransport::tempo
 fn testing::MockTransport::transport
 fn testing::block
 fn testing::block_in
+fn testing::free_source
 fn testing::loop_frames
+fn testing::placed_source
 fn testing::play
 fn testing::prepared
 fn testing::spare_count
@@ -145,8 +147,6 @@ fn voice::memory_source::MemorySource::gain
 fn voice::memory_source::MemorySource::is_placed
 fn voice::memory_source::MemorySource::is_playing
 fn voice::memory_source::MemorySource::loop_
-fn voice::memory_source::MemorySource::new
-fn voice::memory_source::MemorySource::placed
 fn voice::memory_source::MemorySource::placed_at
 fn voice::memory_source::MemorySource::play
 fn voice::memory_source::MemorySource::position
@@ -167,8 +167,11 @@ fn voice::memory_source::MemorySource::trigger_at
 fn voice::memory_source::MemorySource::window
 fn voice::memory_source::MemorySource::window_position
 fn voice::memory_source::MemorySource::window_rate
-fn voice::memory_source::MemorySource::with_channels
-fn voice::memory_source::MemorySource::with_config
+fn voice::memory_source::MemorySourceConfig::gain
+fn voice::memory_source::MemorySourceConfig::looped
+fn voice::memory_source::MemorySourceConfig::new
+fn voice::memory_source::MemorySourceConfig::speed
+fn voice::memory_source::MemorySourceConfig::window
 fn voice::memory_source::VoiceWindow::from
 fn voice::memory_source::VoiceWindow::span
 fn voice::node::VoiceNode::channels

@@ -41,7 +41,7 @@ use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, ForkTarget, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::testing::{MockTransport, block};
+use tutti_sampler::testing::{MockTransport, block, free_source};
 use tutti_sampler::{MemorySource, Playback, VoiceNode, VoiceWindow};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
@@ -58,8 +58,7 @@ fn flat_wave(len: usize) -> Arc<Wave> {
 
 /// A voice placed on the transport at `[start, start + 1)`.
 fn voice_at(start: f64) -> MemorySource<f32> {
-    MemorySource::new(flat_wave(48_000))
-        .expect("a placeable wave")
+    free_source(flat_wave(48_000))
         .placed_at(VoiceWindow::span(Beat::new(start), BeatDuration::new(1.0)))
 }
 
@@ -325,9 +324,7 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
     const LEN: usize = 1_024;
     let samples: Vec<f32> = (0..LEN).map(|i| i as f32 / LEN as f32).collect();
     let wave = Arc::new(Wave::from_mono(SampleRate::SR_48K, Mono::new(&samples)));
-    let source = MemorySource::new(wave)
-        .expect("a placeable wave")
-        .placed_at(VoiceWindow::from(Beat::new(0.0)));
+    let source = free_source(wave).placed_at(VoiceWindow::from(Beat::new(0.0)));
     let node = VoiceNode::with_channels(source, Playback::default(), ChannelLayout::MONO)
         .expect("a finite gain and a nonempty width");
     let (ed, _exec, handle) = graph_with(node);
