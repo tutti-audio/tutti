@@ -77,6 +77,7 @@ enum format::PluginId
 enum format::PluginIdError
 enum format::serde_form::Raw
 enum host::Flushed
+enum host_edits::EditOutcome
 enum invalidation::PluginInvalidation
 enum invalidation::PluginRefresh
 enum invalidation::ResyncClass
@@ -104,6 +105,7 @@ enum param_edit::ParamEdit
 enum param_mapping::PlainMap
 enum param_unit::ParamUnit
 enum parameters::ParamAccess
+enum parameters::ParamRole
 enum parameters::ParamSteps
 enum parameters::ParamWriteError
 enum parameters::PluginParamRange
@@ -216,6 +218,7 @@ fn descriptor::AuComponentType::role
 fn descriptor::Described::new
 fn descriptor::EditorPresence::measured
 fn descriptor::PluginClass::format_name
+fn descriptor::PluginClass::host_edit
 fn descriptor::PluginClass::role
 fn descriptor::PluginDescriptor::has_editor
 fn descriptor::PluginDescriptor::new
@@ -319,6 +322,13 @@ fn guard::contained_panics
 fn guard::ffi_guard
 fn host::Rebuilt::whole
 fn host::process_block
+fn host_edits::HostEdits::drain
+fn host_edits::HostEdits::drain_while
+fn host_edits::HostEdits::holds
+fn host_edits::HostEdits::lost
+fn host_edits::HostEdits::new
+fn host_edits::HostEdits::post
+fn host_edits::HostEdits::reset
 fn invalidation::ResyncKind::classify
 fn layout_support::LayoutSupport::has_any
 fn layout_support::LayoutSupport::of
@@ -431,6 +441,7 @@ fn parameters::ParamWriteError::id
 fn parameters::ParameterInfo::bounds
 fn parameters::ParameterInfo::default_value
 fn parameters::ParameterInfo::flag
+fn parameters::ParameterInfo::gesture_role
 fn parameters::ParameterInfo::group
 fn parameters::ParameterInfo::id
 fn parameters::ParameterInfo::measures
@@ -667,6 +678,7 @@ struct host::PluginIo
 struct host::Rebuilt
 struct host::Refused
 struct host::Stuck
+struct host_edits::HostEdits
 struct lifecycle::Prepare
 struct lifecycle::RestartRules
 struct lifecycle::State

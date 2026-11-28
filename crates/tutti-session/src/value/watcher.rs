@@ -19,7 +19,7 @@ use super::saved::Captured;
 use super::state::{Params, ValueState};
 use super::target::{
     Assign, Target, TargetId,
-    sealed::{Sealed, Store},
+    sealed::{Held, Sealed, Store},
 };
 use crate::AppKey;
 
@@ -454,9 +454,14 @@ mod seal {
         /// Tells each target the value a gesture wrote to it.
         fn wrote(&self, params: &Params, values: &Self::Values);
     }
+}
+
+/// The sealed half of [`IntoWatched`].
+mod seal_watched {
+    use super::*;
 
     /// What a watcher reads of a set of targets.
-    pub trait Watched: Sealed {
+    pub trait Sealed: seal::Sealed {
         /// The changes of the targets, in the argument's shape.
         type Changes;
 
@@ -464,7 +469,8 @@ mod seal {
         fn changes(&self, drained: &Drained) -> Self::Changes;
     }
 }
-use seal::{Sealed as Targets, Watched};
+use seal::Sealed as Targets;
+use seal_watched::Sealed as Watched;
 
 /// What [`Session::gesture`](crate::Session::gesture) takes: any target, or
 /// tuples of up to 12 of them (nested too), arrays, `Vec`s and `Option`s
@@ -549,15 +555,15 @@ impl<T: Store> Targets for T {
     }
 
     fn begin(&self, params: &Params) {
-        Store::begin(*self, params);
+        Store::held(*self, params, Held::Begin);
     }
 
     fn end(&self, params: &Params) {
-        Store::end(*self, params);
+        Store::held(*self, params, Held::End);
     }
 
     fn wrote(&self, params: &Params, value: &T::Value) {
-        Store::wrote(*self, params, value);
+        Store::held(*self, params, Held::Wrote(value));
     }
 }
 impl<T: Store> IntoTargets for T {}

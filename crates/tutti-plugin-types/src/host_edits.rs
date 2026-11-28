@@ -19,7 +19,7 @@ use tutti_units::ParamId;
 use crate::ParamEdit;
 
 /// What a plugin's format does with a host gesture.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EditOutcome {
     /// The edit was queued for the plugin's main thread.
     Queued,

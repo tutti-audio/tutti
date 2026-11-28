@@ -1494,7 +1494,7 @@ pub fn a_gesture_is_reported_in_order<F: Format>() {
 ///
 /// Panics when an assertion of the case fails.
 ///
-/// Spec: vst3.IEditControllerHostEditing.beginEditFromHost, vst3.IEditControllerHostEditing.endEditFromHost, vst3.IEditController.setParamNormalized, clap.ext.params.flush, vst2.audioMaster.BeginEdit
+/// Spec: vst3.IEditControllerHostEditing.beginEditFromHost, vst3.IEditControllerHostEditing.endEditFromHost, vst3.IEditController.setParamNormalized, au.select.AUEventListenerNotify
 pub fn a_host_gesture_reaches_the_plugin_as_the_format_defines<F: Format>() {
     use tutti_plugin_types::ParamEdit;
     let mut a = active_in::<F>(Mode::Tag);

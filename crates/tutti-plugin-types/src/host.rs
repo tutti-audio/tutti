@@ -396,7 +396,7 @@ pub trait Control: EditorWindow {
     }
 
     /// The list the host's gestures toward this plugin are posted to
-    /// ([`PluginHandle::edit`]), for a format that defines one (VST3's
+    /// (`PluginHandle::edit`), for a format that defines one (VST3's
     /// `IEditControllerHostEditing`, AU's gesture notifications); `None` for a
     /// format that does not (CLAP, VST2). The list is the plugin's for its
     /// life: the same one answers every call.

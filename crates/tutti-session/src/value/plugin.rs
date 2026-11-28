@@ -24,7 +24,7 @@ use tutti_units::{
 use super::error::{PluginParamRefusal, SetRefusal, UnitError};
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
-use super::target::{Modulatable, Target, TargetId, sealed, target_builders};
+use super::target::{Modulatable, Target, TargetId, sealed, sealed::Held, target_builders};
 use crate::plugin_params::Driven;
 
 /// One parameter of the plugin hosted at a node: what `key.param(id)` returns,
@@ -155,16 +155,15 @@ pub struct PluginCell {
 impl sealed::Store for PluginParamTarget {
     type Cell = PluginCell;
 
-    fn begin(self, params: &Params) {
-        self.hold(params, ParamEdit::Begin(self.id));
-    }
-
-    fn end(self, params: &Params) {
-        self.hold(params, ParamEdit::End(self.id));
-    }
-
-    fn wrote(self, params: &Params, value: &Normalized) {
-        self.hold(params, ParamEdit::change(self.id, *value));
+    fn held(self, params: &Params, step: Held<&Normalized>) {
+        self.hold(
+            params,
+            match step {
+                Held::Begin => ParamEdit::Begin(self.id),
+                Held::Wrote(value) => ParamEdit::change(self.id, *value),
+                Held::End => ParamEdit::End(self.id),
+            },
+        );
     }
 
     fn resolve(self, params: &Params) -> Option<(PluginCell, Normalized)> {
@@ -331,22 +330,22 @@ macro_rules! unit_targets {
         impl sealed::Store for PluginParamTarget<$ty> {
             type Cell = UnitCell;
 
-            fn begin(self, params: &Params) {
-                self.hold(params, ParamEdit::Begin(self.id));
-            }
-
-            fn end(self, params: &Params) {
-                self.hold(params, ParamEdit::End(self.id));
-            }
-
-            fn wrote(self, params: &Params, value: &$ty) {
-                let position = params
-                    .plugin(self.node)
-                    .and_then(|entry| entry.conversion::<$ty>(self.id)?.ok())
-                    .and_then(|conversion| conversion.position(*value).ok());
-                if let Some(position) = position {
-                    self.hold(params, ParamEdit::change(self.id, position));
-                }
+            fn held(self, params: &Params, step: Held<&$ty>) {
+                let edit = match step {
+                    Held::Begin => ParamEdit::Begin(self.id),
+                    Held::End => ParamEdit::End(self.id),
+                    Held::Wrote(value) => {
+                        let position = params
+                            .plugin(self.node)
+                            .and_then(|entry| entry.conversion::<$ty>(self.id)?.ok())
+                            .and_then(|conversion| conversion.position(*value).ok());
+                        let Some(position) = position else {
+                            return;
+                        };
+                        ParamEdit::change(self.id, position)
+                    }
+                };
+                self.hold(params, edit);
             }
 
             fn resolve(self, params: &Params) -> Option<(UnitCell, $ty)> {

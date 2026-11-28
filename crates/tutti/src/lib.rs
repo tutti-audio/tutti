@@ -239,7 +239,7 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,
-    SavedValues, Watchable, Watcher,
+    IntoWatched, SavedValues, Watchable, Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -855,12 +855,13 @@ pub mod plugin {
     pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BridgeLosses, ChunkOutcomes, ClapFeature,
-        ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper, InvalidContentScale,
-        IpcError, IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured,
-        NotChecked, ParamFlags, ParamSteps, ParamUnit, ParameterInfo, PipelineCounts, PlainMap,
-        PlainUnit, PluginClass, PluginError, PluginFormat, PluginParamRange, PluginTooWide,
-        PluginVersion, ProbeConfig, ServerLosses, StateError, StateHash, TailVerdict,
-        UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
+        ContentScale, ControlRole, EditOutcome, EditorPresence, EmptyVersionText, Helper,
+        InvalidContentScale, IpcError, IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange,
+        Locator, Measured, NotChecked, ParamFlags, ParamRole, ParamSteps, ParamUnit, ParameterInfo,
+        PipelineCounts, PlainMap, PlainUnit, PluginClass, PluginError, PluginFormat,
+        PluginParamRange, PluginTooWide, PluginVersion, ProbeConfig, ServerLosses, StateError,
+        StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType,
+        Vst3SubCategories,
     };
     pub use tutti_plugin_types::{
         AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, MidiAssignment, MidiSource,

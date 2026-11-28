@@ -165,12 +165,12 @@ impl PluginBridge {
     /// One step of a host gesture toward the plugin, queued on the control path
     /// the server's main loop drains. A step the queue refuses is kept and
     /// sent by [`flush_host_edits`](Self::flush_host_edits).
-    pub fn host_edit(&self, edit: tutti_plugin_types::ParamEdit) {
+    pub(crate) fn host_edit(&self, edit: tutti_plugin_types::ParamEdit) {
         self.audio.host_edit(edit);
     }
 
     /// Sends the gesture steps a full control queue kept back.
-    pub fn flush_host_edits(&self) {
+    pub(crate) fn flush_host_edits(&self) {
         self.audio.flush_host_edits();
     }
 
