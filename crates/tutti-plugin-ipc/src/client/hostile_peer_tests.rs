@@ -2403,16 +2403,19 @@ fn a_preset_load_reaches_the_client_as_the_servers_plugin_answered() {
         Err(PresetError::Lost),
     ];
     for answer in answers {
+        let sent = answer.clone();
         let mock = MockServer::start("preset-answers", move |msg| match msg {
             ControlRequest::LoadPreset { .. } => {
-                Action::Reply(Box::new(ControlReply::PresetLoaded { result: answer }))
+                Action::Reply(Box::new(ControlReply::PresetLoaded {
+                    result: sent.clone(),
+                }))
             }
             _ => Action::Silent,
         });
         let id = PresetId::Number(3);
         assert_eq!(
             await_answer(mock.bridge.audio().load_preset_answer(id.clone())),
-            Some(answer),
+            Some(answer.clone()),
             "the awaited load answers {answer:?}"
         );
         assert_eq!(

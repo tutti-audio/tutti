@@ -99,7 +99,7 @@ pub enum Delivered {
 /// does not list it, was asked and refused, or is gone; the bridge adds a full
 /// queue and a missed deadline. The plugin's own answers cross the wire as they
 /// are.
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum PresetError {
@@ -114,7 +114,8 @@ pub enum PresetError {
     /// a VST2 program index outside `[0, numPrograms)` (`effSetProgram`), a VST3
     /// program in a list the plugin does not have or past its `programCount`
     /// (`IUnitInfo::getProgramListInfo`), an AU number outside
-    /// `kAudioUnitProperty_FactoryPresets`. The plugin was not asked.
+    /// `kAudioUnitProperty_FactoryPresets` (the AU host lists factory presets
+    /// only; user presets are not listed). The plugin was not asked.
     #[error("no listed preset has that id")]
     Unlisted,
     /// The plugin was asked about a preset it could address and declined (a
@@ -125,6 +126,15 @@ pub enum PresetError {
     /// The plugin is gone, so nothing was asked.
     #[error("the plugin is lost")]
     Lost,
+    /// Out of process only: the plugin server answered an error in place of the
+    /// plugin's answer, so the server, not the plugin, failed the request. The
+    /// text is the server's.
+    #[error("the plugin server failed the preset request: {0}")]
+    Server(String),
+    /// Out of process only: the plugin server answered with a reply of another
+    /// kind, so the peer broke the protocol.
+    #[error("the plugin server answered the preset request with an unexpected reply")]
+    UnexpectedReply,
     /// The request could not be queued: the bridge's command queue is full. The
     /// plugin was not asked, so a retry is reasonable.
     #[error("the plugin bridge is busy; the request was not sent")]

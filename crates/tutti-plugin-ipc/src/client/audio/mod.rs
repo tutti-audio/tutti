@@ -1696,8 +1696,9 @@ fn editor_lost(lost: Lost, crashed: bool) -> EditorError {
 
 /// A [`LoadPreset`]'s answer: what the plugin's control answered, as it
 /// answered it, or why the bridge has none. No answer within the window is not a
-/// refusal: the plugin was asked and may have loaded it. A server that answers
-/// an error, or another kind of reply, declined.
+/// refusal: the plugin was asked and may have loaded it. A server error is the
+/// server's failure and another kind of reply is a broken peer; neither is the
+/// plugin declining.
 fn preset_loaded(
     answer: std::result::Result<PresetLoaded, Lost>,
 ) -> std::result::Result<(), PresetError> {
@@ -1706,7 +1707,9 @@ fn preset_loaded(
         Err(Lost::Busy) => Err(PresetError::Busy),
         Err(Lost::Crashed) => Err(PresetError::Lost),
         Err(Lost::NoAnswer { after }) => Err(PresetError::Stalled { after }),
-        Err(Lost::Server(_) | Lost::Wrong | Lost::Object(_)) => Err(PresetError::Refused),
+        Err(Lost::Server(error)) => Err(PresetError::Server(error.to_string())),
+        // A `LoadPreset` carries no object, so `Object` is a reply of the wrong kind.
+        Err(Lost::Wrong | Lost::Object(_)) => Err(PresetError::UnexpectedReply),
     }
 }
 
@@ -1735,5 +1738,50 @@ mod delivery_tests {
             delivery(true, || panic!("a dead plugin's queue is not tried")),
             Delivered::PluginDead
         );
+    }
+}
+
+#[cfg(test)]
+mod preset_loaded_tests {
+    use super::*;
+    use std::time::Duration;
+    use tutti_plugin_types::ServerError;
+
+    /// **Only the plugin's own answer can read as `Refused`.** Each way the
+    /// bridge has no answer maps to its own cause: a full queue is `Busy`, a dead
+    /// bridge `Lost`, a missed window `Stalled`, a server error `Server` with the
+    /// server's text, and a reply of the wrong kind (or an object a `LoadPreset`
+    /// never carries) `UnexpectedReply`.
+    #[test]
+    fn a_preset_answer_is_refused_only_when_the_plugin_declined() {
+        let after = Duration::from_millis(250);
+        let server = ServerError::StateWithoutObject;
+        let cases = [
+            (
+                Ok(PresetLoaded {
+                    result: Err(PresetError::Refused),
+                }),
+                Err(PresetError::Refused),
+            ),
+            (Ok(PresetLoaded { result: Ok(()) }), Ok(())),
+            (Err(Lost::Busy), Err(PresetError::Busy)),
+            (Err(Lost::Crashed), Err(PresetError::Lost)),
+            (
+                Err(Lost::NoAnswer { after }),
+                Err(PresetError::Stalled { after }),
+            ),
+            (
+                Err(Lost::Server(server.clone())),
+                Err(PresetError::Server(server.to_string())),
+            ),
+            (Err(Lost::Wrong), Err(PresetError::UnexpectedReply)),
+            (
+                Err(Lost::Object(StateError::UnexpectedReply)),
+                Err(PresetError::UnexpectedReply),
+            ),
+        ];
+        for (answer, expected) in cases {
+            assert_eq!(preset_loaded(answer), expected);
+        }
     }
 }

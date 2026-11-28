@@ -425,7 +425,7 @@ const AUTOMATION_VST3: [(AutomationMode, u32); 4] = [
 
 /// What a format's control surface answers for the shared plugin, the same in
 /// a loaded plugin and an active one. One row per format ([`Surface`]).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Surface {
     /// Whether the plugin's shell reads the state's editor byte: only the Rust
     /// VST3 shell does, offering a view once it says [`EDITOR_TIDY`]. Where

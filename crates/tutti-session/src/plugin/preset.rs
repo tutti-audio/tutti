@@ -87,7 +87,9 @@ pub type LoadPresetInProcess = InProcessOp<LoadPresetOp>;
 /// operation; [`PresetError::Unlisted`] when no listed preset has the id;
 /// [`PresetError::Refused`] when it declined; [`PresetError::Busy`] when the
 /// bridge's queue was full (nothing was sent); [`PresetError::Stalled`] when the
-/// server did not answer in time (the preset may have loaded).
+/// server did not answer in time (the preset may have loaded);
+/// [`PresetError::Server`] when the plugin server failed the request itself;
+/// [`PresetError::UnexpectedReply`] when it answered with another kind of reply.
 ///
 /// # Panics
 ///

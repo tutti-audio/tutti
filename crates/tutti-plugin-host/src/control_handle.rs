@@ -1249,7 +1249,7 @@ mod tests {
             _main: MainThreadMarker,
             _id: &PresetId,
         ) -> Result<(), PresetError> {
-            self.load
+            self.load.clone()
         }
         fn dropped_reported_edits(&self) -> u64 {
             0
@@ -1458,12 +1458,12 @@ mod tests {
         ] {
             let handle = handle_with(Some(FakePresets {
                 listed: Vec::new(),
-                load: answer,
+                load: answer.clone(),
                 track: Delivered::Yes,
             }));
             assert_eq!(
                 handle.load_preset(tutti_fixtures::main_thread(), &id),
-                std::task::Poll::Ready(answer),
+                std::task::Poll::Ready(answer.clone()),
                 "the control's {answer:?} reaches the caller unchanged"
             );
         }
