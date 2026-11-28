@@ -385,16 +385,22 @@ impl<F: SamplerFloat> Roster<F> {
             self.exit.retire(Retired::Slot(slot));
             return;
         };
-        let held = self
-            .voices
-            .iter()
-            .any(|v| v.key() == key && v.plays(wanted));
-        if held {
-            self.exit.retire(Retired::Slot(slot));
-            return;
-        }
         slot.set_render(rate, mode);
         slot.apply(&wanted.values());
+        // A voice the controls built again for a row a slot already plays (the table
+        // went to another structure under the key and came back before a block) is
+        // the controls' record of the voice at the key: it replaces the older slot,
+        // which goes back through the retirement ring, so the controls' hold and
+        // spare flags describe the voice that sounds.
+        if let Some(old) = self
+            .voices
+            .iter_mut()
+            .find(|v| v.key() == key && v.plays(wanted))
+        {
+            let old = std::mem::replace(old, slot);
+            self.exit.retire(Retired::Slot(old));
+            return;
+        }
         let at = self
             .voices
             .iter()
@@ -408,6 +414,9 @@ impl<F: SamplerFloat> Roster<F> {
     /// Gives the slot at `id` a spare vocoder (`Some`), or takes its spare away
     /// (`None`); what it does not keep is retired, never dropped here.
     pub(crate) fn set_spare(&mut self, id: SlotId, spare: Option<Box<PhaseVocoder<F>>>) {
+        // By key alone: at most one slot of a key matches the table at any time (`merge`
+        // retires the rest and `place` keeps one), and the controls send a spare only
+        // for the voice at the key they last sent.
         let left = match self.voices.iter_mut().find(|v| v.key() == id) {
             Some(v) => v.slot.set_spare(spare),
             None => spare,

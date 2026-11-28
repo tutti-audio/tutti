@@ -395,13 +395,19 @@ impl<F: SamplerFloat> VoicePool<F> {
     fn admit(&mut self) {
         while let Some(message) = self.rx.pop() {
             if let Err(message) = self.arrivals.push_within_capacity(message) {
-                // Unreachable: the buffer is as long as the ring.
+                // Unreachable: the buffer is as long as the ring. A slot or spare
+                // retired here keeps its reservation until collected; a withdrawal
+                // (`SetSpare(None)`) carries nothing to retire, so its reservation is
+                // released.
                 debug_assert!(false, "the arrival buffer holds a whole ring");
                 self.roster.exit.retire(match message {
                     Message::Install(slot) => Retired::Slot(slot),
                     Message::SetSpare { spare, .. } => match spare {
                         Some(spare) => Retired::Spare(spare),
-                        None => continue,
+                        None => {
+                            self.roster.exit.kept();
+                            continue;
+                        }
                     },
                 });
             }

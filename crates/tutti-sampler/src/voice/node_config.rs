@@ -473,11 +473,19 @@ impl<F: SamplerFloat, D: VoiceDrive> VoiceNodeConfig<F, D> {
     pub(crate) fn forked(&self, mode: RenderMode) -> Result<Voice<F>, ForkCause> {
         match &self.form {
             Form::Memory(source) => memory_voice_at(source.clone(), self.play).fork_copy(mode),
-            Form::Streamed { home, .. } => Voice {
-                source: VoiceSource::Disk(home.lock().template()),
-                play: self.play,
+            Form::Streamed { home, .. } => {
+                let mut voice = Voice {
+                    source: VoiceSource::Disk(home.lock().template()),
+                    play: self.play,
+                }
+                .fork_copy(mode)?;
+                // The fork's detached cells hold what the live cells hold now, which
+                // the audio thread writes at its next block: the config's values
+                // are the ones in force (the stretch rate is the slot's, per block).
+                voice.source.apply_gain(self.play.gain);
+                apply_speed(&mut voice, self.play.speed);
+                Ok(voice)
             }
-            .fork_copy(mode),
         }
     }
 }

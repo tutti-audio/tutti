@@ -545,3 +545,125 @@ fn a_streamed_row_with_a_stretch_renders_at_that_stretch() {
         held(&doubled)
     );
 }
+
+/// A streamed row's fork taken after a table write and before any block plays at the
+/// written values: the fork's detached cells are given the row's speed, not the one the
+/// live cells last held. The file is a ramp, frame `k` is `(k + 1) / 4096`, so at speed 2
+/// the last frame of a 64-frame block is `(2 * 63 + 1) / 4096`, where speed 1 reads
+/// `64 / 4096`.
+#[test]
+fn a_streamed_rows_fork_taken_after_a_write_plays_at_the_written_speed() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("ramp.wav");
+    let samples: Vec<f32> = (0..RAMP)
+        .flat_map(|k| [(k as f32 + 1.0) / RAMP as f32; 2])
+        .collect();
+    tutti_fixtures::signal::write_wav_f32(&path, SampleRate::of(SR), 2, &samples);
+    let mut streamer =
+        DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("a streamer builds");
+    let opening = streamer.open_stream(&path, StreamStart::HEAD);
+    let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
+    assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
+    let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
+    let streamed = VoiceNodeConfig::streaming(
+        voice,
+        stream,
+        Amplitude::new(1.0),
+        StretchFactor::UNITY,
+        Cents::new(0.0),
+    )
+    .expect("a stereo stream");
+    let stereo = || VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo");
+    let NodeParts { controls, fork, .. } =
+        VoicePool::from(stereo().row(SlotId(1), streamed.clone()).unwrap()).into_parts();
+    // The same stream at another speed: a value, so the row keeps its voice.
+    let faster = streamed.speed(tutti_units::PlaybackRate::of(2.0));
+    controls.replace(stereo().row(SlotId(1), faster).unwrap().table());
+
+    let offline = Prepare::new(
+        SampleRate::of(SR),
+        tutti_buffers::MaxBlock::of(tutti_units::Samples::new(BLOCK)),
+    )
+    .with_render_mode(RenderMode::Offline);
+    let mut forked = fork
+        .expect("a pool forks")
+        .fork(RenderMode::Offline)
+        .expect("a streamed row forks for an offline render")
+        .node;
+    forked.prepare(&offline);
+    let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let env = transport.env(BLOCK, SampleRate::of(SR));
+    let out = tutti_graph::contract::drive_input_in(
+        &mut *forked,
+        &offline,
+        &env,
+        tutti_buffers::Planes::default(),
+        &[],
+        &[],
+    )
+    .audio;
+    let last = out[0][BLOCK - 1];
+    let at_speed_2 = (2.0 * (BLOCK - 1) as f32 + 1.0) / RAMP as f32;
+    assert!(
+        (last - at_speed_2).abs() < 1e-4,
+        "the fork's last frame is {last}, a read at speed 2 is {at_speed_2} (speed 1 is {})",
+        BLOCK as f32 / RAMP as f32
+    );
+}
+
+/// A row declared with one voice, then another structure, then the first again before any
+/// block: the controls built the first voice twice, the audio thread already plays the
+/// older one, and the newer replaces it, so the controls' hold reading describes the voice
+/// that sounds and the row ends up `Holding`, sounding the file's level.
+#[test]
+fn a_row_that_returns_to_its_structure_before_a_block_ends_up_holding() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let (mut streamer, stream, voice) = stream_over(&dir.path().join("a.wav"), 8_192);
+    let (_other_streamer, other_stream, other_voice) =
+        stream_over(&dir.path().join("b.wav"), 8_192);
+    let make = |voice, stream| {
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            Amplitude::new(1.0),
+            StretchFactor::UNITY,
+            Cents::new(0.0),
+        )
+        .expect("a stereo stream")
+    };
+    let first = make(voice, stream);
+    let second = make(other_voice, other_stream);
+    let stereo = || VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo");
+    let (pool, controls) = controlled_pool(VoicePool::from(
+        stereo().row(SlotId(1), first.clone()).unwrap(),
+    ));
+    let mut pool = prepared(pool, SampleRate::of(SR), BLOCK);
+    let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
+    let play = |pool: &mut VoicePool<f32>, streamer: &mut DiskStreamer<Manual<f32>, f32>| {
+        let _ = streamer.step();
+        let out = block(pool, &transport, SampleRate::of(SR), BLOCK).remove(0);
+        transport.advance(BLOCK as i64, SampleRate::of(SR));
+        out
+    };
+    play(&mut pool, &mut streamer);
+    assert_eq!(controls.hold(SlotId(1)), Some(StreamHold::Holding));
+
+    // Another stream under the key, and the first again, with no block between.
+    controls.replace(stereo().row(SlotId(1), second).unwrap().table());
+    controls.replace(stereo().row(SlotId(1), first).unwrap().table());
+    for _ in 0..4 {
+        play(&mut pool, &mut streamer);
+        controls.reclaim();
+    }
+    let level = play(&mut pool, &mut streamer);
+    assert_eq!(
+        controls.hold(SlotId(1)),
+        Some(StreamHold::Holding),
+        "the controls' record is of the voice that holds the reader"
+    );
+    assert!(
+        level.iter().skip(EDGE).all(|&x| (x - LEVEL).abs() < 1e-5),
+        "the row sounds the file's level"
+    );
+    assert_eq!(pool.voice_count(), 1, "one voice plays the key");
+}

@@ -237,9 +237,12 @@ impl<F: SamplerFloat> VoicePoolControls<F> {
     /// Sends the voice of every row of the table that has none: what the pool
     /// starts with, and what a reclaim retries when the ring was full.
     pub(super) fn send_missing(&self) {
-        let table = self.table.current();
         let gone = {
             let mut inner = self.inner.lock();
+            // Read under the lock, as `replace` publishes under it: a table read
+            // before the lock could be one a `replace` has since moved past, and
+            // this would sync the voices back to it.
+            let table = self.table.current();
             self.sync(&mut inner, &table)
         };
         drop(gone);
@@ -331,10 +334,11 @@ impl<F: SamplerFloat> VoicePoolControls<F> {
     /// At most one spare per voice, which is what the retirement ring is sized for.
     fn reconcile_spares(&self) {
         let start = self.loops.start();
-        let table = self.table.current();
         let mut unused = Vec::new();
         {
             let mut inner = self.inner.lock();
+            // Under the lock, as `replace` publishes under it (see `send_missing`).
+            let table = self.table.current();
             let Inner { slots, commands } = &mut *inner;
             for (key, row) in table.rows() {
                 let Some(entry) = slots
