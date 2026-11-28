@@ -442,7 +442,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-wasm",
         "",
-        "clippy for wasm32-unknown-unknown: tutti-platform, tutti-rt and tutti, lib only; then tutti with the web features",
+        "clippy for wasm32-unknown-unknown: tutti-platform, tutti-rt and tutti, lib only; then tutti with the web features, midi-hardware included",
     ),
     (
         "check-no-std",
@@ -1059,7 +1059,7 @@ const CHECK_LOOM: &[&str] = &[
 
 const CHECK_WASM: &[&str] = &[
     "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
-    "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi,midi-network,serde -- -D warnings",
+    "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi,midi-hardware,midi-network,serde -- -D warnings",
 ];
 
 const CHECK_FEATURES: &[&str] = &[
