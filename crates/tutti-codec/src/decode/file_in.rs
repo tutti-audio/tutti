@@ -319,8 +319,8 @@ impl<S: Sample> FileIn<S> {
     /// before the fault, where a finished file answers [`Pull::Ended`]; this is
     /// the fault's detail. The fault is sticky (later reads return it
     /// without decoding on) and cleared by a successful [`seek`](Self::seek).
-    pub fn error(&self) -> Option<DecodeError> {
-        self.fault.clone()
+    pub fn error(&self) -> Option<&DecodeError> {
+        self.fault.as_ref()
     }
 
     /// Returns the frame the next sequential read will produce.

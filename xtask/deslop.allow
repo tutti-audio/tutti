@@ -136,6 +136,7 @@ field-leak tutti_clap_host::instance::processor::ClapProcessor::audio_side
 field-leak tutti_clap_host::instance::table::ParamTable::listed
 field-leak tutti_clap_host::instance::table::ParamTable::ranges
 field-leak tutti_clap_host::types::PluginInfo::features
+field-leak tutti_codec::decode::file_in::FileIn::fault
 field-leak tutti_dsp::bit_crush::BitCrusher::controls
 field-leak tutti_dsp::comb::CombFilter::form
 field-leak tutti_dsp::comb::CombFilter::gain

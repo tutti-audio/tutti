@@ -258,11 +258,7 @@ fn a_file_without_an_exact_count_reads_clean() {
     for (what, path) in cases {
         let mut dec = FileIn::<f32>::open(&path).expect("open");
         assert!(drain(&mut dec) > 0, "{what}");
-        assert_eq!(
-            dec.error().as_ref().map(ToString::to_string),
-            None,
-            "{what}"
-        );
+        assert_eq!(dec.error().map(ToString::to_string), None, "{what}");
     }
 }
 
@@ -344,7 +340,6 @@ fn a_mid_stream_decode_error_keeps_the_frames_before_it() {
     assert!(got > 0 && got < 20_000, "{got}");
     assert!(
         dec.error()
-            .as_ref()
             .map(ToString::to_string)
             .unwrap()
             .contains("injected")

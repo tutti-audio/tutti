@@ -227,7 +227,7 @@ fn the_stream_reads_every_frame_the_load_does() {
         }
         assert_eq!(at, w.len().get(), "{name}: streamed frame count");
         assert_eq!(
-            dec.error().as_ref().map(ToString::to_string),
+            dec.error().map(ToString::to_string),
             None,
             "{name} ends cleanly"
         );
