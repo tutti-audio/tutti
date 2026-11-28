@@ -20,7 +20,7 @@ use tutti_engine::{
 use crate::Result;
 use crate::driver_seam::CpalDriver;
 use crate::host::DeviceSelector;
-use crate::output::{AudioEngine, Origin};
+use crate::output::{AudioEngine, Origin, Resolved};
 
 /// The output device lifecycle a host holds: start, restart on another device
 /// or rate, stop.
@@ -345,6 +345,40 @@ impl<E: From<crate::DeviceError>> Restart<E> {
         match self {
             Self::Device(err) => E::from(err),
             Self::Hook(err) => err,
+        }
+    }
+}
+
+impl AudioEngine {
+    /// Starts `resolved` (this engine's device, found by
+    /// [`resolve_device`](Self::resolve_device), or a
+    /// [`supplied`](Resolved::supplied) driver, which opens no device) on `host`,
+    /// a host whose stream another driver ran (a timer): the driver takes over
+    /// the stream, `rerate` runs between the stop and the start as in
+    /// [`TuttiDriver::restart_with`], and the
+    /// host's stream, fault record and latency cell are the same ones.
+    ///
+    /// # Errors
+    /// The hook's error, or what the driver's `open` reports, as `E`, **with
+    /// the host back** and its stream stopped at its old spec: nothing plays,
+    /// and the driver the host ran is to be started again by the caller.
+    pub fn start_resolved<F: Float, D: StreamDriver<F>, E: From<crate::DeviceError>>(
+        self,
+        host: StreamHost<F>,
+        resolved: Resolved<D>,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<TuttiDriver<F>, (StreamHost<F>, E)>
+    where
+        D::Error: Into<crate::DeviceError>,
+    {
+        let Resolved {
+            spec,
+            driver,
+            opened,
+        } = resolved;
+        match self.origin.started(opened) {
+            Ok(origin) => TuttiDriver::take_over(host, spec, driver, rerate, origin),
+            Err(e) => Err((host, e.into())),
         }
     }
 }

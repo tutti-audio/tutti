@@ -40,9 +40,9 @@
 //! use tutti_sf2::SoundFont;
 //! use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 //!
-//! let soundfont = SoundFont::open("piano.sf2")?;
+//! let soundfont = std::sync::Arc::new(SoundFont::open("piano.sf2")?);
 //!
-//! let mut unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(soundfont))?;
+//! let mut unit = SoundFontUnit::<f32>::from(SoundFontConfig::new(soundfont)?);
 //! unit.program_change(MidiChannel::FIRST, U7::of(0)); // channel 0 → program 0
 //!
 //! // Into the graph: no audio input, five outputs, one MIDI event input (wire a
@@ -206,7 +206,7 @@ pub use player::MissingPresets;
 mod fork;
 mod node;
 
-use tutti_graph::{EventKind, SubBlocks};
+use tutti_graph::{EventKind, HostValues, Initials, NodeConfig, SubBlocks};
 use tutti_midi_protocol::channel_voice;
 use tutti_sf2::Preset;
 use tutti_ump::{Attribute, MidiChannel, NoteNumber, NoteVelocity, U7, Ump, Voice2};
@@ -240,7 +240,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// `tutti_nodes::FreeverbNode`) summed back with the dry pair by the graph's
 /// fan-in (the setup's fader holds all three as sources); `tutti-session`'s `Session::add_general_midi` wires all of
 /// that. A send with nothing to send is reported silent in the block's status
-/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Make it from a [`SoundFontConfig`] with `try_from`, pick a preset with
+/// (`Status::Masked`), and a unit with no voice sounding is `Status::Idle`. Make it from a [`SoundFontConfig`] with `from`, pick a preset with
 /// [`select`](Self::select) (a preset's bank and program) or
 /// [`program_change`](Self::program_change), then insert it into a graph
 /// (it implements `tutti_graph::Node` and `tutti_graph::IntoNode`, with no
@@ -277,12 +277,13 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// # Examples
 ///
 /// ```no_run
+/// use std::sync::Arc;
 /// use tutti_ump::{MidiChannel, U7};
 /// use tutti_sf2::SoundFont;
 /// use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 ///
-/// let soundfont = SoundFont::open("piano.sf2")?;
-/// let mut unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(soundfont))?;
+/// let soundfont = Arc::new(SoundFont::open("piano.sf2")?);
+/// let mut unit = SoundFontUnit::<f32>::from(SoundFontConfig::new(soundfont)?);
 /// unit.program_change(MidiChannel::FIRST, U7::of(0));
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -309,7 +310,7 @@ pub const SYNTH_BLOCK_FRAMES: usize = Render::BLOCK;
 /// # The rate
 ///
 /// A player's voices are built against a rate and cannot be re-rated in place.
-/// `SoundFontUnit::try_from` builds at 44.1 kHz; the node's `prepare` swaps in a
+/// `SoundFontUnit::from` builds at 44.1 kHz; the node's `prepare` swaps in a
 /// player at the graph's rate (control thread, keeping the presets and
 /// channel state). It runs at 16 to 192 kHz, which its shape declares so that a graph
 /// refuses a rate outside; a node added at one is left at its own. The
@@ -533,5 +534,37 @@ impl<F: Float + SimdLanes> Clone for SoundFontUnit<F> {
             // block overwrites the frames it reads back.
             planes: std::array::from_fn(|_| vec![F::ZERO; self.planes[0].len()]),
         }
+    }
+}
+
+/// A unit of float `F` over the config's SoundFont, which it shares rather than copies.
+///
+/// The unit renders at 44.1 kHz until its graph prepares it at the graph's rate ("The
+/// rate" on [`SoundFontUnit`]). Allocates the voices and reads every zone of the font
+/// once (for the tail), so convert off the audio thread.
+impl<F: Float + SimdLanes> From<SoundFontConfig> for SoundFontUnit<F> {
+    fn from(config: SoundFontConfig) -> Self {
+        Self::from_player(Player::new(config), 0)
+    }
+}
+
+/// A unit has no param a host sets while it plays: its font, polyphony, Group and device
+/// are all structure, and a change of any builds a new unit.
+impl<F: Float + SimdLanes> NodeConfig<F> for SoundFontConfig {
+    type Node = SoundFontUnit<F>;
+
+    fn build(&self, _: &HostValues) -> SoundFontUnit<F> {
+        SoundFontUnit::from(self.clone())
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        self.font == other.font
+            && self.polyphony == other.polyphony
+            && self.group == other.group
+            && self.device == other.device
+    }
+
+    fn initials(&self) -> Initials {
+        Initials::new()
     }
 }

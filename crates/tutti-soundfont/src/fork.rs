@@ -108,8 +108,9 @@ mod tests {
 
     /// A unit on preset `preset`.
     fn unit(soundfont: &Arc<SoundFont>, preset: U7) -> SoundFontUnit<f32> {
-        let mut unit = SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(soundfont)))
-            .expect("the unit builds");
+        let mut unit = SoundFontUnit::from(
+            SoundFontConfig::new(Arc::clone(soundfont)).expect("a font with a playable preset"),
+        );
         unit.program_change(MidiChannel::FIRST, preset);
         unit
     }

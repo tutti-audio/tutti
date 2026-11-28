@@ -28,12 +28,14 @@ pub(crate) struct Rig {
 impl Rig {
     /// A unit at the default settings. Its dry pair is true silence once a voice stops: the effects are not in it.
     pub(crate) fn dry(font: &Arc<SoundFont>) -> Self {
-        Self::with(SoundFontConfig::new(Arc::clone(font)))
+        Self::with(SoundFontConfig::new(Arc::clone(font)).expect("a font with a playable preset"))
     }
 
     /// A unit at the default settings, prepared by a graph at `rate`.
     pub(crate) fn dry_at(font: &Arc<SoundFont>, rate: SampleRate) -> Self {
-        let unit = SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(font))).unwrap();
+        let unit = SoundFontUnit::from(
+            SoundFontConfig::new(Arc::clone(font)).expect("a font with a playable preset"),
+        );
         Self {
             hand: Hand::at(unit, rate),
         }
@@ -41,7 +43,7 @@ impl Rig {
 
     pub(crate) fn with(config: SoundFontConfig) -> Self {
         Self {
-            hand: Hand::new(SoundFontUnit::try_from(config).unwrap()),
+            hand: Hand::new(SoundFontUnit::from(config)),
         }
     }
 

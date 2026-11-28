@@ -46,7 +46,9 @@ fn soundfont() -> Arc<SoundFont> {
 
 /// An offline stereo session with a SoundFont synth on the outputs.
 fn rig() -> (Session, NodeKey) {
-    let unit = SoundFontUnit::try_from(SoundFontConfig::new(soundfont())).expect("builds the unit");
+    let unit = SoundFontUnit::from(
+        SoundFontConfig::new(soundfont()).expect("a font with a playable preset"),
+    );
     let mut s = Session::builder()
         .sample_rate(RATE)
         .max_block(MaxBlock::of(Samples::new(128)))

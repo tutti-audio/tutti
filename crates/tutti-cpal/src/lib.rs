@@ -123,6 +123,7 @@
     )
 )]
 
+mod audio_host;
 mod driver;
 mod driver_seam;
 mod edge;
@@ -138,10 +139,11 @@ mod supported;
 #[cfg(feature = "capture")]
 mod mic;
 
+pub use audio_host::AudioHost;
 pub use driver::TuttiDriver;
 pub use driver_seam::{CpalDriver, CpalStream, PREFERRED_QUANTUM};
 pub use error::{DeviceError, Result};
-pub use host::{AudioHost, DeviceHost, DeviceSelector, available_hosts};
+pub use host::{DeviceHost, DeviceSelector, available_hosts};
 pub use listing::DeviceListing;
 pub use output::{AudioEngine, OutputConfig, Resolved};
 pub use poller::{DevicePoller, PollInterval, PollIntervalTooShort};

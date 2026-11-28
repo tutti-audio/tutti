@@ -98,6 +98,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         reason: "an FFI crate's raw types mirror a C ABI or an OS call, not an app's configuration",
     },
     ty(
+        "crates/tutti-soundfont/src/config.rs",
+        "SoundFontConfig::new",
+        CTOR,
+        "a font is playable only if one of its presets has a MIDI bank and program (SF2 2.04 section 7.2): validity of the font's contents, which `SoundFont` keeps unplayable presets alongside and cannot carry",
+    ),
+    ty(
         "crates/tutti-dsp/src/decorrelator.rs",
         "VelvetNoise::new",
         CTOR,
