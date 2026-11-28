@@ -51,7 +51,7 @@
 //! [`Doc::dotted_top`] also takes a top-level heading written `1. Alpha`. A
 //! document with `implicit_levels` may open at `1.1`, with no heading `1`.
 //!
-//! [`SMF`] (Standard MIDI Files 1.0) has no numbered headings and no `pdftotext`
+//! [`SMF`](docs::SMF) (Standard MIDI Files 1.0) has no numbered headings and no `pdftotext`
 //! layout: its sections are the named lines of [`Named`], read from the OCR text
 //! of the spec in The Complete MIDI 1.0 book, and its rows are
 //! `smf/<section>#<n>` under those names.

@@ -10,7 +10,7 @@
 //! speakers). The RIFF and `data` sizes are written as zero first and
 //! back-patched by [`finish`](FormatWriter::finish).
 //!
-//! A WAV file's sizes are 32-bit, so a file holds at most [`max_data_frames`](crate::wav_size::max_data_frames)
+//! A WAV file's sizes are 32-bit, so a file holds at most [`max_data_frames`]
 //! frames (just under 4 GiB: about 62 minutes of 8-channel 24-bit audio at
 //! 48 kHz). The write that would cross it writes the frames that fit and fails
 //! with [`EncodeError::WavTooLarge`]; [`finish`](FormatWriter::finish) then closes the file
@@ -112,7 +112,7 @@ pub(crate) struct WavWriter<W: Write + Seek> {
     header: Header,
     /// Whole frames written so far.
     frames: u64,
-    /// The frames the file may hold: [`max_data_frames`](crate::wav_size::max_data_frames), lowered by a caller.
+    /// The frames the file may hold: [`max_data_frames`], lowered by a caller.
     max_frames: u64,
     /// One block's samples as bytes, reused.
     bytes: Vec<u8>,

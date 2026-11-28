@@ -133,7 +133,7 @@ impl Speaker {
     /// Returns the surround speaker this one is exchanged with: side for back
     /// and back for side (`None` for any other speaker).
     ///
-    /// The two spellings of one set of feeds (see [`Bed::Quad`]):
+    /// The two spellings of one set of feeds (see [`Bed::Quad`](crate::Bed::Quad)):
     /// a `tutti_buffers::Fold` and an encoder's channel order both let a bed
     /// use either.
     #[must_use]
