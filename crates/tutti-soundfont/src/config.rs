@@ -96,12 +96,12 @@ impl From<Polyphony> for usize {
     }
 }
 
-/// What a [`SoundFontUnit`] is made from: the decoded SoundFont, and what differs from the
+/// What a [`SoundFontUnit`](crate::SoundFontUnit) is made from: the decoded SoundFont, and what differs from the
 /// defaults, [`polyphony`](Self::polyphony), [`group`](Self::group) and
 /// [`device`](Self::device). Convert it with `SoundFontUnit::from`, which makes the unit.
 ///
 /// A config exists only over a font with a playable preset ([`new`](Self::new) refuses
-/// another), so the unit's build cannot fail. It is a [`NodeConfig`] with no param: every
+/// another), so the unit's build cannot fail. It is a [`NodeConfig`](tutti_graph::NodeConfig) with no param: every
 /// field is structure, and a font is the same one when it is the same allocation.
 ///
 /// The rate is not here: a unit renders at the rate its graph prepares it at.
@@ -138,7 +138,7 @@ impl SoundFontConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::NoPlayablePreset`](crate::Error::NoPlayablePreset) for a font none of whose
+    /// [`Error::NoPlayablePreset`] for a font none of whose
     /// presets has a MIDI bank and program.
     pub fn new(font: impl Into<Shared<SoundFont>>) -> crate::Result<Self> {
         let font = font.into();
