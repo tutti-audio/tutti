@@ -20,7 +20,9 @@ use tutti_units::{Db, SampleRate, Samples};
 fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::SR_48K)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let dry = s.graph().add(ForkByClone(Const::mono(1.0)));
     let src = s.graph().add(ForkByClone(Const::mono(1.0)));
@@ -61,7 +63,7 @@ fn the_published_latency_shrinks_when_the_latency_bearing_node_leaves() {
     // and the figure with it.
     for _ in 0..6 {
         for _ in 0..64 {
-            s.render_frame(InterleavedMut::one_frame(&mut [0.0; 2]).unwrap());
+            s.render(&mut InterleavedMut::one_frame(&mut [0.0; 2]).unwrap());
         }
         let _ = s.update();
     }

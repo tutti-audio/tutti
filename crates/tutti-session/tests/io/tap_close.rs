@@ -1,7 +1,7 @@
-//! A tap opened and closed on a running detached session.
+//! A tap opened and closed on a running offline session.
 //!
 //! `engine.rs` covers a tap fed by a render
-//! (`a_detached_render_feeds_a_tap`, `an_offline_render_feeds_an_output_tap`)
+//! (`an_offline_render_feeds_an_output_tap`)
 //! and one closed by its reader's drop
 //! (`a_dropped_reader_leaves_the_plan_at_the_reclaim_phase`); what it does not
 //! is a tap opened after the first render and one closed by name
@@ -15,20 +15,24 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{CloseError, DetachedSession, MainOutput, OutputPort, Session};
+use tutti_session::{CloseError, MainOutput, OutputPort, Session};
 use tutti_units::{SampleRate, Samples};
 
-/// A detached one-output session playing a constant 0.25.
-fn session() -> DetachedSession {
+/// An offline one-output session playing a constant 0.25.
+fn session() -> Session {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let dc = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(dc, 0)])
         .unwrap()
         .unfaded();
+    let _ = s.update();
     s
 }
 
@@ -38,14 +42,15 @@ fn session() -> DetachedSession {
 fn opening_a_tap_yields_a_reader_that_sees_the_rendered_frames() {
     let mut s = session();
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     let mut reader = s
         .graph()
         .taps()
         .open_main_output(Samples::new(64))
         .expect("the sources exist");
+    let _ = s.update();
     for _ in 0..3 {
-        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
 
     let mut got = [f32::NAN; 8];
@@ -69,8 +74,9 @@ fn closing_the_tap_stops_the_copy() {
         .taps()
         .open_main_output(Samples::new(64))
         .expect("the sources exist");
+    let _ = s.update();
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     let id = reader.id().expect("the session named it");
     s.graph().taps().close(id).unwrap();
     assert_eq!(
@@ -78,8 +84,9 @@ fn closing_the_tap_stops_the_copy() {
         Err(CloseError::Tap(id)),
         "a closed tap is not open"
     );
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    let _ = s.update();
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
 
     let mut got = [f32::NAN; 8];
     assert_eq!(
@@ -97,7 +104,7 @@ fn closing_the_tap_stops_the_copy() {
 fn a_session_without_a_tap_renders_untouched() {
     let mut s = session();
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 0.25);
     let reader = s
         .graph()
@@ -122,13 +129,14 @@ fn a_session_taps_notified_resolves_once_a_block_renders() {
         .taps()
         .open_main_output(Samples::new(64))
         .expect("the sources exist");
+    let _ = s.update();
     let mut cx = Context::from_waker(Waker::noop());
     let mut poll = |reader: &mut tutti_graph::TapReader| {
         pin!(reader.notified().expect("a session's tap carries a bell")).poll(&mut cx)
     };
     assert_eq!(poll(&mut reader), Poll::Pending, "nothing rendered yet");
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(poll(&mut reader), Poll::Ready(()), "a block was written");
     assert_eq!(poll(&mut reader), Poll::Pending, "the ring was consumed");
 }

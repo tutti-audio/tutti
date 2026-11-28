@@ -14,7 +14,7 @@ use tutti_units::{SampleRate, Samples};
 use super::{Inert, Run as _, host};
 
 use crate::plugin::{PluginApplyError, PluginSignal};
-use crate::{AnyPlugin, DetachedSession, Key, PeerState, Saved, Session};
+use crate::{AnyPlugin, Key, PeerState, Saved, Session};
 
 fn handle() -> (PluginHandle, FakePlugin) {
     let (fake, loaded) = FakePlugin::new();
@@ -32,11 +32,14 @@ fn handle_over(control: Arc<dyn tutti_plugin_host::MainThreadControl>) -> Plugin
     )
 }
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds")
+        .outputs(ChannelLayout::STEREO)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 fn plugin() -> PluginRef {
@@ -44,7 +47,7 @@ fn plugin() -> PluginRef {
 }
 
 /// A session with a fake plugin hosted at a node.
-fn hosted() -> (DetachedSession, Key<AnyPlugin>, FakePlugin) {
+fn hosted() -> (Session, Key<AnyPlugin>, FakePlugin) {
     let mut s = session();
     let (handle, fake) = handle();
     let node = s.graph().add(ForkByClone(Const::mono(0.0)));
@@ -54,7 +57,7 @@ fn hosted() -> (DetachedSession, Key<AnyPlugin>, FakePlugin) {
 }
 
 /// How many refreshes of the parameter values wait at `node`.
-fn refreshes(s: &DetachedSession, node: Key<AnyPlugin>) -> usize {
+fn refreshes(s: &Session, node: Key<AnyPlugin>) -> usize {
     let node: NodeKey = node.erase();
     let hosted = s.graph.plugins.get(&node).expect("hosted");
     let waiting = hosted.notices.lock();
@@ -125,7 +128,7 @@ fn a_restore_applied_after_its_node_was_removed_is_gone() {
 /// Replaces the plugin at `node` with a new fake, as a crash recovery or a swap
 /// does: the record takes another handle, so the outgoing instance is not the
 /// node's.
-fn replace(s: &mut DetachedSession, node: Key<AnyPlugin>) -> FakePlugin {
+fn replace(s: &mut Session, node: Key<AnyPlugin>) -> FakePlugin {
     let (replacement, fake) = handle();
     let (controls, _) =
         PluginControls::new(Samples::new(0), PluginTail::default(), SampleRate::SR_48K);
@@ -325,7 +328,7 @@ fn a_restore_is_pending_while_a_node_drains_and_stalls_at_its_deadline() {
 
 /// A session whose fake plugin's backend answers parameter writes as `refuse`
 /// says, with the backend's cells to read and move.
-fn hosted_answering() -> (DetachedSession, Key<AnyPlugin>, Inert) {
+fn hosted_answering() -> (Session, Key<AnyPlugin>, Inert) {
     let mut s = session();
     let (_fake, loaded) = FakePlugin::new();
     let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);

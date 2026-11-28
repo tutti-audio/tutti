@@ -191,12 +191,20 @@ where
     };
     // A pump the node's rebinder runs reports through the handle's listeners too.
     client.reporting = Some(reporting.clone());
-    let (lost, midi_map, refused) = {
+    let (lost, midi_map, refused, host_edits) = {
         let mut instance = inner.lock();
         let refused = instance
             .control()
             .map_or_else(tutti_rt::tally, |control| control.refused_edits());
-        (instance.lost_latch(), instance.midi_map(), refused)
+        let host_edits = instance
+            .control()
+            .and_then(|control| control.host_edits().cloned());
+        (
+            instance.lost_latch(),
+            instance.midi_map(),
+            refused,
+            host_edits,
+        )
     };
     let backend = Arc::new(ControlBackend {
         inner: Arc::clone(&inner),
@@ -205,7 +213,9 @@ where
         reporting,
         lost,
         refused,
+        host_edits,
         format: descriptor.class.format_name(),
+        class: descriptor.class.clone(),
         work: work.clone(),
     });
 

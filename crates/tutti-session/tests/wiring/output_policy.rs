@@ -139,16 +139,6 @@ fn a_policy_that_does_not_fit_the_device_is_refused_when_set() {
     );
 }
 
-/// A session with no engine has no device to route to.
-#[test]
-fn a_detached_session_has_nothing_to_route() {
-    let s = Session::builder().build_detached(RATE).unwrap();
-    assert_eq!(
-        refused(s.set(s.policy::<OutputPolicy>().to(OutputPolicy::default()))),
-        OutputPolicyError::Detached
-    );
-}
-
 /// A mute ramps to silence over the declick length and the dim scales the
 /// rest, live, applied by `update`: the frames in between are the ramp.
 #[test]

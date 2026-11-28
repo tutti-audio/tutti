@@ -283,10 +283,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.midi.receivers_gained(&self.graph, &gained);
     }
 
-    /// [`commit`](Self::commit), a refusal pushed onto `out`: whether it sent.
+    /// [`commit`](Self::commit), a sent plan or a refusal pushed onto `out`: whether it sent.
     fn commit_reporting(&mut self, out: &mut Vec<SessionEvent>) -> bool {
         match self.commit() {
-            Committed::Sent => true,
+            Committed::Sent => {
+                out.push(SessionEvent::Committed);
+                true
+            }
             Committed::Refused(e) => {
                 if self.graph.newly_refused(&e) {
                     out.push(SessionEvent::CommitRefused(e));

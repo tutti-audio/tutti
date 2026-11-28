@@ -6,7 +6,7 @@
 //! the ~2²⁴ cliff that `Sample.loop_start` was moved to `SamplePosition` (f64)
 //! to escape — so it takes the tier the engine reserves for multi-field
 //! state: a `Publisher` cell the handle publishes to and the node reads once
-//! per block, latest wins. The cell sits in the `VoiceNodeHandle` its
+//! per block, latest wins. The cell sits in the `VoiceNodeControls` its
 //! `IntoNode` hands back.
 //!
 //! # The hazards this file exists to pin
@@ -41,7 +41,7 @@ use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, ForkTarget, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::testing::{MockTransport, block};
+use tutti_sampler::testing::{MockTransport, block, free_source};
 use tutti_sampler::{MemorySource, Playback, VoiceNode, VoiceWindow};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
@@ -58,8 +58,7 @@ fn flat_wave(len: usize) -> Arc<Wave> {
 
 /// A voice placed on the transport at `[start, start + 1)`.
 fn voice_at(start: f64) -> MemorySource<f32> {
-    MemorySource::new(flat_wave(48_000))
-        .expect("a placeable wave")
+    free_source(flat_wave(48_000))
         .placed_at(VoiceWindow::span(Beat::new(start), BeatDuration::new(1.0)))
 }
 
@@ -78,7 +77,7 @@ fn peak(node: &mut dyn tutti_graph::Node, beat: f64) -> f32 {
 }
 
 /// A graph holding `node` at key 1 on output 0, committed; its controls.
-fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle<f32>) {
+fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNodeControls<f32>) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
     ed.wire_declared_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
@@ -126,16 +125,16 @@ fn the_probe_can_tell_inside_from_outside_a_window() {
 #[test]
 fn a_queued_placement_moves_a_live_voice() {
     // Window at beat 0, playhead at 10: silent.
-    let (mut node, handle) = node_at(0.0).with_handle();
+    let (mut node, handle) = tutti_sampler::testing::controlled(node_at(0.0));
     assert!(
         peak(&mut node, 10.0) < 1e-6,
         "silent before the move — the playhead is outside the window"
     );
 
-    handle.window_cell().publish(Some(VoiceWindow::span(
-        Beat::new(10.0),
-        BeatDuration::new(1.0),
-    )));
+    handle
+        .window_cell()
+        .expect("a placed voice")
+        .publish(VoiceWindow::span(Beat::new(10.0), BeatDuration::new(1.0)));
 
     assert!(
         peak(&mut node, 10.0) > 0.5,
@@ -180,10 +179,10 @@ fn a_command_reaches_a_node_across_a_commit() {
         "still silent: nothing was sent"
     );
 
-    handle.window_cell().publish(Some(VoiceWindow::span(
-        Beat::new(10.0),
-        BeatDuration::new(1.0),
-    )));
+    handle
+        .window_cell()
+        .expect("a placed voice")
+        .publish(VoiceWindow::span(Beat::new(10.0), BeatDuration::new(1.0)));
 
     assert!(
         render_peak(&mut exec, 10.0) > 0.5,
@@ -215,10 +214,10 @@ fn a_fork_steals_no_commands() {
         .expect("a memory voice forks");
     fork.apply_pending();
 
-    handle.window_cell().publish(Some(VoiceWindow::span(
-        Beat::new(10.0),
-        BeatDuration::new(1.0),
-    )));
+    handle
+        .window_cell()
+        .expect("a placed voice")
+        .publish(VoiceWindow::span(Beat::new(10.0), BeatDuration::new(1.0)));
 
     // The fork renders first, and must take nothing.
     let _ = render_peak(&mut fork, 10.0);
@@ -260,10 +259,10 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
     let (_before_ed, mut before) = ed.fork(ForkTarget::MainOutput, prepare).expect("forks");
     before.apply_pending();
 
-    handle.window_cell().publish(Some(VoiceWindow::span(
-        Beat::new(10.0),
-        BeatDuration::new(1.0),
-    )));
+    handle
+        .window_cell()
+        .expect("a placed voice")
+        .publish(VoiceWindow::span(Beat::new(10.0), BeatDuration::new(1.0)));
 
     let (_after_ed, mut after) = ed.fork(ForkTarget::MainOutput, prepare).expect("forks");
     after.apply_pending();
@@ -286,25 +285,25 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
 /// second would sound there.
 #[test]
 fn the_latest_placement_wins() {
-    let (mut first_only, first_handle) = node_at(0.0).with_handle();
-    first_handle.window_cell().publish(Some(VoiceWindow::span(
-        Beat::new(10.0),
-        BeatDuration::new(1.0),
-    )));
+    let (mut first_only, first_handle) = tutti_sampler::testing::controlled(node_at(0.0));
+    first_handle
+        .window_cell()
+        .expect("a placed voice")
+        .publish(VoiceWindow::span(Beat::new(10.0), BeatDuration::new(1.0)));
     assert!(
         peak(&mut first_only, 10.0) > 0.5,
         "the first window alone sounds at beat 10"
     );
 
-    let (mut node, handle) = node_at(0.0).with_handle();
-    handle.window_cell().publish(Some(VoiceWindow::span(
-        Beat::new(10.0),
-        BeatDuration::new(1.0),
-    )));
-    handle.window_cell().publish(Some(VoiceWindow::span(
-        Beat::new(20.0),
-        BeatDuration::new(1.0),
-    )));
+    let (mut node, handle) = tutti_sampler::testing::controlled(node_at(0.0));
+    handle
+        .window_cell()
+        .expect("a placed voice")
+        .publish(VoiceWindow::span(Beat::new(10.0), BeatDuration::new(1.0)));
+    handle
+        .window_cell()
+        .expect("a placed voice")
+        .publish(VoiceWindow::span(Beat::new(20.0), BeatDuration::new(1.0)));
     assert!(
         peak(&mut node, 10.0) < 1e-6,
         "the first move was replaced before the block: beat 10 is outside the \
@@ -325,9 +324,7 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
     const LEN: usize = 1_024;
     let samples: Vec<f32> = (0..LEN).map(|i| i as f32 / LEN as f32).collect();
     let wave = Arc::new(Wave::from_mono(SampleRate::SR_48K, Mono::new(&samples)));
-    let source = MemorySource::new(wave)
-        .expect("a placeable wave")
-        .placed_at(VoiceWindow::from(Beat::new(0.0)));
+    let source = free_source(wave).placed_at(VoiceWindow::from(Beat::new(0.0)));
     let node = VoiceNode::with_channels(source, Playback::default(), ChannelLayout::MONO)
         .expect("a finite gain and a nonempty width");
     let (ed, _exec, handle) = graph_with(node);

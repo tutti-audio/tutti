@@ -470,6 +470,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "spawning the streamer future: the failure is the executor's (the OS refusing a thread), not a value's",
     ),
     ty(
+        "crates/tutti-sampler/src/voice/memory_source.rs",
+        "MemorySourceConfig::new",
+        CTOR,
+        "a wave's channels and the width are valid together (a channel no speaker names, a frame with no place for one): no single value's type holds it",
+    ),
+    ty(
         "crates/tutti-sampler/",
         "DiskStreamer::manual",
         CTOR,
@@ -579,7 +585,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a per-sample read, not a construction: the interpolation is the read's own kernel, chosen by the caller's bank at each call, and the line holds no mode a read could default to",
     ),
     ty("crates/tutti-graph/", "Direct", SETTER, TEST_SUPPORT),
-    ty("crates/tutti-session/", "AudioSide", SETTER, TEST_SUPPORT),
     ty(
         "crates/tutti-sampler/",
         "MockTransport",

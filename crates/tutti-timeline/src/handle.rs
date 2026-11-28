@@ -83,14 +83,7 @@ impl Transport {
     /// write the playhead. There is one claim and one place it is held (the
     /// motion machine's home), so no other half can be taken around it.
     pub fn audio(&self, sample_rate: impl Into<SampleRate>) -> Result<TransportAudio, AudioTaken> {
-        TransportAudio::take(self, sample_rate.into())
-    }
-
-    /// The links a clock over this transport shares, writer half included.
-    /// Crate-private: [`audio`](Self::audio) is the only caller, and it only
-    /// calls with the motion machine in hand.
-    pub(crate) fn links(&self) -> super::state::ClockLinks {
-        self.settings.clock_links(self.motion.seek.clone())
+        TransportAudio::take(&self.motion, &self.settings, sample_rate.into())
     }
 
     /// The device rate this transport converts musical time against: the
@@ -142,7 +135,7 @@ impl super::Timeline for Transport {
 #[cfg(test)]
 mod tests {
     use super::super::Timeline;
-    use super::super::motion::MotionCommand;
+    use super::super::command::MotionCommand;
     use super::super::motion::harness::Audio;
     use super::*;
     use tutti_units::Bpm;
@@ -198,7 +191,7 @@ mod tests {
     #[test]
     fn clock_inputs_track_live_edits() {
         let t = Transport::new(SampleRate::SR_48K);
-        let inputs = t.links();
+        let inputs = t.settings.clock_links(t.motion.seek.clone());
 
         let _ = t.motion.send(MotionCommand::locate(Beat::new(4.0)));
         Audio::of(&t.motion).drain();

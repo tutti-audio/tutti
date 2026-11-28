@@ -2,22 +2,25 @@
 //! names a key or port that does not exist fails at the call with a named
 //! error, never later at the commit and never as silence.
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DetachedSession, EventInputPort, EventOutputPort, Feeder, InputPort, MainOutput,
-    OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
+    Committed, ConnectError, EventInputPort, EventOutputPort, Feeder, InputPort, MainOutput,
+    OutputPort, ReplaceRefused, Replacement, Session, SessionEvent, SetRateError,
 };
 use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const GHOST: NodeKey = NodeKey(u64::MAX);
 
-fn detached() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(RATE)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -26,7 +29,7 @@ fn detached() -> DetachedSession {
 /// `Mix::WET` would have read as an answer.
 #[test]
 fn a_query_of_a_node_that_is_not_there_names_it() {
-    let s = detached();
+    let s = session();
     let g = s.graph_ref();
     let named = |e: tutti_session::NoSuchNode| e.node();
     assert_eq!(named(g.node_inputs(GHOST).unwrap_err()), GHOST);
@@ -41,7 +44,7 @@ fn a_query_of_a_node_that_is_not_there_names_it() {
 /// so the refusal above is the missing key and nothing else.
 #[test]
 fn a_query_of_a_node_that_is_there_answers() {
-    let mut s = detached();
+    let mut s = session();
     let through = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
@@ -57,7 +60,7 @@ fn a_query_of_a_node_that_is_there_answers() {
 /// node or port": a typo in a key is not a disconnect that found nothing.
 #[test]
 fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let g = s.graph();
 
@@ -119,25 +122,35 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
 /// fail on a later update; it is `NoSuchNode` now and nothing waits.
 #[test]
 fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
-    let mut s = detached();
-    let _side = s.graph().take_audio_side();
+    let mut s = session();
     let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
 
     let refused = s
         .graph()
         .replace(GHOST, Replacement::new(ForkByClone(Const::frame(&[2.0]))))
         .expect_err("a node that is not there");
     assert_eq!(refused, ReplaceRefused::NoSuchNode(GHOST));
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
 
-    // The node that is there waits, as before.
+    // The node that is there waits, as before, and lands once the graph resumes.
     s.graph()
         .replace(knob, Replacement::new(ForkByClone(Const::frame(&[2.0]))))
         .expect("the node is there");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
+    let mut out = [0.0f32];
+    let mut landed = false;
+    for _ in 0..16 {
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+        landed |= s
+            .update()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Replaced { .. }));
+        if landed {
+            break;
+        }
+    }
+    assert!(landed, "the replace waited, then landed");
 }
 
 /// **A tap or meter source whose port index no `u16` holds is named, not
@@ -147,7 +160,7 @@ fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
 fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     use tutti_graph::{MissingSource, TapAlign, TapOptions};
     use tutti_units::Samples;
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let far = OutputPort::new(a.erase(), 70_000);
     let refused = s
@@ -209,7 +222,7 @@ impl Node for Events {
 /// reads it. A node removed is as missing as one never added.
 #[test]
 fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let sink = g.add(ForkByClone(Events {
         inputs: 1,
@@ -249,7 +262,7 @@ fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
 /// still answers empty.
 #[test]
 fn feed_and_feeds_refuse_a_node_that_is_not_there() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let sink = g.add(ForkByClone(Events {
         inputs: 1,
@@ -266,13 +279,13 @@ fn feed_and_feeds_refuse_a_node_that_is_not_there() {
 /// node's range are accepted.
 #[test]
 fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
-    let mut s = detached();
+    let mut s = session();
     let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_48K);
-    let g = s.graph();
-    let limited = g.add(ForkByClone(Rated(rates)));
-    g.add(ForkByClone(Through::new(ChannelLayout::STEREO)));
+    let limited = s.graph().add(ForkByClone(Rated(rates)));
+    s.graph()
+        .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
 
-    let refused = g.set_sample_rate(SampleRate::SR_96K).unwrap_err();
+    let refused = s.set_sample_rate(SampleRate::SR_96K).unwrap_err();
     assert_eq!(
         refused,
         SetRateError::RateUnsupported {
@@ -281,16 +294,29 @@ fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
             rate: SampleRate::SR_96K,
         }
     );
-    assert_eq!(g.testing().prepared().sample_rate(), RATE, "unchanged");
-    assert!(!g.testing().is_repreparing(), "nothing was sent");
+    assert_eq!(s.sample_rate(), RATE, "unchanged");
+    assert_eq!(
+        s.commit(),
+        Committed::Sent,
+        "no re-prepare pends, so the adds commit"
+    );
 
     // Below the range is refused the same way, and both ends are accepted.
     assert!(matches!(
-        g.set_sample_rate(SampleRate::SR_22K05),
+        s.set_sample_rate(SampleRate::SR_22K05),
         Err(SetRateError::RateUnsupported { .. })
     ));
-    g.set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_44K1);
-    g.set_sample_rate(SampleRate::SR_48K).unwrap();
-    assert_eq!(g.testing().prepared().sample_rate(), SampleRate::SR_48K);
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.sample_rate(), SampleRate::SR_44K1);
+    // The second half of the re-prepare lands once a block has run.
+    let mut out = [0.0f32];
+    for _ in 0..16 {
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+        let _ = s.update();
+        if s.commit() != Committed::Retry {
+            break;
+        }
+    }
+    s.set_sample_rate(SampleRate::SR_48K).unwrap();
+    assert_eq!(s.sample_rate(), SampleRate::SR_48K);
 }

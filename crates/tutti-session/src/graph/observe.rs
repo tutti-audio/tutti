@@ -84,8 +84,7 @@ impl<F: Float> Taps<'_, F> {
     /// Copies `sources`, one lane each, out of the graph into a ring the
     /// returned reader drains: a tap on any ports, at any width. The tap is
     /// compiled by the next commit and fed by every block that renders after
-    /// it (a device, [`Session::render`](crate::Session::render) and
-    /// `Session::render_frame` alike).
+    /// it (a device and [`Session::render`](crate::Session::render) alike).
     /// `options` give each lane's ring capacity in frames (what the reader does
     /// not drain in time is counted, [`TapReader::take_lost`]) and the alignment.
     /// The tap rings a bell after each block it writes and when it ends, so a
@@ -310,7 +309,7 @@ impl<F: Float> Taps<'_, F> {
     /// now, and returns the new reader: it replaces the tap of the same
     /// [`id`](EventTapReader::id), so the reader it supersedes is fed no more.
     /// What the owner of a tap does after a re-prepare at another rate
-    /// ([`set_sample_rate`](Graph::set_sample_rate); a device session's restart
+    /// ([`Session::set_sample_rate`](crate::Session::set_sample_rate); a device session's restart
     /// re-rates the graph too), so that one reader's frames are always on one
     /// scale. Each owner reopens its own tap and no other (the session's
     /// hardware MIDI out reopens its own), so another owner's reader is not
@@ -338,9 +337,8 @@ impl<F: Float> Meters<'_, F> {
     /// Declares a level meter on `sources`, one channel each, any node
     /// ports, and returns its reader, **off** until
     /// [`enable`](MeterReader::enable). The meter is compiled by the next
-    /// commit and fed by every block that renders after it (a device,
-    /// [`Session::render`](crate::Session::render) and
-    /// `Session::render_frame` alike).
+    /// commit and fed by every block that renders after it (a device and
+    /// [`Session::render`](crate::Session::render) alike).
     ///
     /// A meter reads before the engine's fold to the device and its declick.
     /// It holds the peak since the last

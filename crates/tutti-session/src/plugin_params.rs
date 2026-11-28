@@ -1,5 +1,5 @@
 //! A hosted plugin's parameters as views:
-//! [`PluginParams`], [`PluginParam`] and [`ParamGesture`].
+//! [`PluginParams`] and [`PluginParam`].
 //!
 //! Every one of them borrows the session through [`Plugin`](crate::Plugin), so
 //! none can outlive what it names. The descriptors a [`PluginParams`] shows are the
@@ -51,30 +51,22 @@
 //! host does not make one per frame per parameter.
 //!
 //! What the host sets reads back at once (`normalized` answers the value just
-//! set) and is not reported as a [`PluginChange`](crate::PluginChange) unless it
-//! is made inside a [`ParamGesture`]: a gesture is what a host that records
-//! automation touches a parameter with, so the session reports the host's own
-//! begin, changes and end in the one stream with the plugin's, in order.
+//! set) and is not reported as a [`PluginChange`](crate::PluginChange): the
+//! changes a session reports are the plugin's own.
 //!
-//! The gesture is the one owned handle ([`ParamGesture`]): a drag spans frames,
-//! each of which calls `update` under `&mut Session`, so it cannot borrow. A
-//! shared gate stands in for the borrow and refuses a `set` once the plugin is
-//! gone.
-//!
-//! The gesture is the host's own. No hosted format has a call that tells a plugin
-//! the host holds a parameter (CLAP's and VST3's gesture events go from the
-//! plugin to the host, VST2 has none, AU's are notifications to listeners), so a
-//! plugin hears only the values.
+//! A drag is a [`Gesture`](crate::Gesture) over `key.param(id)`: the plugin is
+//! told the host holds the parameter where its format has a call for it (VST3's
+//! `IEditControllerHostEditing`, AU's gesture notifications), and the values
+//! follow through the one write path.
 
 use tutti_graph::NodeKey;
 
-use tutti_plugin_host::{ParamReporter, PluginHandle, PluginSignal};
-use tutti_plugin_types::{ParamEdit, ParamWriteError, ParameterInfo};
+use tutti_plugin_types::ParameterInfo;
 use tutti_rt::Mutex;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
-use crate::plugin::{Gate, HostedPlugin, Signals, queue};
+use crate::plugin::HostedPlugin;
 use crate::{PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError};
 
 /// The lane knobs of a plugin's driven parameters: where a set of one goes,
@@ -256,21 +248,6 @@ impl<'a> PluginParam<'a> {
         PluginParamTarget::declared(self.params.node, self.info())
     }
 
-    /// The write policy every format answers
-    /// ([`ParamWriteError`]), on what the
-    /// mirror holds of this parameter's declaration.
-    fn writable(&self) -> Result<(), PluginParamRefusal> {
-        use tutti_plugin_types::{ParamAccess, ParamWriteError};
-        // The mirror holds a declaration, so the policy can only refuse as
-        // read-only; any other refusal is reported as an unknown parameter.
-        ParamWriteError::check(self.id(), Some(ParamAccess::of(self.info()))).map_err(|refused| {
-            match refused {
-                ParamWriteError::ReadOnly(id) => PluginParamRefusal::ReadOnly(id),
-                other => PluginParamRefusal::UnknownParam(other.id()),
-            }
-        })
-    }
-
     /// The plugin's own text for the value now ("-6.0 dB"); `None` when the
     /// plugin (or its format) has none.
     #[must_use]
@@ -292,121 +269,5 @@ impl<'a> PluginParam<'a> {
             .hosted
             .handle
             .parameter_plain(self.id(), self.normalized())
-    }
-
-    /// Takes hold of the parameter: the session reports the host's gesture
-    /// (a [`PluginChange::GestureBegan`](crate::PluginChange::GestureBegan) now,
-    /// each [`set`](ParamGesture::set) as a
-    /// [`ParamChanged`](crate::PluginChange::ParamChanged), and a
-    /// [`GestureEnded`](crate::PluginChange::GestureEnded) when the guard
-    /// drops, a drop in the middle of a drag included).
-    ///
-    /// # Errors
-    ///
-    /// [`PluginParamRefusal::ReadOnly`]: a gesture on a parameter that cannot be
-    /// set is refused before it begins, so the guard's `set` cannot fail.
-    pub fn edit(&self) -> Result<ParamGesture, PluginParamRefusal> {
-        self.writable()?;
-        let hosted = self.params.hosted;
-        hosted.hear(ParamEdit::Begin(self.id()));
-        Ok(ParamGesture {
-            node: self.params.node,
-            id: self.id(),
-            gate: hosted.gate.clone(),
-            driven: hosted.driven.clone(),
-            handle: hosted.handle.clone(),
-            notices: std::sync::Arc::clone(&hosted.notices),
-            reporter: hosted.mirror.reporter(),
-        })
-    }
-}
-
-/// A host's hold on a parameter: made by [`PluginParam::edit`], which begins the
-/// gesture, and ended when it drops.
-///
-/// **It is the one handle that is owned, with no borrow of the session.** A drag
-/// is a mouse down, many frames each calling [`Session::update`](crate::Session::update)
-/// (which takes `&mut Session`), and a mouse up, so the guard has to live across
-/// them; the other handles stay borrowed because a stale one is then a compile
-/// error. What stands in for the borrow is a shared gate the session ends when
-/// the plugin is removed, replaced (a crossfade, a reload) or stops declaring the
-/// parameter (a rescan landed): [`set`](Self::set) then refuses with
-/// [`PluginParamRefusal::UnknownParam`] and nothing is sent, and the drop sends nothing.
-/// The notices go through the plugin's own queue, so the begin, the changes and
-/// the end are reported in the order they were made, with the plugin's.
-///
-/// There is no way to end it but to drop it, so a drag that is cut short (an
-/// early return, a panic unwinding) still lets go.
-#[must_use = "the gesture ends when this drops: keep it for as long as the hand is down"]
-#[derive(Debug)]
-pub struct ParamGesture {
-    node: NodeKey,
-    id: ParamId,
-    gate: Gate,
-    driven: Driven,
-    handle: PluginHandle,
-    notices: Signals,
-    reporter: ParamReporter,
-}
-
-impl ParamGesture {
-    /// The plugin's node.
-    #[must_use]
-    pub fn node(&self) -> NodeKey {
-        self.node
-    }
-
-    /// The parameter held.
-    #[must_use]
-    pub fn id(&self) -> ParamId {
-        self.id
-    }
-
-    /// Moves the parameter to `value`, inside the gesture: the plugin takes the
-    /// value, and the session reports a
-    /// [`ParamChanged`](crate::PluginChange::ParamChanged) for it.
-    ///
-    /// # Errors
-    ///
-    /// [`PluginParamRefusal::UnknownParam`] once the plugin was removed or replaced, or no
-    /// longer declares the parameter, including when the write finds it
-    /// undeclared; [`PluginParamRefusal::Lost`] when the plugin is lost;
-    /// [`PluginParamRefusal::Unanswered`] when it is alive and did not answer.
-    pub fn set(&self, value: Normalized) -> Result<(), PluginParamRefusal> {
-        if !self.gate.holds(self.id) {
-            return Err(PluginParamRefusal::UnknownParam(self.id));
-        }
-        if !self.driven.write(self.id, value) {
-            self.handle
-                .send_parameter(self.id, value)
-                .map_err(|refused| match refused {
-                    ParamWriteError::Undeclared(id) => PluginParamRefusal::UnknownParam(id),
-                    ParamWriteError::ReadOnly(id) => PluginParamRefusal::ReadOnly(id),
-                    ParamWriteError::Lost(id) => PluginParamRefusal::Lost(id),
-                    ParamWriteError::Unanswered(id) => PluginParamRefusal::Unanswered(id),
-                })?;
-        }
-        self.reporter.report(self.id, value);
-        queue(
-            &self.notices,
-            PluginSignal::Param(ParamEdit::change(self.id, value)),
-        );
-        Ok(())
-    }
-}
-
-impl Drop for ParamGesture {
-    fn drop(&mut self) {
-        if self.gate.holds(self.id) {
-            queue(&self.notices, PluginSignal::Param(ParamEdit::End(self.id)));
-        }
-    }
-}
-
-impl HostedPlugin {
-    /// Queues an edit the host made as if the plugin had reported it, for the
-    /// next `Phase::Plugins`'s event, in the order it was made.
-    pub(crate) fn hear(&self, edit: ParamEdit) {
-        crate::plugin::queue(&self.notices, PluginSignal::Param(edit));
     }
 }

@@ -205,8 +205,6 @@ impl<F: SessionFloat> Default for DeviceClock<F> {
 
 impl<F: SessionFloat> sealed::Sealed for Offline<F> {}
 impl<F: SessionFloat> sealed::Sealed for SystemClock<F> {}
-#[cfg(feature = "testing")]
-impl<F: SessionFloat> sealed::Sealed for Detached<F> {}
 #[cfg(feature = "device")]
 impl<F: SessionFloat> sealed::Sealed for DeviceClock<F> {}
 
@@ -215,46 +213,6 @@ impl<F: SessionFloat> sealed::Sealed for DeviceClock<F> {}
 pub struct OfflineEngine<F: SessionFloat = f32> {
     pub(crate) engine: Engine<F>,
 }
-
-/// The clock of a detached session (`SessionBuilder::build_detached`): no
-/// engine, so nothing renders blocks, and the caller renders the graph by
-/// hand (`Session::render_frame`) or takes its audio side. A test's seam.
-#[cfg(feature = "testing")]
-pub struct Detached<F: SessionFloat = f32>(PhantomData<fn() -> F>);
-
-#[cfg(feature = "testing")]
-impl<F: SessionFloat> Clone for Detached<F> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-#[cfg(feature = "testing")]
-impl<F: SessionFloat> Copy for Detached<F> {}
-
-#[cfg(feature = "testing")]
-impl<F: SessionFloat> std::fmt::Debug for Detached<F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Detached")
-    }
-}
-
-#[cfg(feature = "testing")]
-impl<F: SessionFloat> Default for Detached<F> {
-    fn default() -> Self {
-        Self(PhantomData)
-    }
-}
-
-/// A session on the detached clock: a test's, whose graph the caller renders.
-#[cfg(feature = "testing")]
-pub type DetachedSession<K = &'static str, F = f32> = crate::Session<K, Detached<F>>;
-
-/// What a detached session holds: nothing, its audio side stays with the
-/// graph.
-#[cfg(feature = "testing")]
-#[derive(Debug)]
-pub struct DetachedGraph;
 
 /// What a session on the system clock holds: the stream the timer thread runs
 /// the callback on. Dropping the session stops the thread.
@@ -340,14 +298,3 @@ impl<F: SessionFloat> sealed::Streaming for crate::device::DeviceHandle<F> {
         self.device().output_stream()
     }
 }
-
-#[cfg(feature = "testing")]
-impl<F: SessionFloat> Clock for Detached<F> {
-    type Config = ();
-    type Dates = ();
-    type Running = DetachedGraph;
-    type Float = F;
-}
-
-#[cfg(feature = "testing")]
-impl sealed::Running for DetachedGraph {}

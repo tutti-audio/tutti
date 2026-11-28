@@ -83,3 +83,8 @@ fn main() {
 #[cfg(all(feature = "export", feature = "clap"))]
 #[path = "../support/bounced.rs"]
 mod bounced;
+
+// What an `update`'s events say it sent.
+#[cfg(feature = "clap")]
+#[path = "../support/committed.rs"]
+mod committed;

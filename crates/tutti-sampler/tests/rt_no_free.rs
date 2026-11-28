@@ -10,7 +10,7 @@
 use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::loop_frames;
+use tutti_sampler::testing::{loop_frames, placed_source};
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -21,8 +21,8 @@ use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, SendError, SlotId, StreamHandle,
-    StreamStart, VoicePool,
+    DiskStreamer, DiskVoice, Manual, Playback, SendError, SlotId, StreamHandle, StreamStart,
+    VoicePool,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
@@ -87,8 +87,7 @@ fn the_add_voice_drain_frees_nothing() {
     let env = t.env(64, SampleRate::SR_48K);
     let voice = || {
         (
-            MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
+            placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0))),
             Playback {
                 stretch: StretchFactor::new(2.0),
                 ..Playback::default()
@@ -296,10 +295,7 @@ fn a_full_retirement_channel_refuses_a_remove_and_the_callback_frees_nothing() {
         SampleRate::SR_48K,
         Mono::new(&vec![0.5f32; 480]),
     ));
-    let memory = || {
-        MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave")
-    };
+    let memory = || placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
     // The pool holds 64 voices: the disk voice and 63 memory ones. Removing
     // the 63 (and one more added and removed after) puts 64 values in the
     // retirement channel, none collected.
@@ -392,10 +388,7 @@ fn a_second_handle_has_its_own_retirement_room() {
         SampleRate::SR_48K,
         Mono::new(&vec![0.5f32; 480]),
     ));
-    let memory = || {
-        MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave")
-    };
+    let memory = || placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
     let (pool, first) = VoicePool::<f32>::new().with_handle();
     first
         .add(SlotId(1), memory(), Playback::default())

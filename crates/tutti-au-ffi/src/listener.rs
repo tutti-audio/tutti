@@ -106,8 +106,7 @@ unsafe extern "C" {
     /// A host never needs this for parameter values — that is what
     /// [`AUParameterSet`] is for. It exists here solely to *emit gestures*,
     /// which is otherwise the exclusive province of a plugin's own editor; see
-    /// `emit_gesture`, the one caller, which the `testing` feature builds.
-    #[cfg(feature = "testing")]
+    /// [`AuParameterListener::emit_gesture`] and the test-only `emit_gesture`.
     fn AUEventListenerNotify(
         sending_listener: AUEventListenerRef,
         sending_object: *mut c_void,
@@ -458,6 +457,38 @@ impl AuParameterListener {
         self.add_event_type(K_AUDIO_UNIT_EVENT_PARAMETER_VALUE_CHANGE, id, address)
     }
 
+    /// Tells every listener **but this one** the host holds parameter `id`
+    /// (`begin`) or lets go of it: `AUEventListenerNotify` of
+    /// `kAudioUnitEvent_BeginParameterChangeGesture` or
+    /// `kAudioUnitEvent_EndParameterChangeGesture`, with this listener as the
+    /// sender, which the header excludes. The plugin's own view hears it; the
+    /// host's [`watch_gestures`](Self::watch_gestures) does not hear itself back
+    /// as the plugin's gesture.
+    ///
+    /// # Errors
+    /// Returns the `OSStatus` if AudioToolbox refuses.
+    pub fn emit_gesture(
+        &self,
+        id: AudioUnitParameterID,
+        address: EventAddress,
+        begin: bool,
+    ) -> Result<()> {
+        let event = AudioUnitEvent {
+            event_type: if begin {
+                K_AUDIO_UNIT_EVENT_BEGIN_PARAMETER_CHANGE_GESTURE
+            } else {
+                K_AUDIO_UNIT_EVENT_END_PARAMETER_CHANGE_GESTURE
+            },
+            argument: self.parameter(id, address),
+        };
+        // SAFETY: `event` is live for the call, `self.listener` is live for
+        // `&self`, and a null sending object is the documented "none".
+        check("AUEventListenerNotify", unsafe {
+            AUEventListenerNotify(self.listener, std::ptr::null_mut(), &event)
+        })
+        .map_err(Error::from)
+    }
+
     /// Writes a parameter and notifies every listener **but this one**
     /// (`AUParameterSet` with this listener as the sender, which the header
     /// excludes from the notification).
@@ -633,17 +664,14 @@ pub fn notify_parameter(
     .map_err(Error::from)
 }
 
-/// Emits a gesture boundary to every listener registered on `unit`.
-///
-/// Gestures originate in the *plugin's own editor* — the AU emits them when the
-/// user grabs and releases a control, and receiving them is this crate's job. A
-/// test cannot drive an editor, so this stands in for one: it exercises the
-/// whole receive path. The host itself emits no gesture.
+/// Emits a gesture boundary to every listener registered on `unit`, none
+/// excluded: a host with no listener of its own tells the unit's view it holds
+/// a parameter with it (with one, [`AuParameterListener::emit_gesture`] excludes
+/// it as the sender), and a test uses it to stand in for the plugin's own
+/// editor, which a test cannot drive.
 ///
 /// # Errors
 /// Returns the `OSStatus` if AudioToolbox refuses.
-#[cfg(feature = "testing")]
-#[doc(hidden)]
 pub fn emit_gesture(
     unit: &Unit,
     id: AudioUnitParameterID,

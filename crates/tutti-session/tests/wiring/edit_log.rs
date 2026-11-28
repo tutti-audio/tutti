@@ -3,17 +3,20 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
-use tutti_session::{ChangedBy, DetachedSession, EditLog, EditMark, Key, Session};
+use tutti_session::{ChangedBy, EditLog, EditMark, Key, Session};
 use tutti_units::{Hz, Q, SampleRate, UndoSteps};
 
-fn detached() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
-fn filter(s: &mut DetachedSession) -> Key<SvfFilterNode<f32>> {
+fn filter(s: &mut Session) -> Key<SvfFilterNode<f32>> {
     s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
@@ -29,7 +32,7 @@ fn marks(log: &mut EditLog<&'static str>) -> Vec<EditMark<&'static str>> {
 /// a batch of two targets shares one, and a single write has none.
 #[test]
 fn a_gesture_a_batch_and_a_single_write_are_one_step_each() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut log = s.edit_log().unwrap();
 
@@ -65,7 +68,7 @@ fn a_gesture_a_batch_and_a_single_write_are_one_step_each() {
 /// drain, and the first mark's `after` puts A back.
 #[test]
 fn a_late_drain_still_sees_the_values_as_they_were_at_the_landing() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut log = s.edit_log().unwrap();
     s.set(lp.cutoff().to(Hz::new(1_200.0))).unwrap();
@@ -83,7 +86,7 @@ fn a_late_drain_still_sees_the_values_as_they_were_at_the_landing() {
 /// write's `after` puts back the value before the drag, though the drag moved on.
 #[test]
 fn an_open_gesture_captures_its_targets_at_their_base() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut log = s.edit_log().unwrap();
     let mut drag = s.gesture(lp.cutoff()).unwrap();
@@ -103,7 +106,7 @@ fn an_open_gesture_captures_its_targets_at_their_base() {
 /// drop three, keep two, and the count reads 3.
 #[test]
 fn the_cap_coalesces_the_oldest_steps_and_counts_them() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut log = s.edit_log().unwrap().cap(UndoSteps::new(2));
     assert_eq!(log.coalesced(), UndoSteps::ZERO);
@@ -122,7 +125,7 @@ fn the_cap_coalesces_the_oldest_steps_and_counts_them() {
 /// its mark is the next drain's.
 #[test]
 fn a_set_inside_the_drain_loop_completes() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut log = s.edit_log().unwrap();
     s.set(lp.cutoff().to(Hz::new(1_100.0))).unwrap();
@@ -139,7 +142,7 @@ fn a_set_inside_the_drain_loop_completes() {
 /// step.
 #[test]
 fn a_restore_lands_marks_by_restore() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let saved = s.saved_values().unwrap();
     s.set((lp.cutoff().to(Hz::new(2_000.0)), lp.q().to(Q::new(2.0))))
@@ -156,7 +159,7 @@ fn a_restore_lands_marks_by_restore() {
 /// **A log sees only what lands after it is made**, and dropping it ends the recording.
 #[test]
 fn a_log_records_from_its_creation() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     s.set(lp.cutoff().to(Hz::new(1_100.0))).unwrap();
     let mut log = s.edit_log().unwrap();

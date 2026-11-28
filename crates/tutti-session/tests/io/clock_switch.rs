@@ -127,7 +127,7 @@ fn a_device_session_switches_to_the_timer_and_its_graph_keeps_rendering() {
         "the card's stream stopped"
     );
     play(&s);
-    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK)).unwrap();
+    let mut tap = s.open_heard_tap(Samples::new(4 * BLOCK));
     let mut heard = vec![0.0f32; 2 * BLOCK];
     wait_until("the constant to reach the tap", HANG_GUARD, || {
         let _ = s.update();

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tutti_buffers::Wave;
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Prepare, Renderer, TransportPosition};
-use tutti_sampler::testing::wait_for_open;
+use tutti_sampler::testing::{free_source, wait_for_open};
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, PlayDirection, Playback,
     SlotId, StreamStart, VoiceNode, VoicePool, VoiceWindow,
@@ -105,15 +105,11 @@ fn assert_plays(got: &[Vec<f64>], skip: usize, file: impl Fn(usize) -> usize, wh
 /// A memory source over the file, read as `f64`.
 fn memory(path: &Path) -> MemorySource<f64> {
     let wave = tutti_codec::read_wave::<f64>(path).expect("the file decodes");
-    MemorySource::<f64>::with_config(
-        Arc::new(wave),
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            placement: Some(VoiceWindow::from(Beat::new(0.0))),
-            ..Default::default()
-        },
+    MemorySource::<f64>::from(
+        MemorySourceConfig::new(Arc::new(wave), ChannelLayout::STEREO)
+            .expect("a stereo wave places")
+            .window(VoiceWindow::from(Beat::new(0.0))),
     )
-    .expect("a stereo wave places")
 }
 
 /// **A free-running `MemorySource<f64>` is a node of an `f64` graph and plays
@@ -123,7 +119,7 @@ fn memory(path: &Path) -> MemorySource<f64> {
 fn a_memory_source_in_an_f64_graph_plays_the_files_values_exactly() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let wave: Wave<f64> = tutti_codec::read_wave(write_file(dir.path())).expect("decodes");
-    let source = MemorySource::<f64>::new(Arc::new(wave)).expect("a stereo wave places");
+    let source = free_source::<f64>(Arc::new(wave));
     source.play();
     let (mut solo, ..) = Renderer::<f64>::alone(source, prepare());
     let out = solo.render(RENDERED);

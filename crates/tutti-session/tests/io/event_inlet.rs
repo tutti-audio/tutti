@@ -9,21 +9,29 @@
 //! added the same way, and, unlike the audio inlet, there is no rate to refuse
 //! and an export fork is accepted.
 
+#[cfg(feature = "export")]
+use crate::bounced::{bounced, first_frames};
+use crate::committed::committed;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
+#[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
 use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_graph::{Cx, EventTapOptions, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
-use tutti_session::{DetachedSession, MainOutput, OutputPort, Session, Stamp};
+use tutti_session::{MainOutput, OutputPort, Session, Stamp};
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::Losses;
 use tutti_units::{Frame, SampleRate};
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -32,10 +40,10 @@ fn note(n: u8) -> Ump {
     midi::m1_note_on(MidiChannel::FIRST, n, U7::of(100))
 }
 
-fn frames(n: usize, s: &mut DetachedSession) {
+fn frames(n: usize, s: &mut Session) {
     let mut out = [0.0f32];
     for _ in 0..n {
-        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
 }
 
@@ -125,6 +133,7 @@ impl Node for Hear {
 /// An export fork of a graph whose output is fed by an event inlet is
 /// accepted, where the audio inlet's is refused naming its key, and the fork
 /// is silent: it hears none of what the live graph is pushed.
+#[cfg(feature = "export")]
 #[test]
 fn an_export_fork_is_accepted_and_silent() {
     let mut s = session();
@@ -139,13 +148,15 @@ fn an_export_fork_is_accepted_and_silent() {
         .unfaded();
     let _ = s.update();
     writer.push(Stamp::NextBlock, note(1)).unwrap();
-    let mut fork = s.graph_ref().testing().fork_live().expect("an inlet forks");
+    let forked = bounced(&mut s, first_frames(64))
+        .expect("an inlet forks")
+        .into_main_output()
+        .to_planes();
+    assert_eq!(forked, [[0.0; 64]], "the fork hears nothing");
     let mut out = [0.0f32];
     let mut live = 0.0f32;
     for _ in 0..64 {
-        fork.tick(InterleavedMut::one_frame(&mut out).unwrap());
-        assert_eq!(out[0], 0.0, "the fork hears nothing");
-        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         live += out[0];
     }
     assert!(live > 0.0, "the live graph hears the push");
@@ -173,7 +184,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
 
     writer.push(Stamp::NextBlock, note(1)).unwrap();
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 1.0, "wired: the push is heard");
 
     assert!(
@@ -190,22 +201,20 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
         "cut at once"
     );
     let _ = s.update();
-    let cut = s.graph().testing().commits_sent();
     // Past the span an audio edge would fade over.
     for _ in 0..(2 * tutti_graph::declick_frames(SampleRate::SR_48K).get()) {
-        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
-    let _ = s.update();
     assert_eq!(
-        s.graph().testing().commits_sent(),
-        cut,
+        committed(&s.update()),
+        0,
         "no commit collects a fade that ended"
     );
 
     writer.push(Stamp::NextBlock, note(2)).unwrap();
     let mut heard = 0.0;
     for _ in 0..64 {
-        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         heard += out[0];
     }
     assert_eq!(heard, 0.0, "cut: the push reaches nothing");

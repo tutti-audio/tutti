@@ -6,10 +6,11 @@
 //!
 //! Build the probe first: `cargo build -p tutti-plugin-probe`.
 
+use crate::committed::committed;
 use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
-use tutti_buffers::PlanesMut;
+use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::{ClapProbe, ClapSwitch, Site, ThreadAnswer};
@@ -20,7 +21,7 @@ use tutti_buffers::MaxBlock;
 use tutti_plugin_db::PluginDb;
 use tutti_plugin_db::{Catalog, CatalogConfig, Hosting};
 use tutti_plugin_types::{Locator, PluginId};
-use tutti_session::{PluginChange, Session, SessionEvent};
+use tutti_session::{Committed, PluginChange, Session, SessionEvent};
 use tutti_units::{SampleRate, Samples};
 
 use crate::support::clap_probe;
@@ -513,6 +514,34 @@ impl Rebound {
         self.renders_lead() && self.channel(1).iter().all(|&v| v == 2.0)
     }
 
+    /// Updates and renders until a commit has been sent from the update that
+    /// first finds `staged`: the one that carries the successor node to the
+    /// executor and cuts the node that held the Processor.
+    fn until_commit_carries_successor(&mut self, staged: impl Fn(&Session) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let (mut seen, mut sent) = (false, 0);
+        while sent == 0 {
+            let events = self.s.update();
+            seen |= staged(&self.s);
+            if seen {
+                sent += committed(&events);
+            }
+            let _ = self.channel(0);
+            assert!(Instant::now() < deadline, "no commit carried the successor");
+            thread::yield_now();
+        }
+    }
+
+    /// Updates until the plugin renders through its node on output 0.
+    fn until_renders_lead(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !self.renders_lead() {
+            assert!(Instant::now() < deadline, "the plugin never rendered");
+            let _ = self.s.update();
+            thread::yield_now();
+        }
+    }
+
     /// The plugin renders through its node on output 0 alone, which the
     /// app's broken graph leaves wired.
     fn renders_lead(&mut self) -> bool {
@@ -629,20 +658,15 @@ fn the_predecessor_still_renders_the_plugin_while_the_commit_that_carries_its_su
             .any(|e| matches!(e, SessionEvent::CommitRefused(_))),
         "the graph cannot commit: {events:?}"
     );
-    let sent = r.s.graph_ref().testing().commits_sent();
+    let mut sent = 0;
     for round in 0..16 {
-        let _ = r.s.update();
+        sent += committed(&r.s.update());
         assert!(
             r.renders_lead(),
             "round {round}: the plugin went silent before a commit carried its successor"
         );
     }
-    assert_eq!(r.s.graph_ref().testing().commits_sent(), sent, "no commit");
-    assert_eq!(
-        r.s.graph_ref().testing().rebuild_settling(node),
-        Some(true),
-        "the rebuild waits for a commit"
-    );
+    assert_eq!(sent, 0, "no commit");
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -660,10 +684,8 @@ fn the_plugin_moves_to_its_successor_when_a_commit_succeeds() {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     r.fix_graph();
-    let _ = r.until("the Processor to reach the successor", |s| {
-        s.graph_ref().testing().rebuild_settling(node) == Some(false)
-    });
-    assert!(r.renders_lead(), "the plugin renders through the successor");
+    r.until_commit_carries_successor(|_| true);
+    r.until_renders_lead();
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -684,7 +706,6 @@ fn the_successor_is_silent_and_unreported_between_the_cut_and_the_hand_over() {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
     r.fix_graph();
-    let sent = r.s.graph_ref().testing().commits_sent();
     let mut cut = None;
     let mut rendered = None;
     for round in 0..16 {
@@ -703,7 +724,7 @@ fn the_successor_is_silent_and_unreported_between_the_cut_and_the_hand_over() {
             )),
             "round {round} reported: {events:?}"
         );
-        if cut.is_none() && r.s.graph_ref().testing().commits_sent() > sent {
+        if cut.is_none() && committed(&events) > 0 {
             cut = Some(round);
         }
         if cut.is_some() {
@@ -842,8 +863,8 @@ fn a_muted_node_stays_muted_through_a_port_change() {
 
 /// **A bypassed node's plugin changes its ports while the bypass lasts:** the
 /// parked node answers the restart's recall and the commit's relend, so the
-/// wider node is at the key, still bypassed, and holds the Processor (the
-/// rebuild stops settling).
+/// wider node is at the key, still bypassed, and holds the Processor (it renders the
+/// plugin once un-bypassed).
 fn a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor() {
     use tutti_session::{ModeTarget, NodeMode};
     let mut r = rebound(0);
@@ -851,15 +872,18 @@ fn a_bypassed_plugin_node_is_re_inserted_and_takes_its_processor() {
     r.until("a block", |s| s.graph_ref().node_outputs(node).is_ok());
     r.s.set(ModeTarget::of(node).to(NodeMode::Bypassed))
         .expect("a node can be bypassed");
+    let _ = r.s.update();
     for _ in 0..8 {
         let _ = r.channel(0);
     }
     r.change_ports(1);
-    r.until("the Processor to reach the new node", |s| {
-        s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
-            && s.graph_ref().testing().rebuild_settling(node) == Some(false)
-    });
+    r.until_commit_carries_successor(|s| s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3));
     assert_eq!(r.s.get(ModeTarget::of(node)).unwrap(), NodeMode::Bypassed);
+    // The commit cut the node that held the Processor: the plugin's tags
+    // reach the output only through a successor that holds it.
+    r.s.set(ModeTarget::of(node).to(NodeMode::Active))
+        .expect("a node can be un-bypassed");
+    r.until_renders_lead();
     r.s.close(tutti_fixtures::main_thread());
 }
 
@@ -876,8 +900,10 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
     let (catalog, _dir) = catalog();
     let mut s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
-        .build_detached(SampleRate::SR_48K)
-        .expect("a detached session builds");
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let (_, node) = s
         .load_from(
             tutti_fixtures::main_thread(),
@@ -887,20 +913,19 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
             None,
         )
         .unwrap();
-    let mut side = s.graph().take_audio_side();
-    let mut out = vec![vec![0.0; 512]; 2];
+    let mut out = vec![0.0f32; 512 * 2];
     // The plugin has its Processor in the graph before the re-prepare.
     let _ = s.update();
-    side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
-    assert!(s.graph_ref().testing().is_repreparing(), "mid re-prepare");
+    s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert_eq!(s.commit(), Committed::Retry, "mid re-prepare");
     probe().set(ClapSwitch::PortLayout, 1);
     probe().set(ClapSwitch::RequestPortsRescan, 0x24);
     let mut events = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(30);
     while s.graph_ref().node_outputs(node).is_ok_and(|n| n != 3) {
         assert!(Instant::now() < deadline, "the wider node never came");
-        side.render(512, PlanesMut::from_vecs(&mut out).unwrap());
+        s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         events.extend(s.update());
         thread::yield_now();
     }
@@ -924,14 +949,11 @@ fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
     let mut r = rebound(0);
     let node = r.node;
     r.change_ports(1);
+    // The first update that stages the wider node ends the wait. The Processor
+    // moves to it only at a later update, so it is still the old node's here.
     let _ = r.until("the wider node", |s| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
-    assert_eq!(
-        r.s.graph_ref().testing().rebuild_settling(node),
-        Some(true),
-        "the Processor has not reached the new node yet"
-    );
     // The plugin's own restart deactivated it already; what follows is the close.
     probe().thread_reset();
     assert!(!deactivation().observed);

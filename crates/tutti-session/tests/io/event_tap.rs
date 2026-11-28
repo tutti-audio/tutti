@@ -7,13 +7,14 @@
 //! the copy, a reader dropped first is closed by the `Reclaim` phase, and the
 //! taps are opened again at the graph's new rate.
 
+use crate::committed::committed;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{
-    Cx, Event, EventCapacity, EventTapOptions, Io, MissingSource, Node, Op, Prepare, Shape, Status,
+    Cx, Event, EventCapacity, EventTapOptions, Io, MissingSource, Node, Prepare, Shape, Status,
     TapAlign, TapEvent, Unforkable,
 };
-use tutti_session::{CloseError, DetachedSession, EventInputPort, EventOutputPort, Session};
+use tutti_session::{CloseError, Committed, EventInputPort, EventOutputPort, Session};
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
 
@@ -46,20 +47,37 @@ impl Node for Every4 {
     fn reset(&mut self) {}
 }
 
-fn session() -> (DetachedSession, EventOutputPort) {
+fn session() -> (Session, EventOutputPort) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let key = s.graph().add(Unforkable(Every4));
+    let _ = s.update();
     (s, key.event_output(0))
 }
 
-fn frames(n: usize, s: &mut DetachedSession) {
+fn frames(n: usize, s: &mut Session) {
     let mut out = [0.0f32];
     for _ in 0..n {
-        s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
+}
+
+/// Blocks and updates until the graph has resumed from a re-prepare: its second
+/// half lands once a block has run and an update has collected.
+fn resumed(s: &mut Session) {
+    for _ in 0..16 {
+        frames(1, s);
+        let _ = s.update();
+        if s.commit() != Committed::Retry {
+            return;
+        }
+    }
+    panic!("the graph never resumed");
 }
 
 fn drain(tap: &mut tutti_graph::EventTapReader) -> Vec<u64> {
@@ -81,17 +99,6 @@ fn drain(tap: &mut tutti_graph::EventTapReader) -> Vec<u64> {
         .collect()
 }
 
-fn tap_ops(s: &DetachedSession) -> usize {
-    s.graph_ref()
-        .testing()
-        .sent_plan()
-        .expect("a plan was sent")
-        .ops()
-        .iter()
-        .filter(|op| matches!(op, Op::EventTap { .. }))
-        .count()
-}
-
 /// The whole point of the seam: a host gets the reader from the graph and it
 /// sees the events rendered since the open, each on its frame, at the graph's
 /// rate.
@@ -108,6 +115,7 @@ fn opening_a_tap_yields_the_events_rendered_since_the_open() {
         )
         .expect("the port exists");
     assert_eq!(tap.rate(), SampleRate::SR_48K);
+    let _ = s.update();
     frames(15, &mut s);
     assert_eq!(drain(&mut tap), vec![4, 8, 12]);
     assert_eq!(tap.take_lost(), 0);
@@ -133,8 +141,7 @@ fn opening_refuses_a_port_the_graph_does_not_have() {
     );
 }
 
-/// Closing stops the copy, so a host that is done is back to a plan with no
-/// tap op.
+/// Closing stops the copy: only what rendered while the tap was open is read.
 #[test]
 fn closing_the_tap_stops_the_copy() {
     let (mut s, source) = session();
@@ -146,17 +153,17 @@ fn closing_the_tap_stops_the_copy() {
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
+    let _ = s.update();
     frames(6, &mut s);
-    assert_eq!(tap_ops(&s), 1);
     s.graph().taps().close_event(tap.id()).unwrap();
     assert_eq!(
         s.graph().taps().close_event(tap.id()),
         Err(CloseError::EventTap(tap.id())),
         "a closed event tap is not open"
     );
+    let _ = s.update();
     frames(8, &mut s);
     assert_eq!(drain(&mut tap), vec![0, 4], "only what rendered while open");
-    assert_eq!(tap_ops(&s), 0);
 }
 
 /// A tap whose reader was dropped is closed by the next `Reclaim` phase and
@@ -172,17 +179,14 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
-    let _ = s.update();
-    assert_eq!(tap_ops(&s), 1, "one op a tap while it is open");
+    assert_eq!(committed(&s.update()), 1, "the tap's plan");
     drop(tap);
-    let _ = s.update();
     assert_eq!(
-        tap_ops(&s),
-        1,
-        "the reclaim of this update closed it; the plan is the last commit's"
+        committed(&s.update()),
+        0,
+        "the reclaim of this update closed it; the plan is the next commit's"
     );
-    let _ = s.update();
-    assert_eq!(tap_ops(&s), 0, "closed");
+    assert_eq!(committed(&s.update()), 1, "the tap's op left the plan");
 }
 
 /// After the graph is re-prepared at another rate the taps are opened again:
@@ -199,14 +203,19 @@ fn reopening_replaces_the_tap_at_the_new_rate() {
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the port exists");
+    let _ = s.update();
     frames(5, &mut s);
     assert_eq!(drain(&mut old), vec![0, 4]);
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    resumed(&mut s);
+    // What the old reader heard while the graph re-prepared is not the point.
+    let _ = drain(&mut old);
     let mut new = s
         .graph()
         .taps()
         .reopen_event(old.id())
         .expect("the tap is open");
+    let _ = s.update();
     assert_eq!(new.id(), old.id());
     assert_eq!(old.rate(), SampleRate::SR_48K);
     assert_eq!(new.rate(), SampleRate::SR_44K1);
@@ -266,14 +275,17 @@ fn a_tap_of_an_event_input_hears_what_the_node_hears() {
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .expect("the input exists");
+    let _ = s.update();
     frames(16, &mut s);
     assert_eq!(drain(&mut tap), vec![0, 4, 8, 12]);
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
+    resumed(&mut s);
     let mut new = s
         .graph()
         .taps()
         .reopen_event(tap.id())
         .expect("the tap is open");
+    let _ = s.update();
     assert_eq!(new.rate(), SampleRate::SR_44K1);
     frames(8, &mut s);
     assert!(

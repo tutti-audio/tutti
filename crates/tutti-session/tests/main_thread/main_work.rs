@@ -15,7 +15,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::{MainThreadMarker, MainWork};
-use tutti_session::{DetachedSession, Session};
+use tutti_session::Session;
 use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -38,16 +38,18 @@ fn closes() -> u32 {
     count
 }
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
-        .expect("a detached session builds")
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 /// A probe plugin loaded in `session`, then removed from it and let go of by the session:
 /// what is left of it is the returned handle, so dropping that is the last release.
-fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) -> PluginHandle {
+fn loaded_and_released(session: &mut Session, main: MainThreadMarker) -> PluginHandle {
     let node = session
         .load_plugin_blocking(main, Spec::new(PluginRef::file(probe())))
         .expect("the in-process VST2 loads");
@@ -56,7 +58,7 @@ fn loaded_and_released(session: &mut DetachedSession, main: MainThreadMarker) ->
     let mut frame = [0.0f32; 2];
     for _ in 0..4 {
         let _ = session.update_on(main);
-        session.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
+        session.render(&mut InterleavedMut::one_frame(&mut frame).unwrap());
     }
     assert_eq!(session.retired_plugins(), 0, "the session let go of it");
     handle

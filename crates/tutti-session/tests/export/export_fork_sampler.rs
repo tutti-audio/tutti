@@ -15,24 +15,23 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::Interleaved;
-use tutti_buffers::{InterleavedMut, PlanesMut};
-use tutti_fixtures::WavePlanes;
+use tutti_buffers::InterleavedMut;
+use tutti_fixtures::{WavePlanes, block_on};
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_sampler::testing::wait_for_open;
+use tutti_sampler::testing::{placed_source, wait_for_open};
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, StreamHandle, StreamReader,
-    StreamStart, VoiceNode, VoiceWindow,
+    DiskStreamer, DiskVoice, Manual, Playback, StreamHandle, StreamReader, StreamStart, VoiceNode,
+    VoiceWindow,
 };
 use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session,
-    Stem, StemKey,
+    Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Range, Session, Stem, StemKey,
 };
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
-use tutti_units::{Beat, Bpm, SampleRate, Samples, Seconds};
+use tutti_units::{Beat, Bpm, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
 
@@ -52,7 +51,7 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, ToM
         .tail(BounceTail::None)
 }
 
-fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
+fn render(session: &mut Session, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
@@ -63,7 +62,7 @@ fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
 /// main output. A stem is a node the outputs hear, so the node is routed to them
 /// first: the main output is then the node alone, and the stem its own output.
 fn render_stem(
-    session: &mut DetachedSession,
+    session: &mut Session,
     bounce: Bounce<NodeKey, ToMemory>,
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
@@ -77,17 +76,14 @@ fn render_stem(
     }
 }
 
-/// A detached stereo session whose graph is at the export's rate.
-fn session() -> DetachedSession {
-    let mut session = Session::builder()
+/// An offline stereo session whose graph is at the export's rate.
+fn session() -> Session {
+    Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
-    session
-        .graph()
-        .set_sample_rate(SampleRate::of(RATE))
-        .unwrap();
-    session
+        .sample_rate(SampleRate::of(RATE))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 /// A timeline at `tempo` BPM from beat 0, at the export's rate.
@@ -124,8 +120,7 @@ fn a_node_export_follows_a_90_bpm_timeline() {
             .unwrap();
     }
     let voice = {
-        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)));
         let node = session.graph().add(source);
         session.graph().connect(node, MainOutput).unwrap();
         node
@@ -136,8 +131,7 @@ fn a_node_export_follows_a_90_bpm_timeline() {
             wave.append(Interleaved::new(&[tone(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave");
+        let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
         session.graph().add(source)
     };
 
@@ -267,8 +261,7 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
                 .unwrap();
         }
         let memory = VoiceNode::new(
-            MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
-                .expect("a placeable wave"),
+            placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(3.0))),
             Playback::default(),
         )
         .expect("a finite gain and a nonempty width");
@@ -397,53 +390,55 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
     let len = 30 * RATE as usize;
     write_ramp(&path, RATE as u32, len);
     let ((mut streamer, _stream), reader) = streamer_on(&path);
-    let live_clock = timeline(120.0);
 
     let mut session = session();
     let node = session.graph().add(disk_voice(reader, 0.0));
     session.graph().connect(node, MainOutput).unwrap();
-    session.render_frame(InterleavedMut::one_frame(&mut [0.0, 0.0]).unwrap());
-    let mut live = session.graph().take_audio_side();
+    let _ = session.update();
+    session.play().expect("room");
 
-    let (settled, done) = (AtomicBool::new(false), AtomicBool::new(false));
-    let (heard, rendered) = std::thread::scope(|s| {
+    // One block of the live session, its disk streamer stepped first.
+    let mut live_block = {
+        let mut block = vec![0.0f32; BLOCK * 2];
+        move |session: &mut Session, heard: &mut Vec<f32>| {
+            let _ = streamer.step_until_idle(64);
+            session.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+            heard.extend(block.as_chunks::<2>().0.iter().map(|frame| frame[0]));
+            assert!(heard.len() < len, "the live side ran out of file first");
+        }
+    };
+    // The export starts once the live voice has settled, so every frame it
+    // could disturb is one the assertions below check.
+    let mut heard = Vec::new();
+    while heard.len() <= SETTLED {
+        live_block(&mut session, &mut heard);
+    }
+    let job = session
+        .bounce(on(1.0, &timeline(120.0)))
+        .expect("the bounce starts");
+
+    let done = AtomicBool::new(false);
+    let rendered = std::thread::scope(|s| {
         let device = s.spawn(|| {
-            let mut heard = Vec::new();
-            let mut block = vec![vec![0.0; BLOCK]; 2];
             let mut after = 0;
             while after < 8 {
-                let _ = streamer.step_until_idle(64);
-                live.set_transport(tutti_graph::TransportPosition::new(
-                    true,
-                    Bpm::of(120.0),
-                    live_clock.beat(),
-                    None,
-                ));
-                live.render(BLOCK, PlanesMut::from_vecs(&mut block).unwrap());
-                live_clock.advance(Samples::new(BLOCK));
-                heard.extend_from_slice(&block[0]);
-                assert!(heard.len() < len, "the live side ran out of file first");
-                if heard.len() > SETTLED {
-                    settled.store(true, Ordering::Release);
-                }
+                live_block(&mut session, &mut heard);
                 if done.load(Ordering::Acquire) {
                     after += 1;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
-            heard
         });
-        // The export starts once the live voice has settled, so every
-        // frame it could disturb is one the assertions below check.
-        tutti_fixtures::wait_until(
-            "the live voice to settle",
-            tutti_fixtures::HANG_GUARD,
-            || settled.load(Ordering::Acquire),
-        );
-        let rendered = render(&mut session, on(1.0, &timeline(120.0)));
+        let rendered = block_on(job);
         done.store(true, Ordering::Release);
-        (device.join().expect("the live side"), rendered)
+        device.join().expect("the live side");
+        rendered
     });
+    let rendered = session
+        .apply(rendered)
+        .expect("the render applies")
+        .into_main_output()
+        .to_planes();
 
     let first = frame_of(heard[SETTLED]);
     assert!(first >= 0, "the live voice is playing by frame {SETTLED}");

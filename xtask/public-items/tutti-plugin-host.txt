@@ -19,6 +19,7 @@ fn control_handle::PluginHandle::close_editor
 fn control_handle::PluginHandle::current_preset
 fn control_handle::PluginHandle::descriptor
 fn control_handle::PluginHandle::dropped_parameter_events
+fn control_handle::PluginHandle::edit
 fn control_handle::PluginHandle::editor_capabilities
 fn control_handle::PluginHandle::editor_idle
 fn control_handle::PluginHandle::editor_key

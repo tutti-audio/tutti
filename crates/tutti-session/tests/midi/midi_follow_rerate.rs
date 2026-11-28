@@ -6,6 +6,7 @@
 //! ten-nanosecond units per quarter note (M2-104 7.5.3), 24 Timing Clocks make a quarter
 //! note (M1 p.30), and an MMC PLAY (RP-013 p.20, `02`) rolls the transport.
 
+use crate::committed::committed;
 use crate::common::OpenPorts as _;
 use crate::common::{Keyed, blocks};
 use std::time::Duration;
@@ -143,7 +144,7 @@ fn a_follower_hears_its_source_after_a_re_rate() {
         let (mut s, fake) = rig();
         (follower.follow)(&mut s);
         let _ = s.update();
-        s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+        s.set_sample_rate(SampleRate::SR_44K1).unwrap();
         // The re-prepare's second half lands on a render, then the commit.
         // The old reader ends when its tap is re-opened; the follower does not.
         let mut all = update_events(&mut s);
@@ -186,19 +187,18 @@ fn a_follower_whose_input_is_gone_commits_nothing() {
         let input = s.input();
         let _ = s.remove(input);
         let _ = s.update();
-        s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+        s.set_sample_rate(SampleRate::SR_44K1).unwrap();
         for _ in 0..4 {
             let _ = s.update();
             blocks(&mut s, 8);
         }
-        let settled = s.graph_ref().testing().commits_sent();
+        let mut commits = 0;
         for _ in 0..5 {
-            let _ = s.update();
+            commits += committed(&s.update());
             blocks(&mut s, 1);
         }
         assert_eq!(
-            s.graph_ref().testing().commits_sent(),
-            settled,
+            commits, 0,
             "{} edited the graph after its input went",
             follower.name
         );

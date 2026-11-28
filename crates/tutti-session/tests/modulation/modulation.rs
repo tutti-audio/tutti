@@ -5,6 +5,7 @@
 //! sine on the control grid, a follower's closed form), never on a
 //! reference render. The probe nodes are `tests/common/probe.rs`'s.
 
+use crate::committed::committed;
 use crate::common;
 use crate::offline::offline_48k;
 
@@ -385,8 +386,8 @@ impl tutti_graph::Node for Late {
 /// alone on output 0. The apply binds the lane to the probe's staged cells, so
 /// the one commit sends the probe, the follower and the lane: that plan has
 /// `LATE` frames on output 0 (the follower's path in front of the probe's
-/// param port), and the session publishes them, the total and the per-channel
-/// figures, before the update returns. Exactly one plan is sent.
+/// param port), and the session publishes its total before the update
+/// returns. Exactly one plan is sent.
 #[test]
 fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
     let mut s = offline_48k();
@@ -397,7 +398,6 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
         Samples::new(0),
         "precondition: nothing latent out"
     );
-    let plans = s.graph_ref().testing().commits_sent();
 
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
@@ -411,23 +411,10 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
     m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
         .unwrap();
 
-    let _ = s.update();
+    let events = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "the lane is built");
-    assert_eq!(
-        s.graph_ref().testing().commits_sent(),
-        plans + 1,
-        "one plan for the node and its lane"
-    );
+    assert_eq!(committed(&events), 1, "one plan for the node and its lane");
     assert_eq!(s.latency(), Samples::new(LATE), "the plan's latency");
-    assert_eq!(
-        s.compensation().to_vec().as_slice(),
-        s.graph_ref()
-            .testing()
-            .sent_compensation()
-            .expect("a plan was sent")
-            .channels(),
-        "and its per-channel figures"
-    );
 }
 
 /// **The update frees a lane's program a block held across its
@@ -547,23 +534,21 @@ fn a_steady_update_sends_nothing_and_publishes_nothing() {
         .unwrap();
     settle(&mut s);
     let read = |s: &Session| {
-        (
-            s.graph_ref().testing().commits_sent(),
-            s.mod_state()
-                .lane(cutoff.key())
-                .expect("a lane")
-                .1
-                .program(),
-        )
+        s.mod_state()
+            .lane(cutoff.key())
+            .expect("a lane")
+            .1
+            .program()
     };
-    let steady = |s: &mut Session, (plans, program): &(u64, std::sync::Arc<_>)| {
+    let steady = |s: &mut Session, program: &std::sync::Arc<_>| {
         for _ in 0..8 {
             let events = s.update();
-            assert!(events.is_empty(), "nothing to report: {events:?}");
-            let now = read(s);
-            assert_eq!(now.0, *plans, "no plan was sent");
             assert!(
-                std::sync::Arc::ptr_eq(&now.1, program),
+                events.is_empty(),
+                "no plan was sent, and nothing to report: {events:?}"
+            );
+            assert!(
+                std::sync::Arc::ptr_eq(&read(s), program),
                 "no program was published"
             );
         }
@@ -575,15 +560,15 @@ fn a_steady_update_sends_nothing_and_publishes_nothing() {
     let follower = m.follower(Follower::default(), other);
     m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.25)))
         .unwrap();
-    let _ = s.update();
+    let events = s.update();
     let applied = read(&s);
     assert_eq!(
-        applied.0,
-        before.0 + 1,
+        committed(&events),
+        1,
         "the follower's node and edge were committed"
     );
     assert!(
-        !std::sync::Arc::ptr_eq(&applied.1, &before.1),
+        !std::sync::Arc::ptr_eq(&applied, &before),
         "and the lane's program published"
     );
     steady(&mut s, &applied);

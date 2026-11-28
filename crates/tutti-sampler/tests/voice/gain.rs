@@ -107,15 +107,11 @@ fn dc_wave(len: usize) -> Arc<Wave> {
 /// A placed voice in a pool at `play_gain`, plus the clock driving it.
 fn pool_at_gain(play_gain: f64) -> (VoicePool<f32>, Arc<Clock>) {
     let clock = Clock::new();
-    let source = MemorySource::with_config(
-        dc_wave(SR as usize),
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            placement: Some(tutti_sampler::VoiceWindow::default()),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let source = MemorySource::from(
+        MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
+            .expect("a placeable wave")
+            .window(tutti_sampler::VoiceWindow::default()),
+    );
 
     let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
     pool.insert(
@@ -185,17 +181,13 @@ fn voice_gain_scales_the_output_by_exactly_its_value() {
 #[test]
 fn a_pooled_voice_applies_playback_gain_and_not_the_sources_own() {
     let clock = Clock::new();
-    let source = MemorySource::with_config(
-        dc_wave(SR as usize),
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            placement: Some(tutti_sampler::VoiceWindow::default()),
+    let source = MemorySource::from(
+        MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
+            .expect("a placeable wave")
+            .window(tutti_sampler::VoiceWindow::default())
             // Deliberately NOT 1.0 and NOT equal to the playback gain below.
-            gain: Amplitude::new(0.25),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+            .gain(Amplitude::new(0.25)),
+    );
 
     let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
     pool.insert(
@@ -278,15 +270,11 @@ fn gain_above_unity_amplifies() {
 #[test]
 fn gain_scales_every_channel_equally() {
     let clock = Clock::new();
-    let source = MemorySource::with_config(
-        dc_wave(SR as usize),
-        MemorySourceConfig {
-            channels: ChannelLayout::STEREO,
-            placement: Some(tutti_sampler::VoiceWindow::default()),
-            ..Default::default()
-        },
-    )
-    .expect("a placeable wave");
+    let source = MemorySource::from(
+        MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
+            .expect("a placeable wave")
+            .window(tutti_sampler::VoiceWindow::default()),
+    );
     let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
     pool.insert(
         SlotId(1),
@@ -325,15 +313,11 @@ fn gain_scales_every_channel_equally() {
 #[test]
 fn a_bare_memory_source_applies_its_own_gain() {
     for g in [1.0f64, 0.5, 0.25] {
-        let mut source = MemorySource::with_config(
-            dc_wave(SR as usize),
-            MemorySourceConfig {
-                channels: ChannelLayout::STEREO,
-                gain: Amplitude::new(g),
-                ..Default::default()
-            },
-        )
-        .expect("a placeable wave");
+        let mut source = MemorySource::from(
+            MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
+                .expect("a placeable wave")
+                .gain(Amplitude::new(g)),
+        );
         source.trigger_at(SamplePosition::new(0.0));
         source.play();
 
@@ -360,15 +344,11 @@ fn two_half_gain_voices_sum_to_one_full_gain_voice() {
     let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
 
     for id in [1u128, 2] {
-        let source = MemorySource::with_config(
-            dc_wave(SR as usize),
-            MemorySourceConfig {
-                channels: ChannelLayout::STEREO,
-                placement: Some(tutti_sampler::VoiceWindow::default()),
-                ..Default::default()
-            },
-        )
-        .expect("a placeable wave");
+        let source = MemorySource::from(
+            MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
+                .expect("a placeable wave")
+                .window(tutti_sampler::VoiceWindow::default()),
+        );
         pool.insert(
             SlotId(id),
             source,

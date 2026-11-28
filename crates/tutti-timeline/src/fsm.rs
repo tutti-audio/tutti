@@ -4,7 +4,7 @@
 //! machine that decides transitions, and `TransitionResult` is what it hands
 //! back for the engine's `MotionAudio` to publish.
 
-use super::motion::{AfterLocate, FadeOut, MotionCommand};
+use super::command::{AfterLocate, FadeOut, MotionCommand};
 use tutti_units::Beat;
 
 /// What the transport is doing.

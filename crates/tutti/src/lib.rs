@@ -22,7 +22,7 @@
 //! ```rust
 //! use tutti::modulation::LfoShape;
 //! use tutti::nodes::{LfoConfig, LfoNode};
-//! use tutti::{ChannelLayout, Hz, InterleavedMut, MainOutput, SampleRate, Session};
+//! use tutti::{ChannelLayout, Hz, InterleavedMut, MainOutput, SampleRate, Session, SessionEvent};
 //!
 //! let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build().expect("a session builds");
 //!
@@ -34,8 +34,9 @@
 //! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
-//! // reports a fault or a dropout as an event.
-//! assert!(session.update().is_empty(), "the commit raised no event");
+//! // reports the plan it sent, and a fault or a dropout, as events.
+//! let events = session.update();
+//! assert!(matches!(events.as_slice(), [SessionEvent::Committed]), "one plan sent");
 //!
 //! // One interleaved stereo block.
 //! let mut out = vec![0.0f32; 256 * 2];
@@ -239,7 +240,7 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,
-    SavedValues, Watchable, Watcher,
+    IntoWatched, SavedValues, Watchable, Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -573,8 +574,8 @@ pub mod session {
         MainOutputTopologyStatus, MainSink, Meters, NotReopened, Outlet, OutputPlacement,
         OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent, PeerResourceId,
         Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError, Reopened,
-        ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError, SetRateError,
-        SetSources, Taps, Weighted, Wire, main_output_width,
+        ReplaceRefused, Replacement, Resource, ResourceFact, SetRateError, SetSources, Taps,
+        Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
@@ -634,9 +635,9 @@ pub mod session {
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
-        Editor, EditorCallError, GiveUp, HangPolicy, ParamGesture, PluginCause, PluginParam,
-        PluginPorts, PortsRefusal, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure,
-        RecoveryPolicy, ReloadCause, StateRestore, StateView,
+        Editor, EditorCallError, GiveUp, HangPolicy, PluginCause, PluginParam, PluginPorts,
+        PortsRefusal, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy,
+        ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};
@@ -678,15 +679,15 @@ pub mod codec {
 #[cfg(feature = "sampler")]
 pub mod sampler {
     pub use tutti_sampler::{
-        Block, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart, SamplerFloat,
-        StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
-        StreamStatus, VoiceNodeHandle,
+        Block, FreeRunning, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart,
+        SamplerFloat, StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader,
+        StreamStart, StreamStatus, VoiceNodeControls,
     };
     pub use tutti_sampler::{DirectionKind, LoopingKind, SpeedKind, WindowKind};
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
-        ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
-        SlotId, StreamerStartError, StreamingAddError, VoiceNodeError, VoiceWindow,
+        ControlCell, GainError, Loop, LoopError, PlaceError, Playback, SendError, SlotId,
+        StreamerStartError, StreamingAddError, VoiceNodeError, VoiceWindow,
     };
     #[cfg(any(
         feature = "decode-wav",
@@ -855,12 +856,13 @@ pub mod plugin {
     pub use tutti_plugin_types::features::{FeatureReport, Features};
     pub use tutti_plugin_types::{
         AuComponentType, AutomationModeError, Axis, BridgeLosses, ChunkOutcomes, ClapFeature,
-        ContentScale, ControlRole, EditorPresence, EmptyVersionText, Helper, InvalidContentScale,
-        IpcError, IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange, Locator, Measured,
-        NotChecked, ParamFlags, ParamSteps, ParamUnit, ParameterInfo, PipelineCounts, PlainMap,
-        PlainUnit, PluginClass, PluginError, PluginFormat, PluginParamRange, PluginTooWide,
-        PluginVersion, ProbeConfig, ServerLosses, StateError, StateHash, TailVerdict,
-        UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
+        ContentScale, ControlRole, EditOutcome, EditorPresence, EmptyVersionText, Helper,
+        InvalidContentScale, IpcError, IpcResult, KeyEvent, KeyUse, LatencyVerdict, LinearRange,
+        Locator, Measured, NotChecked, ParamFlags, ParamRole, ParamSteps, ParamUnit, ParameterInfo,
+        PipelineCounts, PlainMap, PlainUnit, PluginClass, PluginError, PluginFormat,
+        PluginParamRange, PluginTooWide, PluginVersion, ProbeConfig, ServerLosses, StateError,
+        StateHash, TailVerdict, UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType,
+        Vst3SubCategories,
     };
     pub use tutti_plugin_types::{
         AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, MidiAssignment, MidiSource,

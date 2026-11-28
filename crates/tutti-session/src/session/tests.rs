@@ -22,7 +22,10 @@ use crate::Session;
 fn an_update_frees_what_a_block_held_across_a_replacement() {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
         .expect("builds");
     let _ = s.update();
 
@@ -67,10 +70,13 @@ fn an_update_with_no_edit_publishes_no_compensation_table() {
     assert_eq!(s.compensation().to_vec(), sentinel, "no table published");
 }
 
-fn detached() -> Session<&'static str, crate::Detached> {
+fn detached() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -101,10 +107,10 @@ fn a_slot_written_twice_before_an_update_publishes_once_with_the_second_value() 
 }
 
 /// **A read after a write and before the update answers the pending value,
-/// and the audio side still reads the one in force**: a reader's lend shows
+/// and the audio thread still reads the one in force**: a reader's lend shows
 /// the old meter and tempo until the update publishes.
 #[test]
-fn a_read_before_the_update_is_the_pending_value_and_the_audio_side_reads_the_old_one() {
+fn a_read_before_the_update_is_the_pending_value_and_the_audio_thread_reads_the_old_one() {
     let mut s = detached();
     let _ = s.update();
     let mut meters = s.transport.settings().project_meter().reader();
@@ -172,7 +178,10 @@ fn a_batch_of_tempo_and_meter_lands_in_one_update() {
 fn an_update_frees_the_mpe_mode_a_block_held_across_a_replacement() {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(crate::BlockDates::Frames)
+        .build()
         .expect("builds");
     let _ = s.update();
     let cell = s.midi.state.mpe().clone();

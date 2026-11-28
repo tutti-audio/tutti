@@ -220,6 +220,11 @@
 //! the end over the duration, `aux` takes the end value at the start, and a
 //! later parameter point on `level` cancels the ramp.
 //!
+//! A host gesture the VST3 controller was told is an event of kind 13
+//! (`beginEditFromHost`), 14 (a `setParamNormalized` of `helper`) or 15
+//! (`endEditFromHost`): its `id` is the parameter, its `value` the value (0 for
+//! 13 and 15), at offset 0, in the order the calls came.
+//!
 //! An event is `kind << 32 | offset` (u64; kind 1 parameter, 2 note on, 3 note
 //! off, 4 control change, 5 data event, 6 null parameter list, 7 flush), the
 //! parameter id, key or controller number (u64; a data event's first byte, 0
@@ -259,6 +264,10 @@ pub const BYPASS: u32 = 5;
 /// a host loads a program by writing it. It is not in [`Core::param`]'s set; the
 /// program is [`Core::program`].
 pub const PROGRAM: u32 = 6;
+/// The helper parameter only VST3 lists: not automatable, not read-only, not
+/// hidden, so a host's edit of it from outside the plugin is bracketed by
+/// `IEditControllerHostEditing`. It holds a value and does nothing with it.
+pub const HELPER: u32 = 7;
 /// The module CLAP puts `aux` in: the path of the `Filter` unit VST3 puts it in
 /// ("Voices" > `Oscillator` > `Filter`).
 pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
@@ -288,14 +297,17 @@ pub const PARAMS: u32 = 5;
 pub const LISTED_IDS: [u32; 6] = [LEVEL, AUX, MODE, TONE, METER, BYPASS];
 /// Number of parameters CLAP lists.
 pub const LISTED: u32 = LISTED_IDS.len() as u32;
-/// The ids VST3 lists, in list order: [`LISTED_IDS`] and [`PROGRAM`].
-pub const VST3_LISTED_IDS: [u32; 7] = [LEVEL, AUX, MODE, TONE, METER, BYPASS, PROGRAM];
+/// The ids VST3 lists, in list order: [`LISTED_IDS`], [`PROGRAM`] and
+/// [`HELPER`].
+pub const VST3_LISTED_IDS: [u32; 8] = [LEVEL, AUX, MODE, TONE, METER, BYPASS, PROGRAM, HELPER];
 /// The keys the plugin names, `(key, name)`: a drum kit's two pads.
 pub const NOTE_NAMES: [(u8, &str); 2] = [(36, "Kick"), (38, "Snare")];
 /// Parameter short names, by id, where the format has one.
-pub const SHORT_NAMES: [&str; 7] = ["lvl", "aux", "mod", "tne", "mtr", "byp", "prg"];
+pub const SHORT_NAMES: [&str; 8] = ["lvl", "aux", "mod", "tne", "mtr", "byp", "prg", "hlp"];
 /// Parameter names, by id.
-pub const NAMES: [&str; 7] = ["level", "aux", "mode", "tone", "meter", "bypass", "program"];
+pub const NAMES: [&str; 8] = [
+    "level", "aux", "mode", "tone", "meter", "bypass", "program", "helper",
+];
 /// The plain value of `TONE` at its normalized minimum, its largest.
 pub const TONE_PLAIN_MAX: f64 = 20_000.0;
 /// The plain value of `TONE` at its normalized maximum, its smallest.
@@ -439,6 +451,7 @@ pub fn default_of(id: u32) -> Option<f64> {
         TONE => Some(0.5),
         METER => Some(0.0),
         BYPASS => Some(0.0),
+        HELPER => Some(0.0),
         _ => None,
     }
 }
@@ -451,6 +464,17 @@ pub fn mode_of(value: f64) -> u32 {
 /// A state blob the plugin refuses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BadState;
+
+/// A step of a host gesture ([`Core::log_host_edit`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HostEdit {
+    /// `beginEditFromHost`.
+    Begin,
+    /// A controller value written between the two.
+    Value,
+    /// `endEditFromHost`.
+    End,
+}
 
 /// What the host sent inside a block.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -599,6 +623,7 @@ pub struct Core {
     aux: AtomicU64,
     tone: AtomicU64,
     bypass: AtomicU64,
+    helper: AtomicU64,
     program: AtomicU32,
     mode: AtomicU32,
     fault: AtomicU32,
@@ -736,6 +761,7 @@ impl Core {
             aux: AtomicU64::new(0.25f64.to_bits()),
             tone: AtomicU64::new(0.5f64.to_bits()),
             bypass: AtomicU64::new(0),
+            helper: AtomicU64::new(0),
             program: AtomicU32::new(0),
             mode: z(),
             fault: z(),
@@ -802,6 +828,7 @@ impl Core {
             AUX => Some(f64::from_bits(self.aux.load(Relaxed))),
             TONE => Some(f64::from_bits(self.tone.load(Relaxed))),
             BYPASS => Some(f64::from_bits(self.bypass.load(Relaxed))),
+            HELPER => Some(f64::from_bits(self.helper.load(Relaxed))),
             MODE => Some(f64::from(self.mode.load(Relaxed)) / f64::from(MODES - 1)),
             METER => Some(0.0),
             _ => None,
@@ -845,6 +872,7 @@ impl Core {
             AUX => self.aux.store(v.to_bits(), Relaxed),
             TONE => self.tone.store(v.to_bits(), Relaxed),
             BYPASS => self.bypass.store(v.to_bits(), Relaxed),
+            HELPER => self.helper.store(v.to_bits(), Relaxed),
             MODE => self.mode.store(mode_of(v), Relaxed),
             _ => {}
         }
@@ -964,6 +992,22 @@ impl Core {
     /// thread while blocks run can lose an entry.
     pub fn log_set_param(&self, id: u32, value: f64) {
         self.log(1, 0, id, value);
+    }
+
+    /// Records a step of a host gesture the controller was told, in arrival
+    /// order and before anything is applied: kind 13 `beginEditFromHost`, 14 a
+    /// `setParamNormalized` of the helper parameter, 15 `endEditFromHost`.
+    pub fn log_host_edit(&self, step: HostEdit, id: u32, value: f64) {
+        self.log(
+            match step {
+                HostEdit::Begin => 13,
+                HostEdit::Value => 14,
+                HostEdit::End => 15,
+            },
+            0,
+            id,
+            value,
+        );
     }
 
     /// Records a key the host forwarded to the editor: `down` is a press, `character`

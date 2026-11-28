@@ -1,5 +1,6 @@
-use crate::error::{FromBeatsError, TempoError};
+use crate::error::FromBeatsError;
 use crate::map::TempoMap;
+use crate::point::TempoPoint;
 use alloc::vec::Vec;
 use tutti_units::{Beat, Bpm, BpmOutOfRange, SampleRate, Samples};
 
@@ -49,14 +50,11 @@ impl TempoMap {
                 Bpm::new(bpm).ok_or(FromBeatsError::Tempo(BpmOutOfRange(bpm)))
             })
             .collect::<Result<Vec<Bpm>, _>>()?;
-        let mut tempi = tempi.into_iter();
-        let first = tempi.next().ok_or(TempoError::Empty)?;
-        let map = tempi
+        let points = tempi
+            .into_iter()
             .enumerate()
-            .fold(Self::builder(first), |builder, (i, tempo)| {
-                builder.step_to(Beat::new((i + 1) as f64), tempo)
-            })
-            .build()?;
-        Ok(map)
+            .map(|(i, tempo)| TempoPoint::step(Beat::new(i as f64), tempo))
+            .collect::<Vec<_>>();
+        Ok(Self::new(points)?)
     }
 }

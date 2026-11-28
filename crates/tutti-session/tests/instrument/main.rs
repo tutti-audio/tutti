@@ -20,3 +20,7 @@ mod loading;
 mod refusal;
 mod soundfont;
 mod soundfont_rates;
+
+// Starts a bounce, awaits its render and applies it.
+#[path = "../support/bounced.rs"]
+mod bounced;

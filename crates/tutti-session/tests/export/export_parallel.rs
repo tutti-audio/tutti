@@ -125,7 +125,9 @@ fn export(workers: Workers) -> (Wave, usize) {
 fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Wave>, usize) {
     let mut session = Session::builder()
         .render_workers(workers)
-        .build_detached(RATE)
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .unwrap();
     let threads = Threads::new(HashSet::with_capacity(64));
     let sum = session.graph().add(ForkByClone(Sum));

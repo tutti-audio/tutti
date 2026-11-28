@@ -57,8 +57,6 @@ pub use component::{ComponentKey, ComponentRef, NotRegistered};
 pub use editor::AuEditor;
 pub use error::{Error, OsError, Result, check};
 pub use event_list::{EventList, Pushed, Wire, event_list_available};
-#[cfg(feature = "testing")]
-#[doc(hidden)]
 pub use listener::emit_gesture;
 pub use listener::{
     AuEvent, AuParameterListener, EventAddress, notify_all_parameters, notify_parameter,

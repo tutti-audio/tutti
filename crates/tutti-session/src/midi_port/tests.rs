@@ -165,7 +165,7 @@ fn a_never_opened_output_re_rated_before_its_open_stamps_at_the_new_rate() {
     let opened = ready(s.open_midi_output(synth).expect("begins"));
     let _out = s.apply(opened).expect("opens with no device");
     let _ = s.update();
-    s.graph().set_sample_rate(SampleRate::of(31_250.0)).unwrap();
+    s.set_sample_rate(SampleRate::of(31_250.0)).unwrap();
     let _ = s.update();
     render(&mut s, 8);
     let _ = s.update();

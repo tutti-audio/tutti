@@ -16,7 +16,7 @@ use tutti_nodes::testing::Const;
 #[cfg(feature = "export")]
 use tutti_session::ToMemory;
 use tutti_session::{
-    Committed, Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
+    Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
 };
 use tutti_units::{SampleRate, Samples};
 
@@ -236,7 +236,7 @@ fn a_refusal_is_a_status_not_a_log_line() {
 }
 
 /// A builder's declaration is in force after updates, and declaring the same
-/// topology again changes nothing (no edit, so no commit).
+/// topology again changes nothing.
 ///
 /// The equal-request early return in `declare_main_output_topology` is
 /// not observable here (the graph and engine ignore an equal declaration
@@ -245,12 +245,10 @@ fn a_refusal_is_a_status_not_a_log_line() {
 fn declaring_the_same_topology_again_changes_nothing() {
     let mut s = offline(Session::builder().main_output_topology(buses(4)), 6).unwrap();
     let _ = s.update();
-    let sent = s.graph_ref().testing().commits_sent();
     s.declare_main_output_topology(buses(4)).unwrap();
     let _ = s.update();
     let _ = s.update();
     assert_eq!(s.main_output_topology(), &buses(4));
-    assert_eq!(s.graph_ref().testing().commits_sent(), sent);
     assert_eq!(
         s.main_output_topology_status(),
         MainOutputTopologyStatus::Applied
@@ -264,7 +262,7 @@ fn declaring_the_same_topology_again_changes_nothing() {
 fn an_export_is_placed_from_the_declaration() {
     use crate::bounced::bounced;
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
-    let planes = |s: &mut tutti_session::DetachedSession| {
+    let planes = |s: &mut tutti_session::Session| {
         let request = Bounce::new()
             .main_output(
                 ToMemory::new().channels(tutti_buffers::ChannelSet::default_for(
@@ -286,7 +284,10 @@ fn an_export_is_placed_from_the_declaration() {
     };
     let mut declared = Session::builder()
         .main_output_topology(buses(4))
-        .build_detached(RATE)
+        .outputs(ChannelLayout::from(6u16))
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .unwrap();
     feed(&mut declared, &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(planes(&mut declared), [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]);
@@ -308,7 +309,11 @@ fn a_bounced_file_is_stated_only_when_its_speakers_are_named() {
     use tutti_session::{Bounce, BounceTail, Range};
     let dir = tempfile::tempdir().expect("dir");
     let placement = |name: &str, topology: Option<ChannelTopology>| {
-        let mut session = Session::builder().build_detached(RATE).unwrap();
+        let mut session = Session::builder()
+            .sample_rate(RATE)
+            .block_dates(tutti_session::BlockDates::Frames)
+            .build()
+            .unwrap();
         feed(&mut session, &[0.1, 0.2]);
         let format = Format::Wav(Pcm::Float(FloatWidth::F32));
         let encoding = match topology {
@@ -365,9 +370,6 @@ fn the_output_device_reads_stated_or_default() {
     let placed = stated.output_device().unwrap();
     assert_eq!(placed.placement, Placement::Stated);
     assert_eq!(placed.channels, tutti_buffers::ChannelSet::from(wired));
-
-    let detached = Session::builder().build_detached(RATE).unwrap();
-    assert_eq!(detached.output_device(), None, "no engine, no device");
 }
 
 /// A stated device is folded into by speaker: a stereo project into a device
@@ -416,14 +418,31 @@ fn a_main_output_declared_after_the_build_folds_from_the_plan_that_carries_it() 
     assert_eq!(heard(&mut s, 6), [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]);
 }
 
-/// A session with no engine places nothing: with no device to fold into, a
-/// commit of any width is sent, since no block is ever folded.
+/// **No offline session has a main output of no channels**: a build declared
+/// empty, and a declaration of an empty main output after it, are refused by
+/// name, and so is a device of no channels.
 #[test]
-fn a_session_with_no_engine_commits_every_width() {
-    let mut s = Session::builder().build_detached(RATE).unwrap();
-    s.declare_main_output_topology(buses(5)).unwrap();
-    assert_eq!(s.commit(), Committed::Sent);
-    assert_eq!(s.graph_ref().outputs(), 5);
+fn an_offline_session_never_has_a_main_output_of_no_channels() {
+    let empty = ChannelTopology::new([]).expect("an empty list is a topology");
+    assert!(matches!(
+        offline(Session::builder().main_output_topology(empty), 2),
+        Err(Error::Output(FoldError::Buffer(
+            tutti_buffers::BufferError::ZeroWidth
+        )))
+    ));
+    let mut s = offline(Session::builder(), 2).unwrap();
+    assert!(s.declare_main_output_topology(empty).is_err());
+    assert_eq!(s.graph_ref().outputs(), 2, "the main output is unchanged");
+    let floorless = Session::builder()
+        .outputs_floor(ChannelLayout::from_count(0))
+        .outputs(ChannelLayout::from_count(0))
+        .build();
+    assert!(matches!(
+        floorless,
+        Err(Error::Output(FoldError::Buffer(
+            tutti_buffers::BufferError::ZeroWidth
+        )))
+    ));
 }
 
 /// A main output declared under a stream that is not rendering is bounded: the

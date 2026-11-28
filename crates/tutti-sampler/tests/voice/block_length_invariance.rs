@@ -45,7 +45,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::loop_frames;
+use tutti_sampler::testing::{free_source, loop_frames, placed_source};
 
 use std::f32::consts::TAU;
 use std::path::Path;
@@ -223,8 +223,7 @@ fn assert_block_invariant<N: Node>(case: &str, mut build: impl FnMut() -> N) {
 
 /// A placed memory source, and the `play` it plays.
 fn memory_parts(wave: &Arc<Wave>, play: Playback) -> (MemorySource<f32>, Playback) {
-    let source = MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)))
-        .expect("a placeable wave");
+    let source = placed_source(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)));
     (source, play)
 }
 
@@ -298,11 +297,10 @@ fn memory_voices_render_the_same_frames_at_any_block_length() {
 fn a_memory_source_node_renders_the_same_frames_at_any_block_length() {
     let wave = tone(1.5);
     assert_block_invariant("memory source, placed", || {
-        MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave")
+        placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
     });
     assert_block_invariant("memory source, free-running", || {
-        let s = MemorySource::new(Arc::clone(&wave)).expect("a placeable wave");
+        let s = free_source(Arc::clone(&wave));
         s.trigger();
         s
     });

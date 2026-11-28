@@ -22,7 +22,7 @@ use crate::VoiceWindow;
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
-use crate::testing::loop_frames;
+use crate::testing::{loop_frames, placed_source};
 
 use std::path::Path;
 use std::sync::Arc;
@@ -38,7 +38,6 @@ use tutti_units::{
     Amplitude, Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor,
 };
 
-use super::memory_source::MemorySource;
 use super::pool::VoicePool;
 use super::types::{PlayDirection, Playback, SlotId, Voice, VoiceSource};
 use crate::{DiskStreamer, DiskStreamerConfig};
@@ -74,8 +73,7 @@ fn write_wav(path: &Path) {
 }
 
 fn memory(w: &Arc<Wave>, start: f64) -> VoiceSource<f32> {
-    let mut s = MemorySource::placed(Arc::clone(w), VoiceWindow::from(Beat::new(start)))
-        .expect("a placeable wave");
+    let mut s = placed_source(Arc::clone(w), VoiceWindow::from(Beat::new(start)));
     s.set_render_rate(SampleRate::of(SR));
     VoiceSource::Memory(s)
 }

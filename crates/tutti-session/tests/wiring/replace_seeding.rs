@@ -8,13 +8,16 @@ use tutti_graph::{
     Cx, DeclaredUnit, ForkByClone, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status,
 };
 use tutti_rt::Param;
-use tutti_session::{DetachedSession, Replacement, Session, SessionEvent, ValueErrorKind};
+use tutti_session::{Replacement, Session, SessionEvent, ValueErrorKind};
 use tutti_units::{Hz, Q, SampleRate, Seconds, UnitParam};
 
-fn detached() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -113,14 +116,14 @@ tutti_graph::declare_params!([] Delay, n { Cutoff => Seconds = &n.cutoff });
 /// to**: 800 Hz set on the outgoing cutoff reads 800 Hz on the incoming one.
 #[test]
 fn a_replace_with_the_same_declaration_keeps_the_set_value() {
-    let mut s = detached();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     s.set(tone.cutoff().to(Hz::new(800.0))).unwrap();
 
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
 
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
     assert_eq!(s.get(tone.q()).unwrap(), Q::new(0.7), "the rest stays");
@@ -130,7 +133,7 @@ fn a_replace_with_the_same_declaration_keeps_the_set_value() {
 /// in the same replace whose declaration did not change keeps its value.**
 #[test]
 fn a_changed_declaration_takes_its_new_initial_beside_an_unchanged_one() {
-    let mut s = detached();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     s.set((tone.cutoff().to(Hz::new(800.0)), tone.q().to(Q::new(2.0))))
         .unwrap();
@@ -138,7 +141,7 @@ fn a_changed_declaration_takes_its_new_initial_beside_an_unchanged_one() {
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 3.0))))
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
 
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0), "unchanged");
     assert_eq!(s.get(tone.q()).unwrap(), Q::new(3.0), "changed");
@@ -149,7 +152,7 @@ fn a_changed_declaration_takes_its_new_initial_beside_an_unchanged_one() {
 /// clamped.
 #[test]
 fn a_value_a_write_refuses_is_not_seeded() {
-    let mut s = detached();
+    let mut s = session();
     let outgoing = Tone::new(1_000.0, 0.7);
     let cutoff = outgoing.cutoff.clone();
     let tone = s.graph().add(Params(outgoing));
@@ -158,7 +161,7 @@ fn a_value_a_write_refuses_is_not_seeded() {
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
 
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(1_000.0));
 }
@@ -168,7 +171,7 @@ fn a_value_a_write_refuses_is_not_seeded() {
 /// that was replaced names no param of the new type.
 #[test]
 fn an_address_in_another_unit_is_not_seeded() {
-    let mut s = detached();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     s.set(tone.cutoff().to(Hz::new(800.0))).unwrap();
 
@@ -180,7 +183,7 @@ fn an_address_in_another_unit_is_not_seeded() {
                 cutoff: Param::new(Seconds::new(0.25)),
             })),
         )
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
 
     assert_eq!(s.get(delay.cutoff()).unwrap(), Seconds::new(0.25));
     let refused = s.get(tone.cutoff()).unwrap_err();
@@ -191,7 +194,7 @@ fn an_address_in_another_unit_is_not_seeded() {
 /// `NoSuchTarget`, and the address the node still has keeps its value.
 #[test]
 fn an_address_the_incoming_node_lacks_is_no_such_target() {
-    let mut s = detached();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     s.set((tone.cutoff().to(Hz::new(800.0)), tone.q().to(Q::new(2.0))))
         .unwrap();
@@ -202,7 +205,7 @@ fn an_address_the_incoming_node_lacks_is_no_such_target() {
             tone,
             Replacement::new(Params(Tone::new(1_000.0, 0.7).without_q())),
         )
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
 
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
     let refused = s.set(tone.q().to(Q::new(1.0))).unwrap_err();
@@ -215,26 +218,30 @@ fn an_address_the_incoming_node_lacks_is_no_such_target() {
 /// lands.
 #[test]
 fn a_parked_replace_seeds_the_same_way() {
-    let mut s = detached();
-    let mut side = s.graph().take_audio_side();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set((tone.cutoff().to(Hz::new(800.0)), tone.q().to(Q::new(2.0))))
         .unwrap();
 
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 3.0))))
         .expect("the node is in the graph");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1, "parked");
+    assert!(
+        !s.update()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Replaced { .. })),
+        "parked: nothing has landed yet"
+    );
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
     assert_eq!(s.get(tone.q()).unwrap(), Q::new(3.0));
 
     let mut out = [0.0f32];
     let mut landed = false;
     for _ in 0..16 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         landed |= s
             .update()
             .iter()
@@ -252,11 +259,10 @@ fn a_parked_replace_seeds_the_same_way() {
 /// value set while the first waited reaches the second.
 #[test]
 fn a_replace_behind_a_waiting_one_seeds_from_it() {
-    let mut s = detached();
-    let _side = s.graph().take_audio_side();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
-    assert!(s.update().is_empty());
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
@@ -266,7 +272,19 @@ fn a_replace_behind_a_waiting_one_seeds_from_it() {
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
         .expect("the node is in the graph");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 2);
+    assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
+
+    let mut out = [0.0f32];
+    let mut landed = 0;
+    for _ in 0..16 {
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+        landed += s
+            .update()
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::Replaced { .. }))
+            .count();
+    }
+    assert_eq!(landed, 2, "both replaces land");
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
 }
 
@@ -274,7 +292,7 @@ fn a_replace_behind_a_waiting_one_seeds_from_it() {
 /// no change from the replace.
 #[test]
 fn seeding_is_no_change_a_watcher_sees() {
-    let mut s = detached();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     let mut w = s.watch(tone.cutoff()).unwrap();
     s.set(tone.cutoff().to(Hz::new(800.0))).unwrap();
@@ -283,7 +301,7 @@ fn seeding_is_no_change_a_watcher_sees() {
     let tone = s
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
 
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0), "it seeded");
     assert!(w.changes().unwrap().is_none(), "and no change was seen");
@@ -311,20 +329,19 @@ impl Node for Eventful {
 /// still keeps the value that was set, not the declaration's initial.
 #[test]
 fn a_refused_parked_swap_gives_the_outgoing_params_back_whole() {
-    let mut s = detached();
-    let mut side = s.graph().take_audio_side();
+    let mut s = session();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
-    assert!(s.update().is_empty());
+    assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set(tone.cutoff().to(Hz::new(800.0))).unwrap();
 
-    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(tone, Replacement::new(ForkByClone(Eventful)))
         .expect("accepted: the shapes are checked when it lands");
     let mut out = [0.0f32];
     let mut failed = false;
     for _ in 0..16 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         failed |= s
             .update()
             .iter()

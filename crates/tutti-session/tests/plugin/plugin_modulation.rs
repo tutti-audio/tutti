@@ -13,7 +13,7 @@ use crate::bounced::bounced;
 use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
 use crate::support;
-use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_buffers::InterleavedMut;
 use tutti_fixtures::WavePlanes;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
@@ -30,33 +30,33 @@ use tutti_modulation::Lfo;
 use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
-use tutti_session::{
-    DetachedSession, EventOutputPort, PHASES, ParamRef, PhaseCx, RouteSpec, Session, SessionEvent,
-};
+use tutti_session::{EventOutputPort, PHASES, ParamRef, PhaseCx, RouteSpec, Session, SessionEvent};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Bipolar, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
-/// The plugin's pipeline chunk in a detached session: its `MaxBlock`
+/// The plugin's pipeline chunk in an offline session: its `MaxBlock`
 /// (`LIVE_MAX_BLOCK`).
 const CHUNK: usize = 1_024;
 /// The probe's gain parameter, `-60..=12` dB; its default (0 dB) is 60/72 of
 /// the range.
 const GAIN: u32 = 77;
 
-/// A detached stereo session at 48 kHz, the probe's server in the
+/// An offline stereo session at 48 kHz, the probe's server in the
 /// environment.
-fn detached() -> DetachedSession {
+fn session() -> Session {
     tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
-        .expect("a detached session builds")
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 /// Loads the probe into `s` and puts it on the outputs.
-fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::AnyPlugin> {
+fn add_probe(s: &mut Session) -> tutti_session::Key<tutti_session::AnyPlugin> {
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
@@ -84,7 +84,7 @@ impl Drive {
     }
 
     /// One frame: every phase at the clock 20 ms on.
-    fn update(&mut self, s: &mut DetachedSession) {
+    fn update(&mut self, s: &mut Session) {
         self.now += Duration::from_millis(20);
         let mut out = Vec::new();
         for &phase in PHASES {
@@ -112,12 +112,12 @@ impl Drive {
     /// [`update`](Self::update) and a plugin chunk's worth of frames rendered
     /// from the graph (the pipeline sends the server one block per chunk).
     /// Whether any was non-zero.
-    fn frame(&mut self, s: &mut DetachedSession) -> bool {
+    fn frame(&mut self, s: &mut Session) -> bool {
         self.update(s);
         let mut heard = false;
         for _ in 0..CHUNK {
             let mut out = [0.0f32; 2];
-            s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+            s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
             heard |= out.iter().any(|&x| x != 0.0);
         }
         heard
@@ -125,7 +125,7 @@ impl Drive {
 }
 
 /// Updates until the plugin at `node` has its parameter values read.
-fn wait_for_values(drive: &mut Drive, s: &mut DetachedSession, node: impl Into<NodeKey> + Copy) {
+fn wait_for_values(drive: &mut Drive, s: &mut Session, node: impl Into<NodeKey> + Copy) {
     tutti_fixtures::wait_until(
         "the plugin's parameter read to land",
         tutti_fixtures::HANG_GUARD,
@@ -137,7 +137,7 @@ fn wait_for_values(drive: &mut Drive, s: &mut DetachedSession, node: impl Into<N
 }
 
 /// The node of `target`'s lane, waiting for it while the declarations apply.
-fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> NodeKey {
+fn lane_of(drive: &mut Drive, s: &mut Session, target: ParamRef) -> NodeKey {
     let mut lane = None;
     tutti_fixtures::wait_until(
         &format!("a lane on {target:?}"),
@@ -164,7 +164,7 @@ fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> Node
 /// The plugin's own gain, normalized over its declared range: read from the state the
 /// plugin saves, not from the host's mirror.
 fn gain_value(
-    s: &DetachedSession,
+    s: &Session,
     node: tutti_session::Key<tutti_session::AnyPlugin>,
 ) -> Option<Normalized> {
     let state = s
@@ -199,7 +199,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_ONCE_FILE", &once);
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -266,7 +266,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
 /// lane leaves the graph with it.
 #[test]
 fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -299,11 +299,6 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
         .replace_plugin(node, Replacement::new(Box::new(incoming)))
         .expect("the replace is accepted");
     assert_eq!(landed, node);
-    assert_eq!(
-        s.graph_ref().testing().waiting_replacements(),
-        0,
-        "nothing waits"
-    );
     // Rebuilt by the replace: not ready until the job is run and landed.
     assert!(
         !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),
@@ -330,7 +325,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
 }
 
 /// Sets the probe's gain to `value` through the session's params.
-fn set_gain(s: &DetachedSession, node: impl Into<NodeKey> + Copy, value: f64) {
+fn set_gain(s: &Session, node: impl Into<NodeKey> + Copy, value: f64) {
     let target = s
         .plugin_view(node)
         .unwrap()
@@ -356,7 +351,7 @@ fn near(v: Option<Normalized>, want: f64) -> bool {
 /// the played value), and the plugin hears the knob plus the route (0.25).
 #[test]
 fn a_set_under_a_lane_writes_the_knob() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -407,7 +402,7 @@ fn a_set_under_a_lane_writes_the_knob() {
 /// hears it plus the route, not the raw value.
 #[test]
 fn a_set_right_after_the_lane_is_added_writes_the_knob() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -443,7 +438,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
 /// typed write, so it is cleared and declared again) it hears `0.4 + 0.5 * 0.5` = 0.65.
 #[test]
 fn narrowing_a_plugin_targets_range_changes_what_lands_by_the_new_span() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -489,7 +484,7 @@ fn narrowing_a_plugin_targets_range_changes_what_lands_by_the_new_span() {
 /// lane's knob is not written, and the plugin takes the value raw.
 #[test]
 fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -538,7 +533,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     // plugin answers `clap.preset-load` only when asked.
     crate::loading::prime(&PluginRef::file(clap_probe()));
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -561,7 +556,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
 
     // The preset sets only the first parameter (Cutoff), so the read it
     // causes has landed once the mirror's Cutoff moved.
-    let cutoff = |s: &DetachedSession| {
+    let cutoff = |s: &Session| {
         let plugin = s.plugin_view(node).unwrap();
         let params = plugin.params();
         let first = params.iter().next().expect("a parameter").id();
@@ -620,7 +615,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     crate::loading::prime(&PluginRef::file(clap_probe()));
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -678,30 +673,24 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     // unanswered: a late block is waited for, a missed one fails here, by
     // name.
     let missed_before = diagnostics_of(&s, node.into()).chunks().missed;
-    let mut side = s.graph().take_audio_side();
+    s.play().expect("room");
     let mut live = [Vec::new(), Vec::new()];
-    let mut out = vec![vec![0.0; BLOCK]; 2];
+    let mut out = vec![0.0f32; BLOCK * 2];
     for b in 0..BLOCKS {
-        let beat = (b * BLOCK) as f64 * 2.0 / RATE.get();
-        side.set_transport(tutti_graph::TransportPosition::new(
-            true,
-            Bpm::of(120.0),
-            Beat::new(beat),
-            None,
-        ));
         tutti_fixtures::wait_until(
             &format!("live block {b}: the chunk before it to be answered"),
             tutti_fixtures::HANG_GUARD,
             || diagnostics_of(&s, node.into()).chunk_in_flight_answered(),
         );
-        side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
+        s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
         assert_eq!(
             diagnostics_of(&s, node.into()).chunks().missed,
             missed_before,
             "live block {b} late or missed: the plugin's chunk was played unanswered"
         );
-        for (l, o) in live.iter_mut().zip(&out) {
-            l.extend_from_slice(o);
+        for frame in out.as_chunks::<2>().0 {
+            live[0].push(frame[0]);
+            live[1].push(frame[1]);
         }
         drive.update(&mut s);
     }
@@ -729,6 +718,6 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     }
 }
 
-fn diagnostics_of(s: &DetachedSession, node: NodeKey) -> tutti_session::Diagnostics<'_> {
+fn diagnostics_of(s: &Session, node: NodeKey) -> tutti_session::Diagnostics<'_> {
     s.plugin_view(node).expect("hosted").diagnostics()
 }

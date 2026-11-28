@@ -1,11 +1,6 @@
 //! [`TransportPart`]: the session's transport, the handle that drives it, and the metronome
 //! that follows it.
 
-#![cfg_attr(
-    not(feature = "device"),
-    expect(dead_code, reason = "a device restart (feature `device`) is the user")
-)]
-
 use tutti_graph::NodeKey;
 use tutti_timeline::{Transport, TransportSettings};
 use tutti_units::SampleRate;
@@ -19,7 +14,7 @@ pub(crate) struct TransportPart {
     transport: Transport,
     /// The transport's verbs and the engine's block clock behind
     /// [`Session::playhead`](crate::Session::playhead); the clock is `None`
-    /// detached, where nothing renders.
+    /// until the builder hands it over.
     pub(crate) handle: TransportHandle,
     /// The metronome's node, when the builder inserted one.
     pub(crate) click: Option<NodeKey>,

@@ -16,6 +16,7 @@ use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{
     Float, Interleaved, InterleavedMut, Planes, Sample, Wave, convert, interleave,
 };
+use tutti_codec::ToFile;
 use tutti_dsp::{DitherShape, NoiseShaping};
 use tutti_measure::{
     Loudness, LoudnessConfig, LoudnessMeter, Measure, StreamMeter as _, TruePeakConfig,
@@ -27,8 +28,6 @@ use crate::Result;
 use crate::Unmeasured;
 #[cfg(doc)]
 use crate::Written;
-use crate::control::{Control, Outcome, Stage, Weights};
-use crate::output::FileTarget;
 
 /// A gain chosen by measuring the rendered signal.
 ///
@@ -181,32 +180,18 @@ impl Normalize {
                 rendered: rendered.layout(),
             });
         }
-        let mut control = Control::none();
-        control.weigh(Weights::Normalized);
-        let total = rendered.len();
-        let outcome = self.measure(rendered, topology, Samples::new(0), total, &mut control)?;
-        Ok(finished(outcome).gain())
+        Ok(self.measure(rendered, topology)?.gain())
     }
 
     /// The reading [`gain_for_wave`](Self::gain_for_wave) takes its
     /// gain from, refused when it is not a measurement of the programme.
     ///
-    /// Measured by a [`Measurer`] a chunk at a time, so `control` is checked
-    /// between chunks and each chunk reads as [`Stage::Measuring`]: `done`
-    /// frames of `total` were already spent in that stage (the conversion
-    /// before it), and this reading counts `rendered.len()` more.
+    /// Measured by a [`Measurer`] a chunk at a time.
     ///
     /// # Errors
     ///
     /// As [`gain_for_wave`](Self::gain_for_wave).
-    fn measure<F: Float>(
-        &self,
-        rendered: &Wave<F>,
-        topology: &ChannelTopology,
-        done: Samples,
-        total: Samples,
-        control: &mut Control<'_>,
-    ) -> Result<Outcome<Reading>> {
+    fn measure<F: Float>(&self, rendered: &Wave<F>, topology: &ChannelTopology) -> Result<Reading> {
         let unmeasurable = |reason| crate::RenderError::Unmeasurable {
             output: None,
             channels: rendered.layout(),
@@ -220,20 +205,13 @@ impl Normalize {
         let chunk = chunk_frames(rendered.sample_rate()).get();
         let mut at = 0;
         while at < frames {
-            if control.is_cancelled() {
-                return Ok(Outcome::Cancelled);
-            }
             let end = (at + chunk).min(frames);
             measurer.feed(planes, at..end)?;
             at = end;
-            control.advance(Stage::Measuring, done + Samples::new(at), total);
-        }
-        if control.is_cancelled() {
-            return Ok(Outcome::Cancelled);
         }
         let reading = measurer.finish();
         reading.check().map_err(unmeasurable)?;
-        Ok(Outcome::Finished(reading))
+        Ok(reading)
     }
 
     /// This mode with its peak target (`Peak`) or ceiling (`Lufs`) pulled down
@@ -249,8 +227,8 @@ impl Normalize {
     /// ceiling already under it is unchanged, and a format that does not
     /// quantize ([`Pcm::Float(FloatWidth::F32)`](tutti_codec::Pcm::Float(FloatWidth::F32))) has no
     /// limit.
-    pub(crate) fn within(self, target: &FileTarget, render_rate: SampleRate) -> Self {
-        let Some(limit) = headroom_ceiling(target, render_rate) else {
+    pub(crate) fn within(self, to: &ToFile, render_rate: SampleRate) -> Self {
+        let Some(limit) = headroom_ceiling(to, render_rate) else {
             return self;
         };
         let cap = |db: Db| db.min(limit);
@@ -266,19 +244,12 @@ impl Normalize {
     }
 }
 
-/// The value of an outcome no token could have cancelled.
-fn finished<T>(outcome: Outcome<T>) -> T {
-    outcome
-        .into_finished()
-        .expect("a control with no token is never cancelled")
-}
-
 /// The loudest peak, in dBTP, an integer format can take with its dither
 /// ([`Normalize::within`]), or `None` for a format that does not quantize.
 /// `render_rate` is the rate the file's frames are rendered at; the shaping filter
 /// is designed for the file's, after any resample.
-fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> {
-    let pcm = target.to_file().format().int_pcm()?;
+fn headroom_ceiling(to: &ToFile, render_rate: SampleRate) -> Option<Db> {
+    let pcm = to.format().int_pcm()?;
     // One LSB in the `[-1, 1]` float domain, as the dither scales it.
     let lsb = pcm.depth().lsb().get();
     let dither_peak = match pcm.dither_shape() {
@@ -290,7 +261,7 @@ fn headroom_ceiling(target: &FileTarget, render_rate: SampleRate) -> Option<Db> 
     // recorded error is at most the dither plus half a step of rounding, and the
     // filter passes at most `feedback_gain` times that.
     let feedback_peak = if pcm.is_noise_shaped() {
-        let rate = target.to_file().rate(render_rate);
+        let rate = to.rate(render_rate);
         NoiseShaping::new(rate).feedback_gain().get() * (dither_peak + 0.5)
     } else {
         0.0
@@ -430,7 +401,7 @@ enum Meter {
 /// `LoudnessMeter` already accumulates (and is what `measure_loudness` folds),
 /// so this only adds the planar-to-interleaved copy of one chunk, so that no
 /// whole interleaved copy of the render is made (the one-shot reading made
-/// one), and the chunking the caller checks `Control` between. Chunks end on
+/// one), and the chunking the caller paces its reads by. Chunks end on
 /// frame boundaries, where the reading does not depend on where the stream is
 /// cut.
 pub(crate) struct Measurer {

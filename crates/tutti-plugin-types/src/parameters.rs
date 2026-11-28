@@ -192,6 +192,16 @@ bitflags! {
     }
 }
 
+/// A parameter as a host gesture sees it ([`ParameterInfo::gesture_role`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParamRole {
+    /// Not automatable, not read-only, not hidden: the host's edits of it come
+    /// from outside the plugin's own UI (VST3 `IEditControllerHostEditing`).
+    Helper,
+    /// Any other parameter.
+    Other,
+}
+
 /// The description of one plugin parameter, shared by every format host.
 ///
 /// Read it through the accessors — [`bounds`](Self::bounds),
@@ -598,6 +608,24 @@ impl ParameterInfo {
     /// known and set.
     pub fn flag(&self, f: ParamFlags) -> Option<bool> {
         self.known.contains(f).then(|| self.flags.contains(f))
+    }
+
+    /// What the parameter is to a host gesture: [`ParamRole::Helper`] when the
+    /// format reports it neither automatable, nor read-only, nor hidden (VST3's
+    /// "kind of helper parameter"), else [`ParamRole::Other`]. A bit the
+    /// format did not report counts as set, so a format that reports none
+    /// has no helpers.
+    #[must_use]
+    pub fn gesture_role(&self) -> ParamRole {
+        let clear = |f| self.flag(f) == Some(false);
+        if clear(ParamFlags::AUTOMATABLE)
+            && clear(ParamFlags::READ_ONLY)
+            && clear(ParamFlags::HIDDEN)
+        {
+            ParamRole::Helper
+        } else {
+            ParamRole::Other
+        }
     }
 
     /// Returns the plugin's declared bounds, or [`None`] when it declared none.

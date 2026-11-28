@@ -1021,31 +1021,23 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // is placed only now, so a refused restart moves nothing, and a
         // restart onto the old device places it again.
         self.graph.place_device(device)?;
-        // The outputs' taps read frames of one rate: reopened at the
-        // new one, committed with the rest below.
-        if self
-            .midi
-            .follow_rate(&mut self.graph, tutti_platform::Instant::now())
-        {
-            self.commit();
-        }
-        // A declaration a device refused is asked again of this one: if it
-        // places, it is in force, committed and settled below with the rest.
-        if self.output.reattempt(&mut self.graph) {
-            self.commit();
-        }
-        // The main output keeps the width it declared, wider or narrower than
-        // the device: the engine folds.
-        // Before the first commit the editor has sent no plan, so there is
-        // none to resume: the first update sends it.
-        let running = stopped.apply_pending();
-        let planned = self.graph.sent_compensation().is_some();
-        debug_assert!(
-            running || !planned,
-            "the re-prepare resumed inside the hook"
-        );
-        // The figures the first block runs at, published before it.
-        self.graph.publish_sent();
+        self.follow_rerate(rate, |s| {
+            // A declaration a device refused is asked again of this one: if it
+            // places, it is in force, committed and settled with the rest.
+            if s.output.reattempt(&mut s.graph) {
+                s.commit();
+            }
+            // The main output keeps the width it declared, wider or narrower
+            // than the device: the engine folds.
+            // Before the first commit the editor has sent no plan, so there is
+            // none to resume: the first update sends it.
+            let running = stopped.apply_pending();
+            let planned = s.graph.sent_compensation().is_some();
+            debug_assert!(
+                running || !planned,
+                "the re-prepare resumed inside the hook"
+            );
+        });
         // The hardware inlets place an arrival a block after it came, a
         // block of this device's callback; the clock map follows the rate
         // from the engine's own readings.
@@ -1055,9 +1047,6 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
                 .samples(),
             rate,
         );
-        // Every open stream's ratio (file rate / session rate) is
-        // re-derived, so it plays on at its pitch.
-        self.sampler.set_sample_rate(rate);
         // The heard tap opens at the device's width from here on; one open
         // across this change keeps counting its blocks lost (see
         // `Session::open_heard_tap`).

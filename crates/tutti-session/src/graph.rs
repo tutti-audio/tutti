@@ -20,11 +20,9 @@
 //! # Where the audio side lives
 //!
 //! `Editor::new` builds the pair. The executor stays here ("local") until
-//! `take_audio_side` or the session builder hands it
-//! to an engine. While it is local, a commit is applied at once on this
-//! thread and its box collected, so a detached graph never meets
-//! back-pressure, and `Session::render_frame`
-//! runs it.
+//! the session builder hands it to an engine. While it is local, a commit is
+//! applied at once on this thread and its box collected, so a graph still
+//! being built never meets back-pressure.
 //!
 //! # A param write lands on the next block, never at once
 //!
@@ -37,10 +35,6 @@ use std::any::Any;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use tutti_buffers::Float;
-#[cfg(feature = "testing")]
-use tutti_buffers::InterleavedMut;
-#[cfg(feature = "testing")]
-use tutti_graph::TransportPosition;
 
 #[cfg(feature = "export")]
 use crate::fork::PendingExport;
@@ -50,8 +44,6 @@ use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
 #[cfg(feature = "device")]
 use tutti_graph::CompileError;
-#[cfg(feature = "testing")]
-use tutti_graph::fade_gains;
 use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, FeedbackFrom, NodeBus};
 use tutti_graph::{
     CommitError, EdgeGainError, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, Fade,
@@ -75,13 +67,9 @@ use tutti_units::{Samples, Tail};
 
 mod observe;
 mod phases;
-#[cfg(feature = "testing")]
-mod testing;
 mod wiring;
 
 pub use observe::{MainOutputReader, Meters, NotReopened, Reopened, Taps};
-#[cfg(feature = "testing")]
-pub use testing::{AudioSide, Testing};
 pub(crate) use wiring::Pending;
 
 use crate::key::{
@@ -101,10 +89,6 @@ use crate::{
 /// arena, not the device. 1024 frames covers every buffer size a DAW offers
 /// by default.
 pub const LIVE_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples::new(1024));
-
-/// The spec `kind` of a hosted plugin.
-#[cfg(feature = "plugin")]
-const PLUGIN_KIND: &str = "tutti-session:plugin";
 
 /// A node to swap in at a key, and the fade it swaps in over:
 /// [`Graph::replace`]'s argument, and `Graph::replace_plugin`'s (feature
@@ -295,15 +279,6 @@ struct Stash {
     params: Outgoing,
 }
 
-/// The executor, while this side still holds it, and what a local render
-/// needs beside it.
-struct Local<F: Float> {
-    exec: Executor<F>,
-    /// Planar scratch, one `Vec` per main output.
-    #[cfg(feature = "testing")]
-    scratch: Vec<Vec<F>>,
-}
-
 /// A node waiting to be swapped in, its type erased.
 trait ErasedSwap<F: Float>: Send {
     /// Swap it in under `node`.
@@ -429,7 +404,9 @@ struct Placed<F: Float> {
 /// `Editor`: the edit/commit boundary stays visible.
 pub struct Graph<F: Float = f32> {
     editor: Editor<F>,
-    local: Option<Box<Local<F>>>,
+    /// The executor, while this side still holds it: from `Editor::new` until
+    /// the engine takes it.
+    local: Option<Box<Executor<F>>>,
     nodes: BTreeMap<NodeKey, Entry>,
     /// What each node's params are written through: the session's value
     /// table, which the session's `Values` share.
@@ -437,9 +414,6 @@ pub struct Graph<F: Float = f32> {
     /// The refusal reported last, until a commit is sent: a spec that keeps
     /// failing the same way is reported once.
     refused: Option<CommitError>,
-    /// Plans sent, for the test seam's `commits_sent`.
-    #[cfg(feature = "testing")]
-    commits: u64,
     /// Threads per block, the caller included (`0` for one per core).
     render_workers: crate::Workers,
     /// Run by each live helper on its own thread, before it takes work.
@@ -660,16 +634,10 @@ impl<F: Float> Graph<F> {
         main_output_meter.enable();
         Self {
             editor,
-            local: Some(Box::new(Local {
-                exec,
-                #[cfg(feature = "testing")]
-                scratch: Vec::new(),
-            })),
+            local: Some(Box::new(exec)),
             nodes: BTreeMap::new(),
             values: ValueTable::new(),
             refused: None,
-            #[cfg(feature = "testing")]
-            commits: 0,
             render_workers: crate::Workers::SERIAL,
             render_worker_start: None,
             feeds: BTreeMap::new(),
@@ -752,12 +720,12 @@ impl<F: Float> Graph<F> {
         Some(Arc::new(pool))
     }
 
-    /// Hand the executor over: to the engine, or to a test's audio side.
+    /// Hand the executor over to the engine.
     fn take_executor(&mut self) -> Executor<F> {
-        self.local
+        *self
+            .local
             .take()
             .expect("the graph's audio side was already taken")
-            .exec
     }
 
     /// Build the engine over this graph's audio side, which it takes:
@@ -798,18 +766,16 @@ impl<F: Float> Graph<F> {
     /// Re-prepare every node for `rate`, keeping the block and the quantum.
     /// With the executor local, both halves of the re-prepare run here, now;
     /// with it taken, the second half lands on a later collect (and commits
-    /// are `Retry` until it does).
-    ///
-    /// For a detached graph, which has no device to take a rate from. A
-    /// device's session re-rates with [`Session::restart`](crate::Session).
+    /// are `Retry` until it does). The session's
+    /// [`set_sample_rate`](crate::Session::set_sample_rate) follows it with
+    /// the rest of the session.
     ///
     /// # Errors
     ///
     /// [`SetRateError::RateUnsupported`] naming a node that does not run at
-    /// `rate` ([`Shape::with_rates`](tutti_graph::Shape::with_rates)), or
-    /// [`SetRateError::Commit`] when the editor would not re-prepare; the graph
-    /// keeps its rate.
-    pub fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
+    /// `rate`, or [`SetRateError::Commit`] when the editor would not
+    /// re-prepare; the graph keeps its rate.
+    pub(crate) fn set_sample_rate(&mut self, rate: SampleRate) -> Result<(), SetRateError> {
         if let Some((node, supported)) = self
             .editor
             .first_unsupported_rate(self.nodes.keys().copied(), rate)
@@ -902,7 +868,7 @@ impl<F: Float> Graph<F> {
             if self.editor.in_flight() == 0 {
                 break;
             }
-            local.exec.apply_pending();
+            local.apply_pending();
             let retired = self.editor.collect();
             Self::bury(&mut self.retiring, &retired);
         }
@@ -1008,7 +974,7 @@ impl<F: Float> Graph<F> {
 
     /// Puts `split` in the editor under `id`, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half.
-    pub(crate) fn place<N: IntoNode<F>>(
+    fn place<N: IntoNode<F>>(
         &mut self,
         id: NodeKey,
         split: Split<N, F>,
@@ -1074,8 +1040,9 @@ impl<F: Float> Graph<F> {
     /// and its writer refuses whole frames, counting them; one behind leaves
     /// the ring empty and the node writes silence for the frames it lacks.
     /// Neither side blocks. A ring of a few blocks keeps both rare, at that
-    /// much latency. A later [`Graph::set_sample_rate`] to another rate is
-    /// refused, naming the inlet, as for any node whose rates leave it out.
+    /// much latency. A later
+    /// [`Session::set_sample_rate`](crate::Session::set_sample_rate) to another
+    /// rate is refused, naming the inlet, as for any node whose rates leave it out.
     ///
     /// The node is unforkable: an export of a graph that holds it is refused,
     /// naming its key.
@@ -1203,7 +1170,6 @@ impl Graph {
         &mut self,
         client: Box<tutti_plugin::PluginClient>,
     ) -> (Key<crate::AnyPlugin>, tutti_plugin::catalog::PluginRebinder) {
-        let node = NodeKey::fresh();
         let hosted = crate::plugin::HostedPlugin::served(
             client.handle(),
             client.plugin().clone(),
@@ -1213,10 +1179,7 @@ impl Graph {
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
-        // A fresh key has no wiring recorded, so nothing is unwired.
-        let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
-        self.nodes.insert(node, Entry { controls: None });
-        self.note_pass(node);
+        let node = self.add_split(NodeKey::fresh(), Split::of(bound)).erase();
         self.plugins.insert(node, hosted);
         self.provide_plugin(node);
         self.write_own_bypass(node);
@@ -3912,12 +3875,6 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// How many commits have sent a plan.
-    #[cfg(feature = "testing")]
-    pub(crate) fn commits(&self) -> u64 {
-        self.commits
-    }
-
     /// `Editor::commit`. `Sent` clears the edit flag; `Refused` and `Retry` keep it.
     pub(crate) fn commit(&mut self) -> Committed {
         if let Some(refused) = self.unplaceable() {
@@ -3927,10 +3884,6 @@ impl<F: Float> Graph<F> {
             Ok(rewired) => {
                 self.note_rewired(rewired);
                 self.refused = None;
-                #[cfg(feature = "testing")]
-                {
-                    self.commits += 1;
-                }
                 for node in std::mem::take(&mut self.gained) {
                     if !self.unapplied.contains(&node) {
                         self.unapplied.push(node);
@@ -3972,72 +3925,6 @@ impl<F: Float> Graph<F> {
         }
         self.refused = Some(e.clone());
         true
-    }
-
-    /// Render one frame on the local executor, under `transport`.
-    #[cfg(feature = "testing")]
-    pub(crate) fn render_local(
-        &mut self,
-        transport: &TransportPosition,
-        output: InterleavedMut<'_, F>,
-    ) {
-        let local = self
-            .local
-            .as_mut()
-            .expect("render_frame needs the audio side, and it was taken");
-        render(&mut local.exec, &mut local.scratch, transport, output);
-    }
-}
-
-/// Render one frame of `exec` into `output` (one sample per main output),
-/// with silence on every main input.
-///
-/// `output` wider than the plan reads silence past it; narrower, the extra
-/// channels are dropped — the width a caller passes is its own business.
-#[cfg(feature = "testing")]
-fn render<F: Float>(
-    exec: &mut Executor<F>,
-    scratch: &mut Vec<Vec<F>>,
-    transport: &TransportPosition,
-    mut output: InterleavedMut<'_, F>,
-) {
-    let output = output.samples_mut();
-    exec.apply_pending();
-    let Some(plan) = exec.plan() else {
-        output.fill(F::ZERO);
-        return;
-    };
-    let (ins, outs, main_output) = (
-        plan.main_inputs() as usize,
-        plan.rendered_outputs(),
-        plan.main_outputs(),
-    );
-    scratch.resize_with(outs, || vec![F::ZERO]);
-    let silence = F::ZERO;
-    let inputs: Vec<&[F]> = (0..ins).map(|_| std::slice::from_ref(&silence)).collect();
-    let fade = exec.main_output_fade();
-    let mut outputs: Vec<&mut [F]> = scratch.iter_mut().map(|c| &mut c[..1]).collect();
-    exec.process(1, transport, &inputs, &mut outputs);
-    // With no device there is no fold: the main output's channels are the output's
-    // by index, and a main output change crossfades channel by channel, the old
-    // main output's channels after the new main output's.
-    let gains = fade.map(|f| fade_gains::<F>(f.fade.law, f.done, f.fade.duration));
-    for (c, o) in output.iter_mut().enumerate() {
-        let new = scratch
-            .get(c)
-            .filter(|_| c < main_output)
-            .map_or(F::ZERO, |s| s[0]);
-        *o = match (fade, gains) {
-            (Some(f), Some((go, gn))) => {
-                let old = if c < f.width {
-                    scratch[main_output + c][0]
-                } else {
-                    F::ZERO
-                };
-                old * go + new * gn
-            }
-            _ => new,
-        };
     }
 }
 

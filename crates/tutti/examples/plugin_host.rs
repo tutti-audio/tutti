@@ -160,10 +160,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    at load, read again when the plugin announces a rescan), so listing
     //    asks the plugin nothing; `get` resolves an id once and refuses one the
     //    plugin does not declare. A value set reads back at once, and `text` is
-    //    the plugin's own wording of it. A drag is a gesture: `edit()` begins
-    //    it, each `set` is a change, and dropping the guard ends it, so the
-    //    session reports the host's begin, changes and end in `update()`'s
-    //    events as it reports the plugin's own.
+    //    the plugin's own wording of it. A drag is a `Gesture` over the
+    //    parameter's target: it tells the plugin the host holds the parameter
+    //    where the format has a call for that, each `set` is a value, and
+    //    dropping it lets go.
     let hosted = session.plugin_view(node)?;
     let params = hosted.params();
     let first: Option<ParamId> = params.iter().next().map(|p| p.id());
@@ -177,7 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .text()
                 .unwrap_or_else(|| param.normalized().get().to_string())
         );
-        let drag = param.edit()?;
+        let mut drag = session.gesture(param.target())?;
         for step in 0..=4 {
             drag.set(Normalized::clamped(f64::from(step) / 8.0))?;
         }

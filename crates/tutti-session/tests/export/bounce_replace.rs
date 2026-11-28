@@ -9,8 +9,7 @@ use tutti_codec::{Format, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, MainOutput,
-    Range, Session,
+    Bounce, BounceError, BounceLatency, BounceTail, ExportClock, MainOutput, Range, Session,
 };
 use tutti_units::{SampleRate, Seconds};
 
@@ -18,11 +17,13 @@ const RATE: SampleRate = SampleRate::SR_48K;
 /// 10 ms at 48 kHz.
 const FRAMES: usize = 480;
 
-fn session() -> DetachedSession {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
-        .expect("a detached session builds")
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 fn float_wav() -> Format {

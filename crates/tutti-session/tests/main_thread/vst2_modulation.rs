@@ -6,7 +6,6 @@
 
 use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
-use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 use tutti_session::MainOutput;
 
@@ -15,8 +14,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    DetachedSession, EventInputPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session,
-    SessionEvent,
+    EventInputPort, Feeder, PHASES, ParamRef, PhaseCx, RouteSpec, Session, SessionEvent,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -28,13 +26,15 @@ fn vst2_probe() -> std::path::PathBuf {
     tutti_fixtures::vst2_probe().to_path_buf()
 }
 
-/// A detached stereo session at 48 kHz with the probe loaded in process, on
+/// An offline stereo session at 48 kHz with the probe loaded in process, on
 /// the outputs, its parameter values read.
-fn session_with_probe() -> (DetachedSession, NodeKey) {
+fn session_with_probe() -> (Session, NodeKey) {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
-        .expect("a detached session builds");
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
@@ -50,8 +50,16 @@ fn session_with_probe() -> (DetachedSession, NodeKey) {
     (s, node.erase())
 }
 
+/// `frames` stereo frames rendered in `block`-frame blocks, as a device would.
+fn render(s: &mut Session, frames: usize, block: usize) {
+    let mut out = vec![0.0f32; block * 2];
+    for _ in 0..frames / block {
+        s.render(&mut tutti_buffers::InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+    }
+}
+
 /// One update at `now`, every phase, as a frame of a host.
-fn update(s: &mut DetachedSession, now: Instant) -> Vec<SessionEvent> {
+fn update(s: &mut Session, now: Instant) -> Vec<SessionEvent> {
     let mut out = Vec::new();
     for &phase in PHASES {
         s.run_phase(phase, PhaseCx::at(now), &mut out);
@@ -60,7 +68,7 @@ fn update(s: &mut DetachedSession, now: Instant) -> Vec<SessionEvent> {
 }
 
 /// Updates until `target` has a lane, and its knob.
-fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f64 {
+fn knob_of(s: &mut Session, target: ParamRef) -> f64 {
     let now = Instant::now();
     let mut knob = None;
     tutti_fixtures::wait_until(
@@ -129,15 +137,7 @@ fn a_plugin_gui_edit_becomes_the_knob() {
 
     probe_switch::<u32>(b"tutti_vst2_probe_set_automate_burst\0", 1);
     let mut out = [0.0f32; 2];
-    s.render_frame_at(
-        &tutti_graph::TransportPosition::new(
-            false,
-            tutti_units::Bpm::of(120.0),
-            tutti_units::Beat::new(0.0),
-            None,
-        ),
-        tutti_buffers::InterleavedMut::one_frame(&mut out).unwrap(),
-    );
+    s.render(&mut tutti_buffers::InterleavedMut::one_frame(&mut out).unwrap());
     probe_switch::<u32>(b"tutti_vst2_probe_set_automate_burst\0", 0);
     s.plugin_view(node)
         .expect("the plugin's handle")
@@ -201,22 +201,20 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
     let lane = s.mod_state().lane(p0.key()).expect("a lane").0;
     let clip = s.graph().add(tutti_graph::ForkByClone(EventSource1));
     let _ = s.update();
-    let mut side = s.graph().take_audio_side();
-    let value = |s: &DetachedSession| {
+    let value = |s: &Session| {
         s.plugin_view(node)
             .expect("the handle")
             .handle()
             .parameter_value(ParamId::new(0))
             .expect("a value")
     };
-    let mut out = vec![vec![0.0; 1_024]; 2];
-    let mut check = |s: &mut DetachedSession, want: &[NodeKey], what: &str| {
+    let check = |s: &mut Session, want: &[NodeKey], what: &str| {
         let mut want = want.to_vec();
         want.sort();
         for _ in 0..2 {
             update(s, Instant::now());
         }
-        side.render(128, PlanesMut::from_vecs(&mut out).unwrap());
+        render(s, 1_024, 128);
         let mut sources: Vec<_> = s
             .graph_ref()
             .sources(EventInputPort::new(node, 0))
@@ -265,10 +263,8 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
     assert_eq!(knob_of(&mut s, p0), 0.0);
     probe_switch::<bool>(b"tutti_vst2_probe_set_echo_set_parameter\0", true);
 
-    let mut side = s.graph().take_audio_side();
-    let mut out = vec![vec![0.0; 1_024]; 2];
     for round in 0..4 {
-        side.render(128, PlanesMut::from_vecs(&mut out).unwrap());
+        render(&mut s, 1_024, 128);
         let handle = s
             .plugin_view(node)
             .expect("the plugin's handle")

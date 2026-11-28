@@ -15,13 +15,13 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use tutti_buffers::{Float, Planes};
+use tutti_buffers::{ChannelLayout, Float, Planes, Wave};
 
-use tutti_graph::{Env, Node, Prepare, TransportChanges, TransportPosition, contract};
+use tutti_graph::{Env, Node, Prepare, Shared, TransportChanges, TransportPosition, contract};
 use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
-use crate::Loop;
+use crate::{Loop, MemorySource, MemorySourceConfig, VoiceWindow};
 
 /// The loop over file frames `start..end` with `crossfade` frames of fade
 /// into it, for a test that has literal frames.
@@ -34,6 +34,44 @@ pub fn loop_frames(start: usize, end: usize, crossfade: usize) -> Loop {
     Loop::new(Samples::new(start)..Samples::new(end))
         .and_then(|l| l.with_crossfade(Samples::new(crossfade)))
         .expect("a test's loop is a literal that `Loop` accepts")
+}
+
+/// A stereo source over `wave`, free-running from its first frame: what a test that
+/// plays one wave on its own cursor builds.
+///
+/// # Panics
+///
+/// If the wave has no place in a stereo frame: a test's wave is one the sampler plays.
+pub fn free_source<F: Float>(wave: impl Into<Shared<Wave<F>>>) -> MemorySource<F> {
+    MemorySource::from(
+        MemorySourceConfig::new(wave, ChannelLayout::STEREO)
+            .expect("a test's wave has a place in a stereo frame"),
+    )
+}
+
+/// A stereo source over `wave`, placed on the transport at `window`.
+///
+/// # Panics
+///
+/// As [`free_source`].
+pub fn placed_source<F: Float>(
+    wave: impl Into<Shared<Wave<F>>>,
+    window: VoiceWindow,
+) -> MemorySource<F> {
+    MemorySource::from(
+        MemorySourceConfig::new(wave, ChannelLayout::STEREO)
+            .expect("a test's wave has a place in a stereo frame")
+            .window(window),
+    )
+}
+
+/// `node` with fresh cells and the controls that write them, without a graph:
+/// what a test that drives a node by hand steers it through. A node inserted
+/// into a graph takes its controls from `into_parts`.
+pub fn controlled<F: crate::SamplerFloat>(
+    node: crate::VoiceNode<F>,
+) -> (crate::VoiceNode<F>, crate::VoiceNodeControls<F>) {
+    node.controlled()
 }
 
 /// The spare vocoders `pool`'s voices carry: what a loop under the voices asks of a pool's

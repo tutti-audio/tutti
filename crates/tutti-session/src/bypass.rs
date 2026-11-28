@@ -264,6 +264,13 @@ pub(crate) mod tests {
     }
 
     impl AnyThread for Plugin {
+        fn edit(
+            &self,
+            _: tutti_plugin_types::ParamEdit,
+            _: tutti_plugin_types::ParamRole,
+        ) -> tutti_plugin_types::EditOutcome {
+            tutti_plugin_types::EditOutcome::NotDefined
+        }
         fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
             tutti_plugin_types::Answer::ready(Some(vec![
                 ParameterInfo::new(ID, "bypass").with_flags(ParamFlags::BYPASS, ParamFlags::BYPASS),

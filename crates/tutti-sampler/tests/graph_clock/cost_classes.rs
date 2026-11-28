@@ -5,6 +5,7 @@
 //! the one-participant one.
 
 use tutti_graph::testing::WireDeclared;
+use tutti_sampler::testing::{free_source, placed_source};
 
 use tutti_buffers::Interleaved;
 use tutti_graph::EdgeId;
@@ -20,7 +21,7 @@ use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::{MemorySource, Playback, VoiceNode, VoicePool, Wave};
+use tutti_sampler::{Playback, VoiceNode, VoicePool, Wave};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
@@ -49,8 +50,7 @@ fn tone(secs: f64) -> Arc<Wave> {
 
 fn stretched(wave: &Arc<Wave>) -> VoiceNode<f32> {
     VoiceNode::new(
-        MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave"),
+        placed_source(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0))),
         Playback {
             stretch: StretchFactor::new(0.5),
             ..Default::default()
@@ -102,11 +102,10 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
     for k in 0..sources {
         let key = NodeKey(k + 1);
         if k < READS {
-            let read = MemorySource::placed(
+            let read = placed_source(
                 Arc::clone(wave),
                 VoiceWindow::from(Beat::new(k as f64 * 0.001)),
-            )
-            .expect("a placeable wave");
+            );
             if declared {
                 ed.insert(key, "read", read);
             } else {
@@ -165,18 +164,11 @@ fn render(exec: &mut Executor, channels: usize) -> Vec<Vec<f32>> {
 fn each_node_declares_its_class() {
     let wave = tone(0.1);
     let plain = VoiceNode::new(
-        MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-            .expect("a placeable wave"),
+        placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0))),
         Playback::default(),
     )
     .expect("a finite gain and a nonempty width");
-    assert_eq!(
-        MemorySource::new(Arc::clone(&wave))
-            .expect("a placeable wave")
-            .shape()
-            .cost,
-        Cost::Moderate
-    );
+    assert_eq!(free_source(Arc::clone(&wave)).shape().cost, Cost::Moderate);
     assert_eq!(plain.shape().cost, Cost::Moderate);
     assert_eq!(stretched(&wave).shape().cost, Cost::Heavy);
     assert_eq!(VoicePool::<f32>::new().shape().cost, Cost::Heavy);
