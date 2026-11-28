@@ -57,8 +57,15 @@ fn listed(io: &MidiSession, spec: &VirtualSpec, input: bool) -> DeviceInfo {
     })
 }
 
-/// A MIDI 2.0 note on key `key`.
+/// A note on key `key`: MIDI 1.0 on Windows MIDI Services, MIDI 2.0 elsewhere.
+#[cfg_attr(
+    midi_backend = "midi_services",
+    allow(unused_variables, reason = "MIDI 1.0 velocity does not vary")
+)]
 fn note(key: u8, step: u16) -> Ump {
+    #[cfg(midi_backend = "midi_services")]
+    return tutti_fixtures::midi::m1_note_on(MidiChannel::of(1), key, tutti_ump::U7::of(0x40));
+    #[cfg(not(midi_backend = "midi_services"))]
     note_on(MidiChannel::of(1), key, 0x8000 + step)
 }
 
@@ -97,6 +104,11 @@ fn what_a_virtual_endpoint_sends_reaches_a_session_input_in_order() {
 
 /// What a session output sends to a virtual endpoint arrives at the
 /// endpoint's producer, in order, as the events of a device input.
+///
+/// Windows MIDI Services sends MIDI 1.0 notes: a MIDI Services endpoint speaks the protocol
+/// the service negotiated with it, and a virtual endpoint whose device does not answer the
+/// negotiation has none, so it is listed as MIDI 1.0 and the session output translates
+/// MIDI 2.0 notes.
 #[test]
 fn what_a_session_output_sends_reaches_a_virtual_endpoint_in_order() {
     let executor = Executor::new();

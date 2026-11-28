@@ -38,8 +38,9 @@ impl MidiServicesOutput {
     /// The service's refusal. [`Error::TooFarAhead`] is one `queue_timed` counts as a loss
     /// instead of offering again: the service refuses a time more than 20 s ahead
     /// (`MIDI_MAX_ALLOWED_SCHEDULER_SECONDS_INTO_FUTURE`), which is past the
-    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) the session's output plan schedules ahead, so the time is a clock
-    /// fault, and a later offer would be refused again.
+    /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) the session's output plan
+    /// schedules ahead, so the time is a clock fault, and a later offer would be refused
+    /// again.
     fn send(&self, send: SendAt, ump: &Ump) -> core::result::Result<(), Error> {
         let at = match send {
             SendAt::Now => None,
