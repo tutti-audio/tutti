@@ -20,8 +20,8 @@ use tutti_clap_test_plugin::{
 };
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare, PresetId,
-    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, Widths, Wraps,
+    Control, Controller, Flushed, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
+    PresetId, ProcessContext, ProcessOutput, Processor, SampleRate, Samples, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -461,14 +461,16 @@ fn a_flushed_requires_process_write_waits_for_the_next_block() {
 
     let none = tutti_plugin_types::ParameterChanges::reserved(0, 1);
     // Keeping a value allocates nothing: the room is fixed at activation.
-    assert!(assert_no_alloc(|| processor.flush_parameters(&none)));
+    assert_eq!(
+        assert_no_alloc(|| processor.flush_parameters(&none)),
+        Some(Flushed::Held)
+    );
     assert_eq!(
         peek_param(cutoff.get()),
         Some(350.0),
         "the other is applied"
     );
     assert_eq!(peek_param(MANUAL_PARAM_ID), Some(0.0), "kept for the block");
-    assert!(Processor::holds_parameters(&processor));
     assert_eq!(
         Control::pending(&mut controller).len(),
         2,
@@ -477,7 +479,6 @@ fn a_flushed_requires_process_write_waits_for_the_next_block() {
 
     render(&mut processor, FloatWidth::F32).expect("a block");
     assert_eq!(peek_param(MANUAL_PARAM_ID), Some(1.0), "taken by the block");
-    assert!(!Processor::holds_parameters(&processor));
     assert!(Control::pending(&mut controller).is_empty());
 }
 
@@ -494,9 +495,12 @@ fn a_flushed_host_change_of_a_requires_process_parameter_waits_and_is_replaced()
     let manual = ParamId::new(MANUAL_PARAM_ID);
     let mut changes = tutti_plugin_types::ParameterChanges::reserved(1, 1);
     assert!(changes.add_change(manual, at_frame(0), unit_value(1.0)));
-    assert!(processor.flush_parameters(&changes), "the plugin flushes");
+    assert_eq!(
+        processor.flush_parameters(&changes),
+        Some(Flushed::Held),
+        "kept"
+    );
     assert_eq!(peek_param(MANUAL_PARAM_ID), Some(0.0), "kept for the block");
-    assert!(Processor::holds_parameters(&processor));
 
     controller
         .set_parameter(main_thread(), manual, Normalized::of(0.0))
@@ -507,7 +511,6 @@ fn a_flushed_host_change_of_a_requires_process_parameter_waits_and_is_replaced()
         Some(0.0),
         "the newer write is the block's, the kept value is not sent over it"
     );
-    assert!(!Processor::holds_parameters(&processor));
 }
 
 /// **A kept write from before a reset is never sent after it**: the reset ends
@@ -526,15 +529,14 @@ fn a_kept_write_from_before_a_reset_is_never_sent() {
         .set_parameter(main_thread(), manual, Normalized::of(1.0))
         .expect("a declared, writable parameter");
     let none = tutti_plugin_types::ParameterChanges::reserved(0, 1);
-    assert!(processor.flush_parameters(&none));
-    assert!(Processor::holds_parameters(&processor), "kept");
+    assert_eq!(processor.flush_parameters(&none), Some(Flushed::Held));
 
     Wraps::before_restore(&mut controller, main_thread());
-    assert!(
-        !Processor::holds_parameters(&processor),
+    assert_eq!(
+        processor.flush_parameters(&none),
+        Some(Flushed::Applied),
         "a reset ended the epoch the kept write was checked against"
     );
-    assert!(processor.flush_parameters(&none));
     render(&mut processor, FloatWidth::F32).expect("a block");
     assert_eq!(peek_param(MANUAL_PARAM_ID), Some(0.0), "never sent");
 }
@@ -556,8 +558,10 @@ fn a_kept_write_survives_a_rejoin() {
             Normalized::of(1.0),
         )
         .expect("a declared, writable parameter");
-    assert!(processor.flush_parameters(&tutti_plugin_types::ParameterChanges::reserved(0, 1)));
-    assert!(Processor::holds_parameters(&processor));
+    assert_eq!(
+        processor.flush_parameters(&tutti_plugin_types::ParameterChanges::reserved(0, 1)),
+        Some(Flushed::Held)
+    );
     let _loaded = ClapLoaded::deactivate(main_thread(), processor, controller)
         .unwrap_or_else(|_| panic!("rejoins"));
     assert_eq!(

@@ -1214,14 +1214,17 @@ impl Processor for FakeProcessor {
         Ok(())
     }
 
-    fn flush_parameters(&mut self, changes: &crate::ParameterChanges) -> PluginResult<()> {
+    fn flush_parameters(
+        &mut self,
+        changes: &crate::ParameterChanges,
+    ) -> PluginResult<crate::Flushed> {
         let log = &self.shared.log;
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
         let drained = self.drain.swept();
         self.drain.publish_applied(drained);
         log.push(Call::FlushParameters(changes.queues.len()));
-        Ok(())
+        Ok(crate::Flushed::Applied)
     }
 
     fn stop(&mut self) {

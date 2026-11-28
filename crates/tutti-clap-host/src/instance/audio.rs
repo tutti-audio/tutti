@@ -19,6 +19,7 @@ use tutti_buffers::FloatWidth;
 use tutti_buffers::{ByWidth, Float, InputOutput};
 use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
+use tutti_plugin_types::Flushed;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
 use tutti_rt::Generation;
@@ -390,16 +391,20 @@ impl ClapProcessor {
     ///
     /// The plugin is active, so a parameter flagged `REQUIRES_PROCESS` is not
     /// flushed: its latest value is kept for the next block's `process`, where
-    /// CLAP takes it in event order ([`holds_parameters`](tutti_plugin_types::Processor::holds_parameters)).
+    /// CLAP takes it in event order ([`Flushed::Held`]).
     /// A kept value is dropped, never sent, once a
     /// [`reset`](tutti_plugin_types::EditWriter::reset) has made it stale. The
     /// applied mark is published only while nothing is kept: one mark cannot
     /// cover the values the plugin has and not the one it has not, so the
     /// block that takes the kept value publishes for all of them.
     ///
-    /// `false` when the plugin has no flush entry or is busy, or a value had no
-    /// room to be kept.
-    pub fn flush_parameters(&mut self, changes: &tutti_plugin_types::ParameterChanges) -> bool {
+    /// `None` when the plugin has no flush entry or is busy, or a value had no
+    /// room to be kept; otherwise [`Flushed::Held`] while anything is kept, an
+    /// empty flush included, and [`Flushed::Applied`] when nothing is.
+    pub fn flush_parameters(
+        &mut self,
+        changes: &tutti_plugin_types::ParameterChanges,
+    ) -> Option<Flushed> {
         self.scratch.input_events.clear();
         self.scratch.output_events.clear();
         // Read first: a value is stamped with an epoch no later than the one
@@ -455,7 +460,13 @@ impl ClapProcessor {
             // gestures) goes where a block's goes: to the Controller's reports.
             self.report_edits();
         }
-        flushed && kept
+        (flushed && kept).then(|| {
+            if self.held.any_current(self.drain.epoch()) {
+                Flushed::Held
+            } else {
+                Flushed::Applied
+            }
+        })
     }
 
     /// Hands the block to the plugin through the FFI crate, which binds the

@@ -46,6 +46,21 @@ use tutti_plugin_ipc_ffi::{FdId, Ready};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
+/// What became of the writes a [`Processor::flush_parameters`] was given.
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Flushed {
+    /// The plugin has them.
+    Applied,
+    /// The Processor keeps writes for the next block's `process` (a CLAP
+    /// parameter flagged `REQUIRES_PROCESS`, which the format takes there, in
+    /// event order, while the plugin is active): the plugin does not have them
+    /// yet, so the caller publishes no applied mark for what it handed. Also
+    /// the answer to a flush that hands nothing while the Processor still
+    /// keeps some.
+    Held,
+}
+
 /// Writes the plugin's bypass parameter, if it lists one: the default of
 /// [`Control::set_bypassed`] and what a wrapped plugin's write goes through, so
 /// an active plugin's reaches its Processor.
@@ -576,7 +591,7 @@ pub trait Processor: Send {
     ///
     /// Per format: CLAP `params.flush` (an audio-thread entry, never beside
     /// `process`), except that a `REQUIRES_PROCESS` parameter's value waits for
-    /// the next block ([`holds_parameters`](Self::holds_parameters)); VST3
+    /// the next block ([`Flushed::Held`]); VST3
     /// `process` with `numSamples = 0`, which the SDK allows for flushing
     /// parameters; VST2 and AU a direct set of each parameter's last value.
     ///
@@ -586,22 +601,11 @@ pub trait Processor: Send {
     ///
     /// [`PluginError::Block`] when the Processor has no such route, or the
     /// plugin refused the call.
-    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<Flushed> {
         let _ = changes;
         Err(PluginError::Block(
             "this Processor takes parameters in a block only",
         ))
-    }
-
-    /// Whether a write [`flush_parameters`](Self::flush_parameters) was given
-    /// waits for the next block's `process` (a CLAP parameter flagged
-    /// `REQUIRES_PROCESS`, which the format takes there, in event order, while
-    /// the plugin is active): the plugin does not have it yet, and a flush made
-    /// now is not its delivery. The caller reads the writes it handed over as
-    /// not yet applied until a block has run. The default is a format that
-    /// applies a flush at once.
-    fn holds_parameters(&self) -> bool {
-        false
     }
 
     /// The frames this Processor renders in, if it renders in fixed chunks

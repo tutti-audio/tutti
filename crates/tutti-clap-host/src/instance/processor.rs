@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::FloatWidth;
 use tutti_buffers::{Float, InputOutput};
 use tutti_plugin_types::{
-    EditReader, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor, ReportSink,
+    EditReader, Flushed, NoteExpressionChanges, PluginError, PluginIo, PluginResult, Processor,
+    ReportSink,
 };
 use tutti_rt::Reader;
 use tutti_units::Normalized;
@@ -384,17 +385,9 @@ impl Processor for ClapProcessor {
     fn flush_parameters(
         &mut self,
         changes: &tutti_plugin_types::ParameterChanges,
-    ) -> PluginResult<()> {
-        if ClapProcessor::flush_parameters(self, changes) {
-            Ok(())
-        } else {
-            Err(PluginError::Block("the plugin has no params.flush to call"))
-        }
-    }
-
-    /// A `REQUIRES_PROCESS` write a flush was given waits for the next block.
-    fn holds_parameters(&self) -> bool {
-        self.held.any_current(self.drain.epoch())
+    ) -> PluginResult<Flushed> {
+        ClapProcessor::flush_parameters(self, changes)
+            .ok_or(PluginError::Block("the plugin has no params.flush to call"))
     }
 
     fn reset(&mut self) {
