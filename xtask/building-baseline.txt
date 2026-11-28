@@ -166,18 +166,11 @@ tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::Par
 
 # tutti-sampler
 tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
-tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_handle
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::channels
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::gain
 tutti-sampler  chain-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamer::set_sample_rate
 tutti-sampler  setter  crates/tutti-sampler/src/voice/node_controls.rs::VoiceNodeControls::set_gain
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_gain
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_loop
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_speed
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_stretch
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_window
 tutti-sampler  setter  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoice::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoice::set_speed
 tutti-sampler  setter  crates/tutti-sampler/src/voice/disk_voice.rs::DiskVoice::set_stretch_rate
@@ -192,7 +185,6 @@ tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySo
 tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_window
 tutti-sampler  ctor-result  crates/tutti-sampler/src/clip.rs::Clip::new
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::new
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_channels
 
 # tutti-session
 tutti-session  chain-result  crates/tutti-session/src/bounce.rs::Bounce::map

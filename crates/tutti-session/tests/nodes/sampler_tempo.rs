@@ -38,8 +38,8 @@ fn run(s: &mut Session, frames: usize, block: usize) -> Vec<f32> {
 /// jump from source frame 23 999 to 48 000.
 #[test]
 fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
-    use tutti_sampler::testing::placed_source;
-    use tutti_sampler::{Playback, SlotId, VoicePool, VoiceWindow};
+    use tutti_sampler::testing::placed_config;
+    use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig, VoiceWindow};
     use tutti_tempo::{TempoMap, TempoPoint, Transition};
     use tutti_units::{Beat, Bpm};
 
@@ -48,10 +48,10 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
         wave.append(Interleaved::new(&[i as f32 / 131_072.0], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
-    let mut pool = VoicePool::new();
-    pool.insert(SlotId(1), source, Playback::default())
-        .expect("a finite gain and a nonempty width");
+    let source = placed_config(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
+    let row = VoiceNodeConfig::placed(source).expect("a finite gain and a nonempty width");
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO).expect("a stereo pool");
+    let pool = VoicePool::from(config.row(SlotId(1), row).expect("a row in the table"));
     let mut s = offline_48k();
     let map =
         TempoMap::new(
@@ -84,12 +84,13 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
 /// **A sampler pool the graph adds follows the transport's loop**: the pool's block carries
 /// the loop in its transport, so after a block renders with the loop armed over a stretched
 /// voice's window and a control tick, the voice carries a spare vocoder, and after a block
-/// renders with the loop disarmed and a tick it does not.
+/// renders with the loop disarmed and a tick it does not. Read through the graph's
+/// `pool_spares`, which hands out no controls.
 #[test]
 fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop() {
     use tutti_music::LoopRange;
-    use tutti_sampler::testing::{placed_source, spares_sent};
-    use tutti_sampler::{Playback, SlotId, VoicePool, VoiceWindow};
+    use tutti_sampler::testing::placed_config;
+    use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig, VoiceWindow};
     use tutti_timeline::LoopRegion;
     use tutti_units::{Beat, StretchFactor};
 
@@ -98,26 +99,20 @@ fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop()
         wave.append(Interleaved::new(&[0.0], wave.layout()).unwrap())
             .unwrap();
     }
-    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
+    let row = VoiceNodeConfig::placed(placed_config(
+        Arc::new(wave),
+        VoiceWindow::from(Beat::new(0.0)),
+    ))
+    .expect("a placed source")
+    .stretch(StretchFactor::new(1.5));
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("a stereo pool")
+        .row(SlotId(1), row)
+        .expect("a row in the table");
     let mut s = offline_48k();
-    let pool = s.graph().add(VoicePool::new());
-    let handle = s
-        .graph_ref()
-        .handle(&pool)
-        .expect("the pool is in the graph")
-        .clone();
-    handle
-        .add(
-            SlotId(1),
-            source,
-            Playback {
-                stretch: StretchFactor::new(1.5),
-                ..Playback::default()
-            },
-        )
-        .expect("queued");
+    let pool = s.graph().add(VoicePool::from(config));
     let _ = s.update();
-    assert_eq!(spares_sent(&handle), 0, "no loop yet");
+    assert_eq!(s.graph_ref().pool_spares(&pool), Some(0), "no loop yet");
 
     let range = LoopRange::try_from(Beat::new(0.5)..Beat::new(1.5)).unwrap();
     let looping = s.transport_handle().looping();
@@ -130,9 +125,13 @@ fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop()
     s.set(looping.to(LoopRegion::new(range, true))).unwrap();
     tick(&mut s);
     tick(&mut s);
-    assert_eq!(spares_sent(&handle), 1, "armed over the voice's window");
+    assert_eq!(
+        s.graph_ref().pool_spares(&pool),
+        Some(1),
+        "armed over the voice's window"
+    );
     s.set(looping.to(LoopRegion::new(range, false))).unwrap();
     tick(&mut s);
     tick(&mut s);
-    assert_eq!(spares_sent(&handle), 0, "disarmed");
+    assert_eq!(s.graph_ref().pool_spares(&pool), Some(0), "disarmed");
 }

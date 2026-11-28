@@ -4,14 +4,14 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
-use tutti_graph::{HostValues, Initials, NodeConfig, Shared};
+use tutti_graph::{ForkCause, HostValues, Initials, NodeConfig, RenderMode, Shared};
 use tutti_rt::{AtomicCell, Mutex};
 use tutti_units::{Amplitude, Cents, PlaybackRate, StretchFactor, UnitAddr, UnitParam};
 
 use super::command::GainError;
 use super::command::ask;
 use super::disk_voice::DiskVoice;
-use super::home::Home;
+use super::home::{Home, Seat};
 use super::loop_span::Loop;
 use super::memory_source::MemorySource;
 use super::memory_source::{MemorySourceConfig, VoiceWindow};
@@ -26,12 +26,12 @@ use crate::SamplerFloat;
 use crate::streamer::StreamHandle;
 
 mod sealed {
-    pub trait Drive {}
+    pub trait VoiceDrive {}
 }
 
 /// How a [`VoiceNodeConfig`] drives its voice, fixed by the type: [`Free`],
 /// [`Placed`] or [`Streamed`].
-pub trait Drive: sealed::Drive + Send + Sync + 'static {}
+pub trait VoiceDrive: sealed::VoiceDrive + Send + Sync + 'static {}
 
 /// A voice on its own cursor, played and stopped through its steering.
 #[derive(Clone, Copy, Debug)]
@@ -43,12 +43,12 @@ pub struct Placed;
 #[derive(Clone, Copy, Debug)]
 pub struct Streamed;
 
-impl sealed::Drive for Free {}
-impl sealed::Drive for Placed {}
-impl sealed::Drive for Streamed {}
-impl Drive for Free {}
-impl Drive for Placed {}
-impl Drive for Streamed {}
+impl sealed::VoiceDrive for Free {}
+impl sealed::VoiceDrive for Placed {}
+impl sealed::VoiceDrive for Streamed {}
+impl VoiceDrive for Free {}
+impl VoiceDrive for Placed {}
+impl VoiceDrive for Streamed {}
 
 /// What the voice reads.
 #[derive(Clone)]
@@ -97,15 +97,15 @@ pub(crate) enum Form<F: SamplerFloat> {
 ///     .speed(PlaybackRate::of(2.0));
 /// let node = VoiceNode::from(config);
 /// ```
-pub struct VoiceNodeConfig<F: SamplerFloat, D: Drive = Free> {
-    pub(crate) form: Form<F>,
-    pub(crate) channels: ChannelLayout,
-    pub(crate) play: Playback,
-    pub(crate) steering: Steering,
+pub struct VoiceNodeConfig<F: SamplerFloat, D: VoiceDrive = Free> {
+    form: Form<F>,
+    channels: ChannelLayout,
+    play: Playback,
+    steering: Steering,
     drive: PhantomData<fn() -> D>,
 }
 
-impl<F: SamplerFloat, D: Drive> Clone for VoiceNodeConfig<F, D> {
+impl<F: SamplerFloat, D: VoiceDrive> Clone for VoiceNodeConfig<F, D> {
     fn clone(&self) -> Self {
         Self {
             form: self.form.clone(),
@@ -117,7 +117,7 @@ impl<F: SamplerFloat, D: Drive> Clone for VoiceNodeConfig<F, D> {
     }
 }
 
-impl<F: SamplerFloat, D: Drive> VoiceNodeConfig<F, D> {
+impl<F: SamplerFloat, D: VoiceDrive> VoiceNodeConfig<F, D> {
     fn of(form: Form<F>, channels: ChannelLayout, play: Playback) -> Self {
         Self {
             form,
@@ -136,6 +136,41 @@ impl<F: SamplerFloat, D: Drive> VoiceNodeConfig<F, D> {
         self.play.stretch = StretchFactor::UNITY;
         self.play.pitch = Cents::new(0.0);
         (self, stretch)
+    }
+
+    /// This config with `factor` and `pitch` as its stretch and pitch: a pool's row
+    /// keeps them apart from the config's.
+    pub(crate) fn stretched_by(mut self, factor: StretchFactor, pitch: Cents) -> Self {
+        self.play.stretch = factor;
+        self.play.pitch = pitch;
+        self
+    }
+
+    /// What the config asks of a voice that is a value: its gain, speed, loop,
+    /// direction, stretch and pitch; the window of a placed resident voice (a
+    /// streamed voice's is its stream's); and the play state of a free-running one.
+    pub(crate) fn asks(&self) -> (Playback, Option<VoiceWindow>, Steering) {
+        let window = match &self.form {
+            Form::Memory(source) => source.window_value(),
+            Form::Streamed { .. } => None,
+        };
+        (self.play, window, self.steering)
+    }
+
+    /// A streamed config's stream, whose cells the controls sweep.
+    pub(crate) fn stream(&self) -> Option<Arc<Mutex<StreamHandle<F>>>> {
+        match &self.form {
+            Form::Streamed { stream, .. } => Some(Arc::clone(stream.arc())),
+            Form::Memory(_) => None,
+        }
+    }
+
+    /// Writes a streamed config's loop and direction to its stream's cells; nothing
+    /// for a resident one.
+    pub(crate) fn steer_stream(&self) {
+        if let Form::Streamed { stream, .. } = &self.form {
+            steer_stream(&stream.lock(), self.play.loop_, self.play.direction);
+        }
     }
 
     /// This config at varispeed `speed`.
@@ -293,7 +328,7 @@ impl<F: SamplerFloat> VoiceNodeConfig<F, Streamed> {
 
 // Hand-written: a memory source's config and a stream are not `Debug`. Prints the
 // drive and the values.
-impl<F: SamplerFloat, D: Drive> std::fmt::Debug for VoiceNodeConfig<F, D> {
+impl<F: SamplerFloat, D: VoiceDrive> std::fmt::Debug for VoiceNodeConfig<F, D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("VoiceNodeConfig")
             .field("drive", &std::any::type_name::<D>())
@@ -304,7 +339,7 @@ impl<F: SamplerFloat, D: Drive> std::fmt::Debug for VoiceNodeConfig<F, D> {
     }
 }
 
-impl<F: SamplerFloat, D: Drive> PartialEq for VoiceNodeConfig<F, D> {
+impl<F: SamplerFloat, D: VoiceDrive> PartialEq for VoiceNodeConfig<F, D> {
     fn eq(&self, other: &Self) -> bool {
         let same_form = match (&self.form, &other.form) {
             (Form::Memory(a), Form::Memory(b)) => a == b,
@@ -319,24 +354,26 @@ impl<F: SamplerFloat, D: Drive> PartialEq for VoiceNodeConfig<F, D> {
     }
 }
 
-impl<F: SamplerFloat, D: Drive> NodeConfig<F> for VoiceNodeConfig<F, D> {
+impl<F: SamplerFloat, D: VoiceDrive> NodeConfig<F> for VoiceNodeConfig<F, D> {
     type Node = VoiceNode<F>;
 
     fn build(&self, _: &HostValues) -> VoiceNode<F> {
         VoiceNode::from(self.clone())
     }
 
+    /// Compared field by field, without a copy: a pool asks it on the audio thread, where
+    /// a copy of a folded source's matrix would allocate.
     fn same_structure(&self, other: &Self) -> bool {
-        let mut with_other_values = self.clone();
-        with_other_values.play.gain = other.play.gain;
-        with_other_values.play.speed = other.play.speed;
-        with_other_values.play.loop_ = other.play.loop_;
-        with_other_values.play.direction = other.play.direction;
-        with_other_values.steering = other.steering;
-        if let (Form::Memory(mine), Form::Memory(theirs)) = (&self.form, &other.form) {
-            with_other_values.form = Form::Memory(mine.clone().with_window_of(theirs));
-        }
-        with_other_values == *other
+        let same_form = match (&self.form, &other.form) {
+            (Form::Memory(mine), Form::Memory(theirs)) => mine.same_structure(theirs),
+            // The voice is the stream's own reader, so the stream is the identity.
+            (Form::Streamed { stream: a, .. }, Form::Streamed { stream: b, .. }) => a == b,
+            _ => false,
+        };
+        same_form
+            && self.channels == other.channels
+            && self.play.stretch == other.play.stretch
+            && self.play.pitch == other.play.pitch
     }
 
     fn initials(&self) -> Initials {
@@ -356,57 +393,131 @@ impl<F: SamplerFloat, D: Drive> NodeConfig<F> for VoiceNodeConfig<F, D> {
     }
 }
 
-/// The node a config describes. The values start at the config's: a resident
-/// voice takes `play`'s gain, speed and loop over its source's, and a disk voice's
-/// loop and direction are first requested of its stream. A streamed config's
-/// stream moves into the node's controls.
-impl<F: SamplerFloat, D: Drive> From<VoiceNodeConfig<F, D>> for VoiceNode<F> {
-    fn from(config: VoiceNodeConfig<F, D>) -> Self {
-        let VoiceNodeConfig {
+/// What a config builds: its voice at the config's values, and how the voice is
+/// held.
+pub(crate) struct Built<F: SamplerFloat> {
+    pub(crate) voice: Voice<F>,
+    pub(crate) channels: ChannelLayout,
+    pub(crate) steering: Steering,
+    /// The stream and the seat of a streamed config's voice; `None` for a resident one.
+    pub(crate) held: Option<Held<F>>,
+}
+
+/// A streamed voice's hold on its stream's reader.
+pub(crate) struct Held<F: SamplerFloat> {
+    pub(crate) seat: Seat<F>,
+    pub(crate) stream: Arc<Mutex<StreamHandle<F>>>,
+    /// Whether the voice has the reader yet; the audio end writes it when it takes it.
+    pub(crate) hold: Arc<AtomicCell<StreamHold>>,
+}
+
+/// Requests `looped` and `direction` of `stream`, which its streamer reads.
+pub(crate) fn steer_stream<F: SamplerFloat>(
+    stream: &StreamHandle<F>,
+    looped: Option<Loop>,
+    direction: PlayDirection,
+) {
+    ask(stream.looping_cell(), looped);
+    ask(stream.direction_cell(), direction);
+}
+
+impl<F: SamplerFloat, D: VoiceDrive> VoiceNodeConfig<F, D> {
+    /// The voice this config describes. The values start at the config's: a
+    /// resident voice takes `play`'s gain, speed and loop over its source's, and a
+    /// disk voice's loop and direction are first requested of its stream. A streamed
+    /// config's reader is taken, or waited for ([`Home::seat`]). Control side.
+    pub(crate) fn built(self) -> Built<F> {
+        let Self {
             form,
             channels,
             play,
             steering,
             ..
-        } = config;
+        } = self;
         match form {
-            Form::Memory(source) => {
-                let mut voice = Voice {
-                    source: VoiceSource::Memory(MemorySource::from(source)),
-                    play,
-                };
-                voice.source.apply_gain(play.gain);
-                apply_speed(&mut voice, play.speed);
-                apply_loop(&mut voice, play.loop_);
-                Self::of_voice(voice, channels, steering)
-            }
+            Form::Memory(source) => Built {
+                voice: memory_voice_at(source, play),
+                channels,
+                steering,
+                held: None,
+            },
             Form::Streamed { home, stream } => {
-                let (disk, seat) = Home::seat(home.arc());
-                {
-                    let stream = stream.lock();
-                    ask(stream.looping_cell(), play.loop_);
-                    ask(stream.direction_cell(), play.direction);
-                }
-                let mut disk = disk;
+                let (mut disk, seat) = Home::seat(home.arc());
+                steer_stream(&stream.lock(), play.loop_, play.direction);
                 disk.store_gain(play.gain);
                 disk.set_speed(play.speed);
-                let mut node = Self::of_voice(
-                    Voice {
+                let hold = Arc::new(AtomicCell::new(if seat.holds() == Some(true) {
+                    StreamHold::Holding
+                } else {
+                    StreamHold::Waiting
+                }));
+                Built {
+                    voice: Voice {
                         source: VoiceSource::Disk(disk),
                         play,
                     },
                     channels,
                     steering,
-                );
-                node.stream = Some(Arc::clone(stream.arc()));
-                node.hold = Some(Arc::new(AtomicCell::new(if seat.holds() == Some(true) {
-                    StreamHold::Holding
-                } else {
-                    StreamHold::Waiting
-                })));
-                node.seat = seat;
-                node
+                    held: Some(Held {
+                        seat,
+                        stream: Arc::clone(stream.arc()),
+                        hold,
+                    }),
+                }
             }
         }
+    }
+
+    /// The voice a fork of a node over this config plays: a copy that shares nothing
+    /// with the live one ([`Voice::fork_copy`]), at the config's values.
+    pub(crate) fn forked(&self, mode: RenderMode) -> Result<Voice<F>, ForkCause> {
+        match &self.form {
+            Form::Memory(source) => memory_voice_at(source.clone(), self.play).fork_copy(mode),
+            Form::Streamed { home, .. } => {
+                let mut voice = Voice {
+                    source: VoiceSource::Disk(home.lock().template()),
+                    play: self.play,
+                }
+                .fork_copy(mode)?;
+                // The fork's detached cells hold what the live cells hold now, which
+                // the audio thread writes at its next block: the config's values
+                // are the ones in force (the stretch rate is the slot's, per block).
+                voice.source.apply_gain(self.play.gain);
+                apply_speed(&mut voice, self.play.speed);
+                Ok(voice)
+            }
+        }
+    }
+}
+
+/// A resident voice over `source` at `play`'s gain, speed and loop.
+fn memory_voice_at<F: SamplerFloat>(source: MemorySourceConfig<F>, play: Playback) -> Voice<F> {
+    let mut voice = Voice {
+        source: VoiceSource::Memory(MemorySource::from(source)),
+        play,
+    };
+    voice.source.apply_gain(play.gain);
+    apply_speed(&mut voice, play.speed);
+    apply_loop(&mut voice, play.loop_);
+    voice
+}
+
+/// The node a config describes: its voice, at the config's values. A streamed config's
+/// stream moves into the node's controls.
+impl<F: SamplerFloat, D: VoiceDrive> From<VoiceNodeConfig<F, D>> for VoiceNode<F> {
+    fn from(config: VoiceNodeConfig<F, D>) -> Self {
+        let Built {
+            voice,
+            channels,
+            steering,
+            held,
+        } = config.built();
+        let mut node = Self::of_voice(voice, channels, steering);
+        if let Some(Held { seat, stream, hold }) = held {
+            node.stream = Some(stream);
+            node.hold = Some(hold);
+            node.seat = seat;
+        }
+        node
     }
 }

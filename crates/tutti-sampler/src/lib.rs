@@ -25,9 +25,9 @@
 //!
 //! Both are wrapped by `Voice` and played by one of two graph nodes:
 //!
-//! - `VoicePool`: every voice on a track in one node, controlled from the control
-//!   thread through a `VoicePoolHandle` (add, remove, re-place, respeed, stretch).
-//!   Adding or removing a voice is a queued command, not a graph edit.
+//! - `VoicePool`: every voice on a track in one node, made from a `VoicePoolConfig`
+//!   whose voices are the rows of a published table (`VoiceTable`). Adding, removing or
+//!   moving a voice is a write of the table, not a graph edit.
 //! - `VoiceNode`: a single voice as its own node, for previews and single clips,
 //!   controlled through a `VoiceNodeControls`.
 //!
@@ -50,7 +50,7 @@
 //! (21 ms at 48 kHz) and then sound on the timeline; a clip placed ahead of the playhead,
 //! or at a position the transport has stood at, primes before it plays and is on time. A
 //! loop wrap does not go silent for a memory voice under the loop: a second vocoder, which a
-//! pool's handle sends it, primes for it ahead (unless the loop was set less than 1 024
+//! pool's controls send it, primes for it ahead (unless the loop was set less than 1 024
 //! frames before its first wrap). A voice without one, a disk voice included, reseats at the
 //! wrap. Nothing ties the stretch to the tempo.
 //! All three are `tutti-units` types.
@@ -109,7 +109,7 @@
 //! `tutti_buffers::MAX_CHANNELS` is the widest frame a voice reads or emits, the
 //! same cap as a bus and the graph's main output: a voice wider than the main output could
 //! render would be truncated downstream, so the sampler refuses it here instead
-//! (`VoicePool::with_channels` returns `PlaceError::WidthTooWide`).
+//! (`VoicePoolConfig::new` returns `PlaceError::WidthTooWide`).
 //!
 //! ## Features
 //!
@@ -135,10 +135,10 @@
 //!   [`StreamReader`] (the voice's).
 //! - [`Voice`], [`VoiceSource`], [`Playback`]: a voice of either tier and its
 //!   control state.
-//! - [`VoicePool`] with [`VoicePoolHandle`], and [`VoiceNode`] with
+//! - [`VoicePool`] with [`VoicePoolControls`], and [`VoiceNode`] with
 //!   [`VoiceNodeControls`]: the graph nodes that play voices, and their
-//!   control-thread handles (add, steer and remove voices; a node's handle
-//!   owns the disk stream that feeds it).
+//!   control-thread handles (a pool's controls are the table's published entry; a
+//!   node's controls own the disk stream that feeds it).
 //! - [`Clip`]: one sample placed on the timeline, resident or streamed.
 //! - [`Loop`]: the one checked loop every tier takes.
 //! - `probe`: the header probe that informs a caller's tier choice (the
@@ -216,12 +216,12 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 // crate constructs it.
 //
 pub use voice::{
-    DirectionKind, DiskVoice, DiskVoiceControls, Drive, Free, FreeRunning, GainError, Loop,
-    LoopError, LoopingKind, MemorySource, MemorySourceConfig, Placed, PlayDirection, Playback,
-    PoolDrops, Row, SendError, SlotId, SpeedKind, StreamHold, Streamed, StreamingAddError,
-    TableError, Voice, VoiceCount, VoiceCountOutOfRange, VoiceNode, VoiceNodeConfig,
-    VoiceNodeControls, VoiceNodeError, VoicePool, VoicePoolConfig, VoicePoolHandle, VoiceSource,
-    VoiceTable, VoiceTableKind, VoiceWindow, WindowKind, memory_voice, voice_width,
+    DirectionKind, DiskVoice, DiskVoiceControls, Free, FreeRunning, GainError, Loop, LoopError,
+    LoopingKind, MemorySource, MemorySourceConfig, Placed, PlayDirection, Playback, PoolDrops, Row,
+    SlotId, SpeedKind, StreamHold, Streamed, TableError, Voice, VoiceCount, VoiceCountOutOfRange,
+    VoiceDrive, VoiceNode, VoiceNodeConfig, VoiceNodeControls, VoiceNodeError, VoicePool,
+    VoicePoolConfig, VoicePoolControls, VoiceSource, VoiceTable, VoiceTableKind, VoiceWindow,
+    WindowKind, memory_voice, voice_width,
 };
 // The async disk-streaming engine (streamer future + the `DiskStreamer` handle).
 pub(crate) mod streamer;

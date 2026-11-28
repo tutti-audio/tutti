@@ -2205,8 +2205,7 @@ where
     /// naming its node ([`BounceError::NotForkable`]). Live keys, hardware MIDI
     /// and the clock out fork silent: the render is driven from its clock, which
     /// has no events waiting. A `VoicePool` forks
-    /// only while its handle has queued nothing, and is refused otherwise
-    /// ([`BounceError::Fork`], naming its node).
+    /// with the voices of its table.
     ///
     /// **No `update` is needed first.** The fork is the graph's spec as it
     /// stands at this call, so an insert, a wire or a mode set since the last

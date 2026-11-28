@@ -8,9 +8,10 @@
 //! a cut shows as a step of the tone's amplitude.
 
 use crate::VoiceWindow;
-use crate::testing::{free_source, placed_config, voice_node};
+use crate::testing::{controlled_pool, free_source, placed_config, prepared, voice_node};
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
+use tutti_graph::Published;
 
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
@@ -22,10 +23,13 @@ use tutti_graph::{Env, Node, Offset, Prepare, TransportChanges, TransportPositio
 use tutti_music::{FrameClock, LoopRange};
 use tutti_units::{Beat, BeatDuration, Bpm, Frame, SampleRate, Samples};
 
+use super::command::VoicePoolControls;
 use super::memory_source::MemorySource;
 use super::node::VoiceNode;
+use super::node_config::VoiceNodeConfig;
 use super::pool::VoicePool;
-use super::types::{Playback, SlotId, Voice, VoiceSource};
+use super::table::{Row, VoicePoolConfig};
+use super::types::{Playback, SlotId};
 
 const SR: f64 = 48_000.0;
 /// Frames in a beat at 120 BPM.
@@ -70,8 +74,8 @@ enum Host {
 }
 
 enum Hosted {
-    Pool(VoicePool<f32>),
-    Node(MemorySource<f32>),
+    Pool(Box<VoicePool<f32>>, VoicePoolControls<f32>),
+    Node(Box<MemorySource<f32>>),
     Voice(Option<Box<VoiceNode<f32>>>),
 }
 
@@ -108,16 +112,17 @@ impl Rig {
     fn new(host: Host, looping: Option<LoopRange>, max_block: usize) -> Self {
         let host = match host {
             Host::Pool => {
-                let mut pool = VoicePool::with_channels(ChannelLayout::STEREO).expect("stereo");
-                pool.prepare(&Prepare::new(
-                    SampleRate::of(SR),
-                    MaxBlock::of(Samples::new(max_block)),
-                ));
-                Hosted::Pool(pool)
+                let config = VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo");
+                let (pool, controls) = controlled_pool(VoicePool::from(config));
+                let pool = prepared(pool, SampleRate::of(SR), max_block);
+                Hosted::Pool(Box::new(pool), controls)
             }
             // Placed by `place`.
             Host::Voice => Hosted::Voice(None),
-            Host::Node => Hosted::Node(free_source(Arc::new(Wave::new(2, SampleRate::of(SR))))),
+            Host::Node => Hosted::Node(Box::new(free_source(Arc::new(Wave::new(
+                2,
+                SampleRate::of(SR),
+            ))))),
         };
         Self {
             host,
@@ -150,16 +155,23 @@ impl Rig {
             },
         );
         match &mut self.host {
-            Hosted::Pool(pool) => {
-                let mut source = MemorySource::from(config);
-                source.set_render_rate(SampleRate::of(SR));
-                pool.insert_voice(
-                    SlotId(id),
-                    Voice {
-                        source: VoiceSource::Memory(source),
-                        play,
-                    },
+            Hosted::Pool(_, controls) => {
+                // The row's gain and loop are the source config's.
+                let source = config.gain(play.gain);
+                let source = match play.loop_ {
+                    Some(looped) => source.looped(looped),
+                    None => source,
+                };
+                let row = Row::from(
+                    VoiceNodeConfig::placed(source).expect("a finite gain on a placed source"),
                 );
+                let table = VoicePoolConfig::<f32>::new(ChannelLayout::STEREO)
+                    .expect("stereo")
+                    .row(SlotId(id), row)
+                    .expect("one row in a free key")
+                    .table()
+                    .clone();
+                controls.replace(&table);
             }
             Hosted::Voice(slot) => {
                 let mut node = voice_node(config, play);
@@ -177,7 +189,7 @@ impl Rig {
                     SampleRate::of(SR),
                     MaxBlock::of(Samples::new(self.max_block)),
                 ));
-                *node = source;
+                **node = source;
             }
         }
     }
@@ -185,11 +197,11 @@ impl Rig {
     /// One block under `env`.
     fn drive(&mut self, env: &Env) -> Vec<Vec<f32>> {
         match &mut self.host {
-            Hosted::Pool(pool) => {
-                contract::drive_input(pool, env, Planes::default(), &[], &[]).audio
+            Hosted::Pool(pool, _) => {
+                contract::drive_input(&mut **pool, env, Planes::default(), &[], &[]).audio
             }
             Hosted::Node(node) => {
-                contract::drive_input(node, env, Planes::default(), &[], &[]).audio
+                contract::drive_input(&mut **node, env, Planes::default(), &[], &[]).audio
             }
             Hosted::Voice(node) => {
                 let node = node.as_mut().expect("placed");
@@ -770,13 +782,8 @@ fn a_voice_with_its_own_loop_is_judged_by_its_window(host: Host) {
     assert!(out[0][WRAP..].iter().all(|s| s.is_finite() && *s <= 0.75));
 }
 
-// A voice node refuses a gain that is not finite at its constructor, so only the
-// hosts that can hold one (a pool's slot, a source) answer it with silence.
-#[test]
-fn a_non_finite_gain_renders_silence_in_a_pool() {
-    a_non_finite_gain_renders_silence(Host::Pool);
-}
-
+// A voice node and a pool's row refuse a gain that is not finite at their
+// constructor, so only the host that can hold one (a source) answers it with silence.
 #[test]
 fn a_non_finite_gain_renders_silence_in_a_source() {
     a_non_finite_gain_renders_silence(Host::Node);

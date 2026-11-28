@@ -51,14 +51,17 @@ use std::f32::consts::TAU;
 use std::path::Path;
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::contract::{self, Direct};
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
 use tutti_sampler::{
-    DiskStreamer, DiskStreamerConfig, Manual, MemorySource, PlayDirection, Playback, SlotId,
-    StepOutcome, StreamHandle, VoicePool,
+    DiskStreamer, DiskStreamerConfig, Manual, Placed, PlayDirection, Playback, SlotId, StepOutcome,
+    StreamHandle, VoiceNodeConfig, VoicePool, VoicePoolConfig,
 };
-use tutti_units::{Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor};
+use tutti_units::{
+    Amplitude, Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor,
+};
 
 const SR: f64 = 48_000.0;
 const BPM: f64 = 120.0;
@@ -221,10 +224,30 @@ fn assert_block_invariant<N: Node>(case: &str, mut build: impl FnMut() -> N) {
     }
 }
 
-/// A placed memory source, and the `play` it plays.
-fn memory_parts(wave: &Arc<Wave>, play: Playback) -> (MemorySource<f32>, Playback) {
-    let source = placed_source(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)));
-    (source, play)
+/// A pool of one row, key 1, over `voice`.
+fn pool_of(voice: impl Into<tutti_sampler::Row<f32>>) -> VoicePool<f32> {
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("stereo is a width a pool runs")
+        .row(SlotId(1), voice)
+        .expect("one row in a free key");
+    VoicePool::from(config)
+}
+
+/// The placed row of `wave` that plays as `play` says.
+fn memory_row(wave: &Arc<Wave>, play: Playback) -> VoiceNodeConfig<f32, Placed> {
+    let voice = VoiceNodeConfig::placed(placed_config(
+        Arc::clone(wave),
+        VoiceWindow::from(Beat::new(0.0)),
+    ))
+    .expect("a finite gain")
+    .speed(play.speed)
+    .direction(play.direction)
+    .stretch(play.stretch)
+    .pitch(play.pitch);
+    match play.loop_ {
+        Some(looped) => voice.looped(looped),
+        None => voice,
+    }
 }
 
 /// The memory-tier playbacks every pool case renders.
@@ -278,11 +301,7 @@ fn memory_voices_render_the_same_frames_at_any_block_length() {
     let wave = tone(1.5);
     for (name, play) in playbacks() {
         assert_block_invariant(&format!("pool, {name}"), || {
-            let mut pool = VoicePool::new();
-            let (source, play) = memory_parts(&wave, play);
-            pool.insert(SlotId(1), source, play)
-                .expect("a finite gain and a nonempty width");
-            pool
+            pool_of(memory_row(&wave, play))
         });
         assert_block_invariant(&format!("voice node, {name}"), || {
             voice_node(
@@ -357,13 +376,16 @@ fn a_disk_voice_renders_the_same_frames_at_any_block_length() {
     });
     assert_block_invariant("pool, disk voice", || {
         let (s, stream, v) = disk_voice(&path);
-        // A pool holds a disk voice only with its stream (`add_streaming`),
-        // through its handle's queue, drained on the first block.
-        let (pool, handle) = VoicePool::new().with_handle();
-        handle
-            .add_streaming(SlotId(1), v, stream, Playback::default())
-            .expect("the command queue has room in a test");
-        keep.push(Box::new((s, handle)));
-        pool
+        // A pool holds a disk voice only with its stream, in a streamed row.
+        let row = VoiceNodeConfig::streaming(
+            v,
+            stream,
+            Amplitude::new(1.0),
+            StretchFactor::UNITY,
+            Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width");
+        keep.push(Box::new(s));
+        pool_of(row)
     });
 }

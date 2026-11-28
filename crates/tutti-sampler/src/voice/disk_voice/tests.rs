@@ -81,6 +81,39 @@ pub(crate) fn voice_over(
     )
 }
 
+/// A streamed pool row over `voice`, at unity gain and `stretch`: its stream is a
+/// handle no streamer serves, which holds the stream's loop and direction cells.
+pub(crate) fn streamed_row(
+    voice: DiskVoice<f32>,
+    stretch: tutti_units::StretchFactor,
+) -> crate::Row<f32> {
+    let (tx, _streamer) = std::sync::mpsc::sync_channel(8);
+    let stream =
+        crate::StreamHandle::detached(StreamId::of(1), crate::streamer::StreamerPort::new(tx));
+    crate::Row::from(
+        crate::VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            Amplitude::UNITY,
+            stretch,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a stereo-or-narrower voice at unity gain"),
+    )
+}
+
+/// A pool of `width` outputs over one streamed row at key 0: its voice
+/// arrives at the first block.
+pub(crate) fn pool_of(row: crate::Row<f32>, width: usize) -> crate::VoicePool<f32> {
+    let config = crate::VoicePoolConfig::<f32>::new(
+        ChannelLayout::try_from(width).expect("a test width is small"),
+    )
+    .expect("a sampler width")
+    .row(crate::SlotId(0), row)
+    .expect("one row in a free key");
+    crate::VoicePool::from(config)
+}
+
 /// At unity rate a placed voice reads one file frame per output
 /// frame, exactly: output frame `i` is the ring's frame `i`, and after 8
 /// blocks of 64 it stands on frame 511.
@@ -1054,20 +1087,9 @@ fn a_placed_ring_jump_edge_is_allocation_free() {
 /// and a start, all inside the guard.
 #[test]
 fn a_stretching_disk_voice_is_allocation_free_through_its_seats() {
-    use crate::voice::{Playback, SlotId, Voice, VoicePool, VoiceSource};
     use tutti_units::StretchFactor;
     const BLOCK: usize = 64;
-    let mut pool = VoicePool::new();
-    pool.insert_voice(
-        SlotId(0),
-        Voice {
-            source: VoiceSource::Disk(wide_clip(2)),
-            play: Playback {
-                stretch: StretchFactor::new(1.5),
-                ..Playback::default()
-            },
-        },
-    );
+    let pool = pool_of(streamed_row(wide_clip(2), StretchFactor::new(1.5)), 2);
     let pool = tutti_graph::contract::prepared(pool, SampleRate::of(SR), BLOCK);
     let mut direct = Direct::new(pool, SampleRate::of(SR), BLOCK);
     let t = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
@@ -1095,19 +1117,11 @@ fn a_stretching_disk_voice_is_allocation_free_through_its_seats() {
 /// pool, a 6-channel clip in a stereo pool, over 8 rolling blocks.
 #[test]
 fn a_streamed_clip_wider_than_its_pool_mixes_its_first_channels() {
-    use crate::voice::{Playback, SlotId, Voice, VoicePool, VoiceSource};
     const BLOCK: usize = 64;
     for (width, pool_width) in [(2usize, 1usize), (6, 2)] {
-        let mut pool = VoicePool::with_channels(
-            ChannelLayout::try_from(pool_width).expect("a test width is small"),
-        )
-        .expect("a sampler width");
-        pool.insert_voice(
-            SlotId(0),
-            Voice {
-                source: VoiceSource::Disk(wide_clip(width)),
-                play: Playback::default(),
-            },
+        let pool = pool_of(
+            streamed_row(wide_clip(width), tutti_units::StretchFactor::UNITY),
+            pool_width,
         );
         let pool = tutti_graph::contract::prepared(pool, SampleRate::of(SR), BLOCK);
         let mut direct = Direct::new(pool, SampleRate::of(SR), BLOCK);
@@ -1458,16 +1472,11 @@ type Script = [(bool, usize, Option<f64>)];
 /// of 64 at a time, returning each block's output bits (both channels).
 /// The playhead moves only while rolling.
 fn scripted_pool(script: &Script, no_skip: bool) -> Vec<[Vec<u32>; 2]> {
-    use crate::voice::{Playback, SlotId, Voice, VoicePool, VoiceSource};
     const BLOCK: usize = 64;
     let _guard = NoSkip::on(no_skip);
-    let mut pool = VoicePool::with_channels(2u16).expect("a sampler width");
-    pool.insert_voice(
-        SlotId(0),
-        Voice {
-            source: VoiceSource::Disk(wide_clip(2)),
-            play: Playback::default(),
-        },
+    let pool = pool_of(
+        streamed_row(wide_clip(2), tutti_units::StretchFactor::UNITY),
+        2,
     );
     let pool = tutti_graph::contract::prepared(pool, SampleRate::of(SR), BLOCK);
     let mut direct = Direct::new(pool, SampleRate::of(SR), BLOCK);

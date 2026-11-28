@@ -5,18 +5,25 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
-use tutti_graph::{NodeConfig, PublishedKind};
+use tutti_graph::{ForkCause, HostValues, Initials, NodeConfig, PublishedKind, RenderMode};
+use tutti_rt::Mutex;
 use tutti_units::{Cents, StretchFactor};
 
 use super::command::MAX_RESIDENT_VOICES;
-use super::node_config::{Free, Placed, Streamed, VoiceNodeConfig};
-use super::types::SlotId;
+use super::memory_source::VoiceWindow;
+use super::node_config::{Built, Free, Placed, Streamed, VoiceDrive, VoiceNodeConfig};
+use super::node_controls::Steering;
+use super::pool::VoicePool;
+use super::types::{Playback, SlotId, Voice};
+use crate::streamer::StreamHandle;
 use crate::{PlaceError, SamplerFloat, voice_width};
 
 const _: () = assert!(MAX_RESIDENT_VOICES <= u16::MAX as usize);
 
 tutti_units::ranged! {
-    /// How many voices a pool holds at most: at least one.
+    /// How many voices a pool holds at most: at least one. Not a render budget: the
+    /// slot vector and the rings are sized from it, and each voice costs what its
+    /// source costs, so there is no upper bound beyond the type's.
     VoiceCount(u16), VoiceCountOutOfRange, "at least one voice", |raw| raw >= 1
 }
 
@@ -53,9 +60,54 @@ pub enum TableError {
 
 /// The stretch and pitch a stretching row carries.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Stretching {
-    factor: StretchFactor,
-    pitch: Cents,
+pub(crate) struct Stretching {
+    pub(crate) factor: StretchFactor,
+    pub(crate) pitch: Cents,
+}
+
+/// What a row asks of its voice that is a value: every one is applied to a
+/// running voice by comparison with what it last applied.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RowValues {
+    /// The gain, speed, loop and direction, and the stretch and pitch of a
+    /// stretching row (unity and zero for one that does not stretch).
+    pub(crate) play: Playback,
+    /// The window of a placed resident voice. A streamed voice's window is its
+    /// stream's, fixed when the stream was opened.
+    pub(crate) window: Option<VoiceWindow>,
+    /// The play state of a free-running voice.
+    pub(crate) steering: Steering,
+    /// Whether the row stretches: structure, so equal for a voice and its row.
+    pub(crate) stretching: bool,
+}
+
+/// `config` with `stretch` as its stretch and pitch: the row's, not the config's.
+fn with_stretch<F: SamplerFloat, D: VoiceDrive>(
+    config: &VoiceNodeConfig<F, D>,
+    stretch: Option<Stretching>,
+) -> VoiceNodeConfig<F, D> {
+    match stretch {
+        Some(Stretching { factor, pitch }) => config.clone().stretched_by(factor, pitch),
+        None => config.clone(),
+    }
+}
+
+/// What `config` asks that is a value, with `stretch` as its stretch and pitch.
+fn values_of<F: SamplerFloat, D: VoiceDrive>(
+    config: &VoiceNodeConfig<F, D>,
+    stretch: Option<Stretching>,
+) -> RowValues {
+    let (mut play, window, steering) = config.asks();
+    if let Some(Stretching { factor, pitch }) = stretch {
+        play.stretch = factor;
+        play.pitch = pitch;
+    }
+    RowValues {
+        play,
+        window,
+        steering,
+        stretching: stretch.is_some(),
+    }
 }
 
 /// The config a row was made from, one arm per drive.
@@ -75,7 +127,12 @@ enum RowForm<F: SamplerFloat> {
 /// [`stretching`](Self::stretching) is how a warped row starts at unity. A row
 /// that does not stretch has no factor or pitch to hold. The factor and the
 /// pitch of a stretching row, and the gain, speed, loop, direction, window and
-/// steering, are values.
+/// steering, are values, held as units ([`Amplitude`](tutti_units::Amplitude),
+/// [`PlaybackRate`](tutti_units::PlaybackRate), [`StretchFactor`], [`Cents`]).
+///
+/// A streamed row's loop and direction are its stream's cells and nothing else: the
+/// pool's controls write them from the row when the table is written, and the node
+/// never reads them from the table.
 pub struct Row<F: SamplerFloat> {
     /// The config with its stretch and pitch at their defaults: a row's
     /// stretch is `stretch`, not the config's.
@@ -106,6 +163,54 @@ impl<F: SamplerFloat> Row<F> {
     pub fn stretching(mut self, factor: StretchFactor, pitch: Cents) -> Self {
         self.stretch = Some(Stretching { factor, pitch });
         self
+    }
+
+    /// What the row asks that is a value, read on the audio thread: copies,
+    /// nothing allocated.
+    pub(crate) fn values(&self) -> RowValues {
+        match &self.form {
+            RowForm::Free(c) => values_of(c, self.stretch),
+            RowForm::Placed(c) => values_of(c, self.stretch),
+            RowForm::Streamed(c) => values_of(c, self.stretch),
+        }
+    }
+
+    /// The voice the row describes, at its values. A streamed row's reader is taken,
+    /// or waited for. Control side.
+    pub(crate) fn built(&self) -> Built<F> {
+        match &self.form {
+            RowForm::Free(c) => with_stretch(c, self.stretch).built(),
+            RowForm::Placed(c) => with_stretch(c, self.stretch).built(),
+            RowForm::Streamed(c) => with_stretch(c, self.stretch).built(),
+        }
+    }
+
+    /// The voice a fork of the pool plays for this row.
+    pub(crate) fn forked(&self, mode: RenderMode) -> Result<Voice<F>, ForkCause> {
+        match &self.form {
+            RowForm::Free(c) => with_stretch(c, self.stretch).forked(mode),
+            RowForm::Placed(c) => with_stretch(c, self.stretch).forked(mode),
+            RowForm::Streamed(c) => with_stretch(c, self.stretch).forked(mode),
+        }
+    }
+
+    /// The stream a streamed row reads, whose cells the controls sweep.
+    pub(crate) fn stream(&self) -> Option<Arc<Mutex<StreamHandle<F>>>> {
+        match &self.form {
+            RowForm::Streamed(c) => c.stream(),
+            RowForm::Free(_) | RowForm::Placed(_) => None,
+        }
+    }
+
+    /// Writes the row's loop and direction to its stream's cells, which the
+    /// streamer reads: the one place a streamed row's loop and direction are
+    /// written, and the only place they are read from (the node reads the
+    /// stream's cells, never the table). A resident row has no stream. Control
+    /// side.
+    pub(crate) fn steer_stream(&self) {
+        if let RowForm::Streamed(c) = &self.form {
+            c.steer_stream();
+        }
     }
 
     /// Whether `other` is the same voice with other values: the drive, the wave
@@ -317,6 +422,36 @@ impl<F: SamplerFloat> VoicePoolConfig<F> {
     #[must_use]
     pub fn table(&self) -> &Arc<VoiceTable<F>> {
         &self.table
+    }
+
+    /// The output width.
+    #[must_use]
+    pub(crate) fn channels(&self) -> ChannelLayout {
+        self.channels
+    }
+
+    /// The voices the pool holds at most.
+    #[must_use]
+    pub(crate) fn capacity(&self) -> VoiceCount {
+        self.voices
+    }
+}
+
+impl<F: SamplerFloat> NodeConfig<F> for VoicePoolConfig<F> {
+    type Node = VoicePool<F>;
+
+    fn build(&self, _: &HostValues) -> VoicePool<F> {
+        VoicePool::from(self.clone())
+    }
+
+    /// The width and the voice count: the slot vector and the rings are sized
+    /// from them. The rows are a published value.
+    fn same_structure(&self, other: &Self) -> bool {
+        self.channels == other.channels && self.voices == other.voices
+    }
+
+    fn initials(&self) -> Initials {
+        Initials::new().published::<VoiceTableKind<F>>(Arc::clone(&self.table))
     }
 }
 

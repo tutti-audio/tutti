@@ -155,12 +155,6 @@ pub fn spare_count<F: crate::SamplerFloat>(pool: &crate::VoicePool<F>) -> usize 
     pool.spare_count()
 }
 
-/// The voices `handle` has sent a spare vocoder and not taken back: the control side's
-/// accounting of what the transport's loop asks of the pool.
-pub fn spares_sent<F: crate::SamplerFloat>(handle: &crate::VoicePoolHandle<F>) -> usize {
-    handle.spares_sent()
-}
-
 /// A transport a test can move between blocks, as a real one moves.
 ///
 /// Interior-mutable and shared (`Arc`), so a test can move it from inside a
@@ -372,6 +366,15 @@ pub fn wait_for_open_threaded<D, F: tutti_rt::RingFloat>(
     Ok(streamer
         .adopt(opening.run()?)
         .expect("a running streamer adopts what it read"))
+}
+
+/// `pool` with the controls that steer it, without a graph: what a test that
+/// renders a pool by hand writes its table through ([`Published::replace`](tutti_graph::Published::replace)).
+/// A pool inserted into a graph takes its controls from `into_parts`.
+pub fn controlled_pool<F: crate::SamplerFloat>(
+    pool: crate::VoicePool<F>,
+) -> (crate::VoicePool<F>, crate::VoicePoolControls<F>) {
+    pool.controlled()
 }
 
 #[cfg(test)]

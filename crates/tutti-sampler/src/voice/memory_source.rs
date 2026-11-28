@@ -199,13 +199,14 @@ impl<F: Float> MemorySourceConfig<F> {
         self
     }
 
-    /// This config with `other`'s window, where both are placed: a window is a
-    /// value of a placed voice, and being placed is structure.
-    pub(crate) fn with_window_of(mut self, other: &Self) -> Self {
-        if self.window.is_some() && other.window.is_some() {
-            self.window = other.window;
-        }
-        self
+    /// Whether `other` is this source with other values: the wave (by identity), the width
+    /// and its placement, and whether the voice is placed on the transport are equal; the
+    /// gain, speed, loop and window are not compared. Allocation-free.
+    pub(crate) fn same_structure(&self, other: &Self) -> bool {
+        self.wave == other.wave
+            && self.channels == other.channels
+            && self.place == other.place
+            && self.window.is_some() == other.window.is_some()
     }
 }
 

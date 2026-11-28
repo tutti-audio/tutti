@@ -12,11 +12,12 @@ use std::sync::Arc;
 
 use tutti_buffers::{ChannelLayout, Interleaved, Planes, Wave};
 use tutti_dsp::{ColaGeometry, HopSize, PhaseVocoder, StftGeometry, WindowLength};
-use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition, contract};
+use tutti_graph::{Env, Node, PlayClock, Published, TransportChanges, TransportPosition, contract};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_sampler::testing::{MockTransport, voice_node};
+use tutti_sampler::testing::{MockTransport, controlled_pool, voice_node};
 use tutti_sampler::{
-    MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool, VoicePoolHandle, VoiceWindow,
+    MemorySourceConfig, Placed, Playback, Row, SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig,
+    VoicePoolControls, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, Cents, Frame, SampleRate, Samples, StretchFactor};
 
@@ -52,51 +53,62 @@ fn source_config_from(wave: &Arc<Wave>, start: f64) -> MemorySourceConfig<f32> {
         .window(VoiceWindow::from(Beat::new(start)))
 }
 
-fn source_from(wave: &Arc<Wave>, start: f64) -> MemorySource<f32> {
-    MemorySource::from(source_config_from(wave, start))
+/// The placed voice of `wave` from beat `start`, stretched by `stretch` and shifted by `cents`.
+fn placed(wave: &Arc<Wave>, start: f64, stretch: f64, cents: f64) -> VoiceNodeConfig<f32, Placed> {
+    VoiceNodeConfig::placed(source_config_from(wave, start))
+        .expect("a finite gain and a nonempty width")
+        .stretch(StretchFactor::new(stretch))
+        .pitch(Cents::new(cents))
+}
+
+/// The row of `wave` from beat `start` with a vocoder at unity: a row that stretches
+/// owns one whatever its factor.
+fn unity_row(wave: &Arc<Wave>, start: f64) -> Row<f32> {
+    Row::from(placed(wave, start, 1.0, 0.0)).stretching(StretchFactor::UNITY, Cents::new(0.0))
+}
+
+/// A pool of `wave`'s width holding `rows` under their keys.
+fn pool_of(
+    wave: &Arc<Wave>,
+    rows: impl IntoIterator<Item = (u128, Row<f32>)>,
+) -> VoicePoolConfig<f32> {
+    rows.into_iter().fold(
+        VoicePoolConfig::<f32>::new(wave.layout()).expect("a width the sampler reads"),
+        |config, (key, row)| config.row(SlotId(key), row).expect("a free key"),
+    )
 }
 
 /// `wave` placed at beat 0 in a pool, stretched by `stretch` and shifted by
 /// `cents`, rendered `frames` frames in blocks of [`BLOCK`]; `each` runs before
-/// every block with its index and the pool's handle.
+/// every block with its index and the pool's controls.
 fn render(
     wave: &Arc<Wave>,
     stretch: f64,
     cents: f64,
     frames: usize,
-    each: impl FnMut(usize, &VoicePoolHandle<f32>, &MockTransport),
+    each: impl FnMut(usize, &VoicePoolControls<f32>, &MockTransport),
 ) -> Vec<Vec<f32>> {
-    render_from(wave, 0.0, stretch, cents, frames, each)
+    render_row(
+        wave,
+        Row::from(placed(wave, 0.0, stretch, cents)),
+        frames,
+        each,
+    )
 }
 
-/// [`render`] with the wave placed from beat `start`.
-fn render_from(
+/// [`render`] of the row `row` of `wave`.
+fn render_row(
     wave: &Arc<Wave>,
-    start: f64,
-    stretch: f64,
-    cents: f64,
+    row: Row<f32>,
     frames: usize,
-    mut each: impl FnMut(usize, &VoicePoolHandle<f32>, &MockTransport),
+    mut each: impl FnMut(usize, &VoicePoolControls<f32>, &MockTransport),
 ) -> Vec<Vec<f32>> {
-    let (pool, handle) = VoicePool::with_channels(wave.layout())
-        .expect("a width the sampler reads")
-        .with_handle();
+    let (pool, controls) = controlled_pool(VoicePool::from(pool_of(wave, [(1, row)])));
     let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    handle
-        .add(
-            SlotId(1),
-            source_from(wave, start),
-            Playback {
-                stretch: StretchFactor::new(stretch),
-                pitch: Cents::new(cents),
-                ..Default::default()
-            },
-        )
-        .expect("the command queue has room in a test");
     let mut out = vec![Vec::new(); usize::from(wave.layout().count())];
     for index in 0..frames / BLOCK {
-        each(index, &handle, &transport);
+        each(index, &controls, &transport);
         let block = contract::drive_input(
             &mut pool,
             &transport.env(BLOCK, SampleRate::of(SR)),
@@ -216,7 +228,12 @@ fn a_non_integer_ratio_plays_n_frames_over_n_times_the_ratio() {
     let source = wave(60_000, &[&tone_burst, &tone_burst]);
     for ratio in [1.5, 0.8] {
         // Placed at beat 1, so the voice primes before its window opens and loses none.
-        let out = render_from(&source, 1.0, ratio, 0.0, 70_000, |_, _, _| {});
+        let out = render_row(
+            &source,
+            Row::from(placed(&source, 1.0, ratio, 0.0)),
+            70_000,
+            |_, _, _| {},
+        );
         let half = 0.5 / 2.0f64.sqrt() / 2.0;
         let loud: Vec<usize> = out[0]
             .as_chunks::<RES>()
@@ -279,11 +296,10 @@ fn a_ratio_step_mid_play_keeps_every_block_within_a_decibel() {
     let source = wave(120_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
     for (first, second) in [(0.8, 1.0667), (1.0667, 0.8), (1.01, 1.05)] {
         let step_at = 320; // a block, 20 480 frames in
-        let out = render(&source, first, 0.0, 60_000, |index, handle, _| {
+        let out = render(&source, first, 0.0, 60_000, |index, controls, _| {
             if index == step_at {
-                handle
-                    .set_stretch(SlotId(1), StretchFactor::new(second), Cents::new(0.0))
-                    .expect("the command queue has room in a test");
+                let stepped = Row::from(placed(&source, 0.0, second, 0.0));
+                controls.replace(pool_of(&source, [(1, stepped)]).table());
             }
         });
         let steady = 0.5 / 2.0f64.sqrt();
@@ -359,13 +375,7 @@ fn an_onset_lands_at_its_timeline_frame_through_a_pool() {
     let impulse = |i: usize| if i == AT { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&impulse, &impulse]);
     let due = 24_000 + AT;
-    let out = render_from(&source, 1.0, 1.5, 0.0, 32_000, |index, handle, _| {
-        if index == 0 {
-            handle
-                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-                .expect("the command queue has room in a test");
-        }
-    });
+    let out = render_row(&source, unity_row(&source, 1.0), 32_000, |_, _, _| {});
     let bound = 4.0 * f32_transform_error();
     for (n, &y) in out[0].iter().enumerate() {
         let want = if n == due { 1.0 } else { 0.0 };
@@ -513,16 +523,16 @@ fn a_reseat_sounds_after_the_priming_closed_form() {
     let (f, seek_block) = (1000.0, 375);
     let seek = seek_block * BLOCK;
     let source = wave(300_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, 0.0)]);
-    let out = render(&source, 1.5, 0.0, 40_000, |index, handle, transport| {
-        if index == 0 {
-            handle
-                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-                .expect("the command queue has room in a test");
-        }
-        if index == seek_block {
-            transport.seek(Beat::new(5.0));
-        }
-    });
+    let out = render_row(
+        &source,
+        unity_row(&source, 0.0),
+        40_000,
+        |index, _, transport| {
+            if index == seek_block {
+                transport.seek(Beat::new(5.0));
+            }
+        },
+    );
     let silent = priming();
     assert!(
         out[0][seek..seek + silent].iter().all(|&x| x == 0.0),
@@ -560,14 +570,16 @@ fn a_seat_short_of_a_window_of_history_sounds_on_time() {
     let at = ORIGIN + priming();
     let hit = |i: usize| if i == at { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&hit, &hit]);
-    let out = render(&source, 1.5, 0.0, 6_000, |index, handle, transport| {
-        if index == 0 {
-            transport.seek(Beat::new(0.05));
-            handle
-                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-                .expect("the command queue has room in a test");
-        }
-    });
+    let out = render_row(
+        &source,
+        unity_row(&source, 0.0),
+        6_000,
+        |index, _, transport| {
+            if index == 0 {
+                transport.seek(Beat::new(0.05));
+            }
+        },
+    );
     let due = priming();
     assert!(
         out[0][..due].iter().all(|&x| x == 0.0),
@@ -598,17 +610,19 @@ fn a_clip_at_frame_zero_sounds_from_frame_zero_after_the_transport_stood() {
     assert!(STOOD * BLOCK >= priming().div_ceil(2));
     let hit = |i: usize| if i == 0 { 1.0 } else { 0.0 };
     let source = wave(20_000, &[&hit, &hit]);
-    let out = render(&source, 1.5, 0.0, 12_000, |index, handle, transport| {
-        if index == 0 {
-            transport.set_rolling(false);
-            handle
-                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-                .expect("the command queue has room in a test");
-        }
-        if index == STOOD {
-            transport.set_rolling(true);
-        }
-    });
+    let out = render_row(
+        &source,
+        unity_row(&source, 0.0),
+        12_000,
+        |index, _, transport| {
+            if index == 0 {
+                transport.set_rolling(false);
+            }
+            if index == STOOD {
+                transport.set_rolling(true);
+            }
+        },
+    );
     let due = STOOD * BLOCK;
     let bound = 4.0 * f32_transform_error();
     for (n, &y) in out[0].iter().enumerate() {
@@ -627,20 +641,22 @@ fn a_clip_at_frame_zero_sounds_from_frame_zero_after_the_transport_stood() {
 fn a_locate_while_stopped_primes_the_new_place() {
     let f = 1000.0;
     let source = wave(300_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, 0.0)]);
-    let out = render(&source, 1.5, 0.0, 20_000, |index, handle, transport| {
-        if index == 0 {
-            transport.set_rolling(false);
-            handle
-                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-                .expect("the command queue has room in a test");
-        }
-        if index == 20 {
-            transport.seek(Beat::new(2.0));
-        }
-        if index == 80 {
-            transport.set_rolling(true);
-        }
-    });
+    let out = render_row(
+        &source,
+        unity_row(&source, 0.0),
+        20_000,
+        |index, _, transport| {
+            if index == 0 {
+                transport.set_rolling(false);
+            }
+            if index == 20 {
+                transport.seek(Beat::new(2.0));
+            }
+            if index == 80 {
+                transport.set_rolling(true);
+            }
+        },
+    );
     let from = 80 * BLOCK;
     let tone = sine(f, 0.5, 0.0);
     let bound = 8.0 * f32_transform_error();
@@ -659,13 +675,7 @@ fn a_locate_while_stopped_primes_the_new_place() {
 fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
     let f = 1000.0;
     let source = wave(60_000, &[&sine(f, 0.5, 0.0), &sine(f, 0.5, 0.0)]);
-    let out = render(&source, 1.5, 0.0, 12_000, |index, handle, _| {
-        if index == 0 {
-            handle
-                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-                .expect("the command queue has room in a test");
-        }
-    });
+    let out = render_row(&source, unity_row(&source, 0.0), 12_000, |_, _, _| {});
     let silent = priming();
     assert!(out[0][..silent].iter().all(|&x| x == 0.0));
     let tone = sine(f, 0.5, 0.0);
@@ -683,7 +693,7 @@ fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
 /// `wave` placed at beat 0 with a vocoder at unity (a voice turned back to 1.0 keeps it),
 /// rendered `frames` frames under a transport that rolls from beat 0 at 120 BPM and wraps
 /// the loop `region_at(block)` names, `None` for no loop; as the host's clock moves it.
-/// `spares`: the handle's control tick runs after each block, reading the loop the block
+/// `spares`: the controls' control tick runs after each block, reading the loop the block
 /// carried (`false`: it never does, so the voice has no spare).
 fn render_looped(
     wave: &Arc<Wave>,
@@ -691,23 +701,9 @@ fn render_looped(
     spares: bool,
     region_at: impl Fn(usize) -> Option<(f64, f64)>,
 ) -> Vec<Vec<f32>> {
-    let (pool, handle) = VoicePool::with_channels(wave.layout())
-        .expect("a width the sampler reads")
-        .with_handle();
+    let (pool, controls) =
+        controlled_pool(VoicePool::from(pool_of(wave, [(1, unity_row(wave, 0.0))])));
     let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
-    handle
-        .add(
-            SlotId(1),
-            source_from(wave, 0.0),
-            Playback {
-                stretch: StretchFactor::new(1.5),
-                ..Default::default()
-            },
-        )
-        .expect("the command queue has room in a test");
-    handle
-        .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-        .expect("the command queue has room in a test");
     let mut clock = FrameClock::new(Beat::new(0.0), Bpm::of(120.0), SampleRate::of(SR));
     let mut out = vec![Vec::new(); usize::from(wave.layout().count())];
     for index in 0..frames / BLOCK {
@@ -725,7 +721,7 @@ fn render_looped(
         // The control tick after the block that carried the loop sends the spare, ahead
         // of the block that wraps under it.
         if spares {
-            tutti_rt::Reclaim::reclaim(&handle);
+            tutti_rt::Reclaim::reclaim(&controls);
         }
         for (channel, plane) in out.iter_mut().zip(&block) {
             channel.extend_from_slice(plane);
@@ -778,7 +774,7 @@ fn a_loop_set_while_playing_is_swapped_in_without_a_gap() {
 }
 
 /// A voice with no spare that meets a wrap flushes as a seek does (the documented fallback):
-/// the handle is never told the loop, so the first wrap (frame 18 000) leaves the voice
+/// the controls' tick never runs, so the first wrap (frame 18 000) leaves the voice
 /// silent while it primes, and it sounds the loop again after that, until the next wrap
 /// (30 000).
 #[test]
@@ -801,21 +797,21 @@ fn a_voice_without_a_spare_flushes_at_a_wrap() {
 #[test]
 fn only_a_stretched_voice_under_the_loop_carries_a_spare() {
     let wave = wave(48_000, &[&sine(1500.0, 0.5, 0.0), &sine(1500.0, 0.5, 0.0)]);
-    let (pool, handle) = VoicePool::with_channels(wave.layout())
-        .expect("a width the sampler reads")
-        .with_handle();
+    // The rows as `(key, window start, stretch)`: a row at unity does not stretch.
+    let table = |rows: [(u128, f64, f64); 3]| {
+        pool_of(
+            &wave,
+            rows.map(|(key, start, stretch)| (key, Row::from(placed(&wave, start, stretch, 0.0)))),
+        )
+    };
+    let (pool, controls) = controlled_pool(VoicePool::from(table([
+        (1, 0.0, 1.5),
+        (2, 8.0, 1.5),
+        (3, 0.0, 1.0),
+    ])));
     let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let stretch = |stretch: f64| Playback {
-        stretch: StretchFactor::new(stretch),
-        ..Default::default()
-    };
-    for (id, start, stretching) in [(1, 0.0, 1.5), (2, 8.0, 1.5), (3, 0.0, 1.0)] {
-        handle
-            .add(SlotId(id), source_from(&wave, start), stretch(stretching))
-            .expect("the command queue has room in a test");
-    }
-    // A block carries the loop to the handle's feed; the tick sends the spares; the next
+    // A block carries the loop to the controls' feed; the tick sends the spares; the next
     // block's drain applies them.
     let mut spares = |region: Option<LoopRange>| {
         transport.set_loop(region);
@@ -829,9 +825,15 @@ fn only_a_stretched_voice_under_the_loop_carries_a_spare() {
             );
         };
         block(&mut pool);
-        tutti_rt::Reclaim::reclaim(&handle);
+        tutti_rt::Reclaim::reclaim(&controls);
         block(&mut pool);
-        tutti_sampler::testing::spare_count(&pool)
+        let carried = tutti_sampler::testing::spare_count(&pool);
+        assert_eq!(
+            controls.spares(),
+            carried,
+            "the controls' account is the voices' spares"
+        );
+        carried
     };
     let looped = || Some(LoopRange::new(Beat::new(0.25), Beat::new(0.75)).expect("a loop"));
     assert_eq!(spares(None), 0, "no loop: no spare");
@@ -841,24 +843,16 @@ fn only_a_stretched_voice_under_the_loop_carries_a_spare() {
         "only voice 1 is stretched under the loop"
     );
     assert_eq!(spares(None), 0, "the loop off retires the spare");
-    assert_eq!(
-        handle.collect_retired(),
-        1,
-        "and the retirement ring hands it back"
-    );
     assert_eq!(spares(looped()), 1, "the loop on sends a new one");
-    let at = |start: f64| VoiceWindow::from(Beat::new(start));
-    handle.set_window(SlotId(2), at(0.0)).expect("room");
+    controls.replace(table([(1, 0.0, 1.5), (2, 0.0, 1.5), (3, 0.0, 1.0)]).table());
     assert_eq!(
         spares(looped()),
         2,
         "a window moved under the loop gets one"
     );
-    handle.set_window(SlotId(1), at(8.0)).expect("room");
+    controls.replace(table([(1, 8.0, 1.5), (2, 0.0, 1.5), (3, 0.0, 1.0)]).table());
     assert_eq!(spares(looped()), 1, "a window moved off the loop loses it");
-    handle
-        .set_stretch(SlotId(3), StretchFactor::new(1.5), Cents::new(0.0))
-        .expect("room");
+    controls.replace(table([(1, 8.0, 1.5), (2, 0.0, 1.5), (3, 0.0, 1.5)]).table());
     assert_eq!(
         spares(looped()),
         2,

@@ -59,7 +59,9 @@ use tutti_codec::IntPcm;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{RenderGraph, Setup};
 use tutti_graph::GraphBuilder;
-use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool, VoiceWindow};
+use tutti_sampler::{
+    MemorySourceConfig, SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig, VoiceWindow,
+};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
@@ -110,24 +112,20 @@ fn voice_graph(stretch: f64, cents: f64) -> (RenderGraph, Arc<OfflineTimeline>) 
     // and read as an attenuation bug rather than an exhausted source.
     let wave = tone((SR * DUR_S) as usize * 4);
 
-    let source = MemorySource::from(
-        MemorySourceConfig::new(wave, ChannelLayout::STEREO)
-            .expect("a placeable wave")
-            .window(VoiceWindow::from(Beat::new(0.0))),
-    );
-
-    let play = Playback {
-        stretch: StretchFactor::new(stretch),
-        pitch: Cents::new(cents),
-        ..Default::default()
-    };
-
-    let mut pool = VoicePool::new();
-    // `insert_voice` directly rather than through the handle: this is the
-    // control thread, there is no audio thread to hand a command to, and going
-    // through the channel would need a pump step that proves nothing here.
-    pool.insert(SlotId(1), source, play)
-        .expect("a finite gain and a nonempty width");
+    let source = MemorySourceConfig::new(wave, ChannelLayout::STEREO)
+        .expect("a placeable wave")
+        .window(VoiceWindow::from(Beat::new(0.0)));
+    let row = VoiceNodeConfig::placed(source)
+        .expect("a finite gain and a nonempty width")
+        .stretch(StretchFactor::new(stretch))
+        .pitch(Cents::new(cents));
+    // The pool's table holds the voice: this is the control thread, and the
+    // first block takes the voice in.
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("a stereo pool")
+        .row(SlotId(1), row)
+        .expect("a row in the table");
+    let pool = VoicePool::from(config);
 
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
     let (id, _handle) = g.add_with_controls(pool);

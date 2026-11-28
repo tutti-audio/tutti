@@ -66,6 +66,11 @@ impl<F: SamplerFloat> Home<F> {
         }
     }
 
+    /// A copy of the config's voice that reads no ring: what a fork copies.
+    pub(crate) fn template(&self) -> DiskVoice<F> {
+        self.template.clone()
+    }
+
     /// The voice a node is built over, and how the node holds it: the reader when
     /// it is home, else the template and a place in the queue for the reader.
     /// Control side.

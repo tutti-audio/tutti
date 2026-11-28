@@ -13,7 +13,7 @@
 //! gives analytically.
 
 use tutti_graph::testing::WireDeclared;
-use tutti_sampler::testing::placed_source;
+use tutti_sampler::testing::{placed_config, placed_source};
 
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
@@ -21,11 +21,12 @@ use tutti_sampler::VoiceWindow;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
+use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, Prepare, TransportPosition, WorkerPool};
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_sampler::{Playback, SlotId, VoicePool, Wave};
+use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig, Wave};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -74,16 +75,19 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
         let key = NodeKey(k + 1);
         // Placed before the loop's start, on it, and inside the fade.
         let at = [0.0, LOOP.0, LOOP.0 + 0.002][k as usize % 3] + k as f64 * 0.0001;
-        let source = placed_source(Arc::clone(wave), VoiceWindow::from(Beat::new(at)));
+        let window = VoiceWindow::from(Beat::new(at));
         match host {
             Host::Pool => {
-                let mut pool = VoicePool::new();
-                pool.insert(SlotId(1), source, Playback::default())
-                    .expect("a finite gain and a nonempty width");
-                ed.insert(key, "pool", pool);
+                let row = VoiceNodeConfig::placed(placed_config(Arc::clone(wave), window))
+                    .expect("a finite gain");
+                let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+                    .expect("stereo is a width a pool runs")
+                    .row(SlotId(1), row)
+                    .expect("one row in a free key");
+                ed.insert(key, "pool", VoicePool::from(config));
             }
             Host::Node => {
-                ed.insert(key, "source", source);
+                ed.insert(key, "source", placed_source(Arc::clone(wave), window));
             }
         }
         for port in 0..2u16 {

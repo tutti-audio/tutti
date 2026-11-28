@@ -16,10 +16,13 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::Wave;
+use tutti_buffers::{ChannelLayout, Wave};
 use tutti_graph::contract::Direct;
-use tutti_sampler::testing::{MockTransport, placed_config, placed_source, voice_node};
-use tutti_sampler::{Playback, SlotId, VoiceNode, VoicePool, VoiceWindow};
+use tutti_sampler::testing::{MockTransport, placed_config, voice_node};
+use tutti_sampler::{
+    Playback, SlotId, VoiceCount, VoiceNode, VoiceNodeConfig, VoicePool, VoicePoolConfig,
+    VoiceWindow,
+};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, Seconds, StretchFactor};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -84,19 +87,23 @@ fn reseat_case(c: &mut Criterion, name: &str, voices: u128, block: usize) {
         wave.set(1, i, s);
     }
     let wave = Arc::new(wave);
-    let (pool, handle) = VoicePool::<f32>::new().with_handle();
-    let mut direct = Direct::new(pool, RATE, block);
+    let mut config = VoicePoolConfig::<f32>::new(ChannelLayout::STEREO)
+        .expect("stereo is a width a pool runs")
+        .voices(VoiceCount::new(voices as u16).expect("at least one voice"))
+        .expect("no rows yet");
     for id in 0..voices {
-        let source = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
-        let play = Playback {
-            stretch: StretchFactor::new(1.5),
-            pitch: Cents::new(200.0),
-            ..Playback::default()
-        };
-        handle
-            .add(SlotId(id), source, play)
-            .expect("the command queue has room");
+        let voice = VoiceNodeConfig::placed(placed_config(
+            Arc::clone(&wave),
+            VoiceWindow::from(Beat::new(0.0)),
+        ))
+        .expect("a finite gain")
+        .stretch(StretchFactor::new(1.5))
+        .pitch(Cents::new(200.0));
+        config = config
+            .row(SlotId(id), voice)
+            .expect("a free key within the voices");
     }
+    let mut direct = Direct::new(VoicePool::from(config), RATE, block);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let seeker = Arc::clone(&transport);
     let mut run = move || {

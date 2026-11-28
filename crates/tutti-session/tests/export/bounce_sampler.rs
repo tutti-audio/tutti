@@ -1,20 +1,19 @@
 //! What a bounce renders past its range for the sampler's nodes, and what it
 //! does with a voice pool: a placed clip is the programme and rings out
 //! nothing, a free-running voice rings to the end of its wave, and a pool
-//! forks only while its voices are the ones it was built with.
+//! forks with the voices of its table.
 
 use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 use tutti_fixtures::WavePlanes;
-use tutti_sampler::testing::{free_source, placed_source};
+use tutti_sampler::testing::{free_source, placed_config};
 use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
-use tutti_graph::ForkError;
-use tutti_sampler::{Clip, Loop, Playback, SlotId, VoicePool};
-use tutti_session::{Bounce, BounceError, BounceTail, MainOutput, Range, Session};
+use tutti_sampler::{Clip, Loop, SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig};
+use tutti_session::{Bounce, BounceTail, MainOutput, Range, Session};
 use tutti_units::{Beat, PlaybackRate, SampleRate, Samples, Seconds};
 
 const RATE: f64 = 48_000.0;
@@ -119,13 +118,13 @@ fn a_free_running_voice_rings_out_its_wave() {
 #[test]
 fn a_pool_built_with_its_voices_bounces_them() {
     let mut session = session();
-    let mut pool = VoicePool::new();
-    let source = placed_source(
+    let source = placed_config(
         constant(RATE as usize, 0.25),
         tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
     );
-    pool.insert(SlotId(1), source, Playback::default())
-        .expect("a finite gain and a nonempty width");
+    let row = VoiceNodeConfig::placed(source).expect("a finite gain and a nonempty width");
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO).expect("a stereo pool");
+    let pool = VoicePool::from(config.row(SlotId(1), row).expect("a row in the table"));
     let pool = session.graph().add(pool);
     session.graph().connect(pool, MainOutput).unwrap().unfaded();
 
@@ -143,37 +142,4 @@ fn a_pool_built_with_its_voices_bounces_them() {
         planes[0].iter().all(|&s| (s - 0.25).abs() < 1e-6),
         "the pool's voice is in the render at its level"
     );
-}
-
-/// **A pool whose handle has queued a command refuses the bounce, naming
-/// it.** The voices it holds then arrive on the audio thread, where nothing
-/// control-side holds a copy: a fork would render them as silence.
-#[test]
-fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
-    let mut session = session();
-    let pool = session.graph().add(VoicePool::new());
-    session.graph().connect(pool, MainOutput).unwrap().unfaded();
-    let source = placed_source(
-        constant(RATE as usize, 0.25),
-        tutti_sampler::VoiceWindow::from(Beat::new(0.0)),
-    );
-    session
-        .graph_ref()
-        .handle(&pool)
-        .expect("the pool is in the graph")
-        .add(SlotId(1), source, Playback::default())
-        .expect("queued");
-
-    let bounce = Bounce::new()
-        .main_output(ToMemory::new())
-        .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
-        .sample_rate(SampleRate::of(RATE))
-        .tail(BounceTail::None);
-    match bounced(&mut session, bounce) {
-        Err(BounceError::Fork(ForkError::Source { key, .. })) => assert_eq!(key, pool.erase()),
-        other => panic!(
-            "expected the pool's refusal by key, got {:?}",
-            other.map(|_| ())
-        ),
-    }
 }

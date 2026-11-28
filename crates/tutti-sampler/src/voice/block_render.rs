@@ -22,24 +22,26 @@ use crate::VoiceWindow;
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
-use crate::testing::{loop_frames, placed_source};
+use crate::testing::{loop_frames, placed_config};
 
 use std::path::Path;
 use std::sync::Arc;
-use tutti_buffers::MaxBlock;
 
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::MaxBlock;
 use tutti_buffers::Wave;
 use tutti_graph::{
-    Env, Node, Offset, Prepare, RenderMode, TransportChanges, TransportPosition, contract,
+    Env, IntoNode, Node, Offset, Prepare, RenderMode, TransportChanges, TransportPosition, contract,
 };
 use tutti_music::FrameClock;
 use tutti_units::{
     Amplitude, Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor,
 };
 
+use super::node_config::{Placed, VoiceNodeConfig};
 use super::pool::VoicePool;
-use super::types::{PlayDirection, Playback, SlotId, Voice, VoiceSource};
+use super::table::{Row, VoicePoolConfig};
+use super::types::{PlayDirection, SlotId};
 use crate::{DiskStreamer, DiskStreamerConfig};
 
 const SR: f64 = 48_000.0;
@@ -72,10 +74,17 @@ fn write_wav(path: &Path) {
     tutti_fixtures::signal::write_wav_f32(path, SampleRate::of(SR), 2, &interleaved);
 }
 
-fn memory(w: &Arc<Wave>, start: f64) -> VoiceSource<f32> {
-    let mut s = placed_source(Arc::clone(w), VoiceWindow::from(Beat::new(start)));
-    s.set_render_rate(SampleRate::of(SR));
-    VoiceSource::Memory(s)
+/// A placed row over `w` from beat `start`: the stereo source config's gain is `gain`,
+/// and `options` sets the rest of the row's node config.
+fn memory(
+    w: &Arc<Wave>,
+    start: f64,
+    gain: Amplitude,
+    options: impl FnOnce(VoiceNodeConfig<f32, Placed>) -> VoiceNodeConfig<f32, Placed>,
+) -> Row<f32> {
+    let source = placed_config(Arc::clone(w), VoiceWindow::from(Beat::new(start))).gain(gain);
+    let node = VoiceNodeConfig::placed(source).expect("a finite gain on a placed source");
+    Row::from(options(node))
 }
 
 /// The host's transport: a frame clock (counted, as an engine's), rolling or
@@ -125,12 +134,6 @@ fn env(frame: u64, len: usize, transport: TransportPosition, changes: TransportC
     }
 }
 
-fn play(f: impl FnOnce(&mut Playback)) -> Playback {
-    let mut p = Playback::default();
-    f(&mut p);
-    p
-}
-
 /// The block read is the same in 256-frame blocks with the transport
 /// changing inside them as in 64-frame blocks with it changing at their
 /// starts, bit for bit, summed over a pool of voices covering every arm the
@@ -139,7 +142,7 @@ fn play(f: impl FnOnce(&mut Playback)) -> Playback {
 /// stretched and pitched at half gain, a mono wave fanned out, a 24 kHz wave
 /// on a 48 kHz clock, a six-channel wave folded to stereo, a window that
 /// opens mid-render (plain, and stretched); from disk live at unity, at 0.75x,
-/// and stretched 1.5x; and a disk voice forked offline. Through a seek (a
+/// and stretched 1.5x. Through a seek (a
 /// re-seat, a ring jump, a stretch flush) and a stop and restart, each on a
 /// frame inside a 256-frame block.
 ///
@@ -160,20 +163,20 @@ fn the_block_read_is_the_same_at_any_block_length() {
     let low = wave(2, 24_000.0);
     let six = wave(6, SR);
 
-    // Disk streams: 0..4 for the long-block pool, 4..8 for the
-    // short-block one.
+    // Disk streams: 0..3 for the long-block pool, 3..6 for the short-block one, and
+    // 6..9 and 9..12 for the pools whose offline fork is rendered.
     let mut streamer = DiskStreamer::manual(SampleRate::of(SR), DiskStreamerConfig::default())
         .expect("streamer builds");
-    // Each stream's handle is held for the whole render: dropping it would end
-    // the stream.
-    let (_streams, mut readers): (Vec<_>, Vec<_>) = (0..8)
+    // Each stream's handle is the streamed row's, and its voice sounds for as long
+    // as the row holds it.
+    let (mut streams, mut readers): (Vec<_>, Vec<_>) = (0..12)
         .map(|_| {
             let read = streamer
                 .open_stream(&path, crate::StreamStart::HEAD)
                 .run()
                 .expect("the file reads");
             let (stream, reader) = streamer.adopt(read).expect("adopts");
-            (stream, Some(reader))
+            (Some(stream), Some(reader))
         })
         .unzip();
     assert!(
@@ -181,85 +184,127 @@ fn the_block_read_is_the_same_at_any_block_length() {
         "the rings never primed"
     );
     // A stream's reader is its voice's, once: each voice takes its own.
-    let mut disk = |stream: usize| {
+    let mut disk = |stream: usize, speed: PlaybackRate, stretch: StretchFactor| {
         let reader = readers[stream]
             .take()
             .expect("each stream builds one voice");
         let mut v = crate::DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
         v.set_render(SampleRate::of(SR), RenderMode::Realtime);
-        v
+        let handle = streams[stream]
+            .take()
+            .expect("each stream builds one voice");
+        let config =
+            VoiceNodeConfig::streaming(v, handle, Amplitude::UNITY, stretch, Cents::new(0.0))
+                .expect("a stereo voice at a finite gain");
+        Row::from(config.speed(speed))
     };
 
-    let mut build = |first_disk: usize| {
-        let mut pool =
-            VoicePool::with_channels(ChannelLayout::STEREO).expect("a width the sampler reads");
-        pool.prepare(&Prepare::new(
-            SampleRate::of(SR),
-            MaxBlock::of(Samples::new(256)),
-        ));
-        let mut forked = disk(first_disk + 3).fork_copy();
-        forked.set_render(SampleRate::of(SR), RenderMode::Offline);
-        let voices: Vec<(VoiceSource<f32>, Playback)> = vec![
-            (memory(&stereo, 0.0), Playback::default()),
-            (
-                memory(&stereo, 0.0),
-                play(|p| {
-                    p.speed = PlaybackRate::of(1.37);
-                    p.gain = Amplitude::new(0.5);
-                }),
-            ),
-            (
-                memory(&stereo, 0.0),
-                play(|p| p.direction = PlayDirection::Reverse),
-            ),
-            (
-                memory(&stereo, 0.0),
-                play(|p| p.loop_ = Some(loop_frames(1_000, 9_000, 256))),
-            ),
-            (
-                memory(&stereo, 0.0),
-                play(|p| p.stretch = StretchFactor::new(0.5)),
-            ),
-            (memory(&stereo, 0.0), play(|p| p.pitch = Cents::new(700.0))),
-            (
-                memory(&stereo, 0.0),
-                play(|p| {
-                    p.stretch = StretchFactor::new(1.5);
-                    p.pitch = Cents::new(-300.0);
-                    // The stretched arm applies the gain before the filter.
-                    p.gain = Amplitude::new(0.5);
-                }),
-            ),
-            (memory(&mono, 0.0), Playback::default()),
-            (memory(&low, 0.0), Playback::default()),
-            (memory(&six, 0.0), Playback::default()),
-            (memory(&stereo, 1.0), Playback::default()),
+    let unity = Amplitude::UNITY;
+    let mut build = |first_disk: usize, with_memory: bool| {
+        let mut rows: Vec<Row<f32>> = vec![
+            memory(&stereo, 0.0, unity, |n| n),
+            memory(&stereo, 0.0, Amplitude::new(0.5), |n| {
+                n.speed(PlaybackRate::of(1.37))
+            }),
+            memory(&stereo, 0.0, unity, |n| n.direction(PlayDirection::Reverse)),
+            memory(&stereo, 0.0, unity, |n| {
+                n.looped(loop_frames(1_000, 9_000, 256))
+            }),
+            memory(&stereo, 0.0, unity, |n| n.stretch(StretchFactor::new(0.5))),
+            memory(&stereo, 0.0, unity, |n| n.pitch(Cents::new(700.0))),
+            // The stretched arm applies the gain before the filter.
+            memory(&stereo, 0.0, Amplitude::new(0.5), |n| {
+                n.stretch(StretchFactor::new(1.5)).pitch(Cents::new(-300.0))
+            }),
+            memory(&mono, 0.0, unity, |n| n),
+            memory(&low, 0.0, unity, |n| n),
+            memory(&six, 0.0, unity, |n| n),
+            memory(&stereo, 1.0, unity, |n| n),
             // Stretched, and silent until its window opens: the filter must
             // be fed nothing before then.
-            (
-                memory(&stereo, 1.0),
-                play(|p| p.stretch = StretchFactor::new(0.5)),
-            ),
-            (VoiceSource::Disk(disk(first_disk)), Playback::default()),
-            (
-                VoiceSource::Disk(disk(first_disk + 1)),
-                play(|p| p.speed = PlaybackRate::of(0.75)),
-            ),
-            (
-                VoiceSource::Disk(disk(first_disk + 2)),
-                play(|p| p.stretch = StretchFactor::new(1.5)),
-            ),
-            (VoiceSource::Disk(forked), Playback::default()),
+            memory(&stereo, 1.0, unity, |n| n.stretch(StretchFactor::new(0.5))),
+            disk(first_disk, PlaybackRate::UNITY, StretchFactor::UNITY),
+            disk(first_disk + 1, PlaybackRate::of(0.75), StretchFactor::UNITY),
+            disk(first_disk + 2, PlaybackRate::UNITY, StretchFactor::new(1.5)),
         ];
-        for (i, (source, play)) in voices.into_iter().enumerate() {
-            pool.insert_voice(SlotId(i as u128), Voice { source, play });
+        if !with_memory {
+            // Only the streamed rows: what an offline fork reads from files.
+            rows.drain(..rows.len() - 3);
         }
-        pool
+        rows.into_iter()
+            .enumerate()
+            .try_fold(
+                VoicePoolConfig::<f32>::new(ChannelLayout::STEREO)
+                    .expect("a width the sampler reads"),
+                |config, (i, row)| config.row(SlotId(i as u128), row),
+            )
+            .expect("distinct keys within the pool's voices")
     };
-    let mut long = build(0);
-    let mut short = build(4);
-    assert_eq!(long.voice_count(), 16);
+    let mut long =
+        crate::testing::prepared(VoicePool::from(build(0, true)), SampleRate::of(SR), 256);
+    let mut short =
+        crate::testing::prepared(VoicePool::from(build(3, true)), SampleRate::of(SR), 256);
+    // The offline forks of two more pools of the three streamed rows, as an export takes
+    // them: each reads its file itself (`DiskVoice::fork_copy`), whatever the ring holds,
+    // so the pair sounds only if the forked streamed rows do.
+    let mut offline = |first_disk: usize| {
+        let parts = VoicePool::from(build(first_disk, false)).into_parts();
+        let mut node = parts
+            .fork
+            .as_ref()
+            .expect("a pool forks")
+            .fork(RenderMode::Offline)
+            .expect("a pool with streamed rows forks for an offline render")
+            .node;
+        node.prepare(&offline_prepare());
+        (node, parts)
+    };
+    let (mut long_fork, _long_parts) = offline(6);
+    let (mut short_fork, _short_parts) = offline(9);
 
+    let heard = same_at_any_block_length(&mut long, &mut short, &mut streamer, None);
+    assert_eq!(long.voice_count(), 15, "every row's voice arrived");
+    assert_eq!(heard, [true, true], "silence proves nothing");
+    let heard = same_at_any_block_length(
+        &mut *long_fork,
+        &mut *short_fork,
+        &mut streamer,
+        Some(&offline_prepare()),
+    );
+    assert_eq!(
+        heard,
+        [true, true],
+        "the offline forks sound, and read the same at any block length"
+    );
+}
+
+/// What an offline render prepares its nodes with: it reads files itself, so its blocks
+/// may allocate.
+fn offline_prepare() -> Prepare {
+    Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(256)))
+        .with_render_mode(RenderMode::Offline)
+}
+
+/// One block of `node` under `env`: inside the real-time scope unless `offline` says
+/// the render is one that reads files in its blocks.
+fn drive(node: &mut dyn Node, offline: Option<&Prepare>, env: &Env) -> Vec<Vec<f32>> {
+    match offline {
+        Some(prepare) => {
+            contract::drive_input_in(node, prepare, env, Planes::default(), &[], &[]).audio
+        }
+        None => contract::drive_input(node, env, Planes::default(), &[], &[]).audio,
+    }
+}
+
+/// Renders `long` in 256-frame blocks with the transport changing inside them and
+/// `short` in 64-frame blocks with it changing at their starts, through a seek and a
+/// stop and restart, and asserts every frame equal bit for bit. Which channels sounded.
+fn same_at_any_block_length(
+    long: &mut dyn Node,
+    short: &mut dyn Node,
+    streamer: &mut DiskStreamer<crate::Manual<f32>, f32>,
+    offline: Option<&Prepare>,
+) -> [bool; 2] {
     // Events at the start of a 64-frame block, none on a 256-frame one: in
     // the long blocks each is a change in the block's `Env`.
     let events = |b: usize| match b {
@@ -298,14 +343,7 @@ fn the_block_read_is_the_same_at_any_block_length() {
             }
         }
         let frame = (big * 256) as u64;
-        let got = contract::drive_input(
-            &mut long,
-            &env(frame, 256, first, changes),
-            Planes::default(),
-            &[],
-            &[],
-        )
-        .audio;
+        let got = drive(long, offline, &env(frame, 256, first, changes));
 
         // The same span in 64-frame blocks, each event at a block's start.
         let mut want = [Vec::with_capacity(256), Vec::with_capacity(256)];
@@ -314,14 +352,11 @@ fn the_block_read_is_the_same_at_any_block_length() {
                 apply(&mut host, e);
             }
             let at = frame + (k * 64) as u64;
-            let out = contract::drive_input(
-                &mut short,
+            let out = drive(
+                short,
+                offline,
                 &env(at, 64, host.transport(), TransportChanges::NONE),
-                Planes::default(),
-                &[],
-                &[],
-            )
-            .audio;
+            );
             for (w, o) in want.iter_mut().zip(out) {
                 w.extend(o);
             }
@@ -343,5 +378,5 @@ fn the_block_read_is_the_same_at_any_block_length() {
         }
         let _ = streamer.step();
     }
-    assert_eq!(heard, [true, true], "silence proves nothing");
+    heard
 }

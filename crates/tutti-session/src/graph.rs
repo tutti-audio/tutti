@@ -972,6 +972,47 @@ impl<F: Float> Graph<F> {
         (band < controls.bands()).then(|| controls.gain_reduction_db(band))
     }
 
+    /// Whether the streamed row `row` of the pool at `key` holds its stream's
+    /// reader yet ([`StreamHold::Waiting`](tutti_sampler::StreamHold) until the
+    /// voice that holds it is collected). `None` when the node is gone, for a
+    /// resident row, and for a row whose voice is not installed. A reading: the
+    /// pool's controls are not handed out, since they are a second writer of its
+    /// table.
+    #[cfg(feature = "sampler")]
+    pub fn stream_hold(
+        &self,
+        key: &Key<tutti_sampler::VoicePool<F>>,
+        row: tutti_sampler::SlotId,
+    ) -> Option<tutti_sampler::StreamHold>
+    where
+        F: tutti_sampler::SamplerFloat,
+    {
+        self.controls(key)?.hold(row)
+    }
+
+    /// What the pool at `key` dropped or deferred since it was built. `None` when
+    /// the node is gone.
+    #[cfg(feature = "sampler")]
+    pub fn pool_drops(
+        &self,
+        key: &Key<tutti_sampler::VoicePool<F>>,
+    ) -> Option<tutti_sampler::PoolDrops>
+    where
+        F: tutti_sampler::SamplerFloat,
+    {
+        Some(self.controls(key)?.drops())
+    }
+
+    /// How many voices of the pool at `key` carry a spare vocoder for a loop wrap,
+    /// as the pool's controls sent them. `None` when the node is gone.
+    #[cfg(feature = "sampler")]
+    pub fn pool_spares(&self, key: &Key<tutti_sampler::VoicePool<F>>) -> Option<usize>
+    where
+        F: tutti_sampler::SamplerFloat,
+    {
+        Some(self.controls(key)?.spares())
+    }
+
     /// Puts `split` in the editor under `id`, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half.
     fn place<N: IntoNode<F>>(

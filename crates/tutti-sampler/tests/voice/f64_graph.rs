@@ -15,8 +15,8 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::{Prepare, Renderer, TransportPosition};
 use tutti_sampler::testing::{free_source, voice_node, wait_for_open};
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, PlayDirection, Playback,
-    SlotId, StreamStart, VoiceNode, VoiceNodeConfig, VoicePool, VoiceWindow,
+    DiskStreamer, DiskVoice, Manual, MemorySourceConfig, PlayDirection, Playback, SlotId,
+    StreamStart, VoiceNode, VoiceNodeConfig, VoicePool, VoicePoolConfig, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -108,10 +108,6 @@ fn memory_config(path: &Path) -> MemorySourceConfig<f64> {
     MemorySourceConfig::new(Arc::new(wave), ChannelLayout::STEREO)
         .expect("a stereo wave places")
         .window(VoiceWindow::from(Beat::new(0.0)))
-}
-
-fn memory(path: &Path) -> MemorySource<f64> {
-    MemorySource::from(memory_config(path))
 }
 
 /// **A free-running `MemorySource<f64>` is a node of an `f64` graph and plays
@@ -233,19 +229,18 @@ fn a_reversed_disk_voice_in_an_f64_graph_reads_the_mirrored_frames() {
     assert_plays(&got, TURNED, |i| FRAMES - 1 - i, "disk reverse");
 }
 
-/// **A `VoicePool<f64>` adds a memory voice through its handle, and plays the
-/// file's values** in an `f64` graph.
+/// **A `VoicePool<f64>` plays a memory row, the file's values** in an `f64`
+/// graph.
 #[test]
-fn a_pool_in_an_f64_graph_plays_a_voice_added_through_its_handle() {
+fn a_pool_in_an_f64_graph_plays_a_memory_row() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let (mut solo, _, controls) = Renderer::<f64>::alone(VoicePool::<f64>::new(), prepare());
-    controls
-        .add(
-            SlotId(1),
-            memory(&write_file(dir.path())),
-            Playback::default(),
-        )
-        .expect("the add queues");
+    let row =
+        VoiceNodeConfig::placed(memory_config(&write_file(dir.path()))).expect("a finite gain");
+    let config = VoicePoolConfig::<f64>::new(ChannelLayout::STEREO)
+        .expect("stereo is a width a pool runs")
+        .row(SlotId(1), row)
+        .expect("one row in a free key");
+    let (mut solo, ..) = Renderer::<f64>::alone(VoicePool::from(config), prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| i, "pool");
 }

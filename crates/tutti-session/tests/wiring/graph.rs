@@ -1384,94 +1384,157 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
     );
 }
 
-/// A pool's voice added and then removed, rendered through, so the pool's
-/// render parks the removed slot in its retire ring.
+/// A mono wave of `frames` frames whose frame `k` is `(k + 1) / 4096`: a ramp
+/// every product of which with a power-of-two gain is exact in `f32`.
 #[cfg(feature = "sampler")]
-fn park_a_retired_slot(s: &mut Session, handle: &tutti_sampler::VoicePoolHandle<f32>) {
-    use tutti_sampler::testing::placed_source;
-    use tutti_sampler::{Playback, SlotId, VoiceWindow};
-    let source = placed_source(
-        Arc::new(tutti_buffers::Wave::new(1, SampleRate::SR_48K)),
-        VoiceWindow::from(tutti_units::Beat::new(0.0)),
-    );
-    handle
-        .add(SlotId(1), source, Playback::default())
-        .expect("queued");
-    let mut out = [0.0f32];
-    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
-    handle.remove(SlotId(1)).expect("queued");
-    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+fn ramp_wave(frames: usize) -> Arc<tutti_buffers::Wave> {
+    let mut wave = tutti_buffers::Wave::new(1, RATE);
+    for k in 0..frames {
+        let sample = [(k + 1) as f32 / 4096.0];
+        wave.append(tutti_buffers::Interleaved::new(&sample, wave.layout()).unwrap())
+            .unwrap();
+    }
+    Arc::new(wave)
 }
 
-/// **The update frees the slots a pool the graph holds retired**: `Graph::add`
-/// of a `VoicePool` keeps `VoicePoolHandle`'s reclaimer, and
-/// `Phase::Reclaim` (the update) drains the pool's retire ring on the control
-/// side. A pool inserted without one (`Unforkable`) keeps its parked slot, so
-/// the sweep, not the render, is what freed the first.
+/// A stereo pool config with one placed row, key 1, over `wave` at beat 0 and `gain`.
+#[cfg(feature = "sampler")]
+fn ramp_pool(
+    wave: &Arc<tutti_buffers::Wave>,
+    gain: tutti_units::Amplitude,
+) -> tutti_sampler::VoicePoolConfig<f32> {
+    use tutti_sampler::testing::placed_config;
+    use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePoolConfig, VoiceWindow};
+    let source = placed_config(
+        Arc::clone(wave),
+        VoiceWindow::from(tutti_units::Beat::new(0.0)),
+    )
+    .gain(gain);
+    let row = VoiceNodeConfig::placed(source).expect("a finite gain and a nonempty width");
+    VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("a stereo pool")
+        .row(SlotId(1), row)
+        .expect("a row in the table")
+}
+
+/// A stereo pool config with no rows.
+#[cfg(feature = "sampler")]
+fn empty_pool() -> tutti_sampler::VoicePoolConfig<f32> {
+    tutti_sampler::VoicePoolConfig::new(ChannelLayout::STEREO).expect("a stereo pool")
+}
+
+/// One block of `frames` stereo frames the session renders, left channel.
+#[cfg(feature = "sampler")]
+fn left_block(s: &mut Session, frames: usize) -> Vec<f32> {
+    let mut block = vec![0.0f32; frames * 2];
+    s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+    block.chunks(2).map(|frame| frame[0]).collect()
+}
+
+/// **The update frees what a graph pool's audio thread retired**: a patch that
+/// declares the pool with a row and then without it silences the voice from
+/// the next block, and the voice and the retired table are freed by the update's
+/// sweep. The row's wave is held by the table and by the voice, and returns to
+/// the test's own count after a block and the updates that follow.
 #[cfg(feature = "sampler")]
 #[test]
 fn the_update_frees_the_slots_a_graph_pool_retired() {
-    let mut s = session(1);
-    let pool = s.graph().add(tutti_sampler::VoicePool::new());
-    let handle = s
-        .graph_ref()
-        .handle(&pool)
-        .expect("the pool is in the graph")
-        .clone();
-    let (bare, bare_handle) = tutti_sampler::VoicePool::new().with_handle();
-    let bare = s.graph().add(tutti_graph::Unforkable(bare));
-    s.graph()
-        .set_sources(
-            MainOutput::channel(0),
-            [OutputPort::new(pool, 0), OutputPort::new(bare, 0)],
+    use tutti_session::{Mention, NodeDecl, WireStart};
+    let mut s = session(2);
+    let wave = ramp_wave(4096);
+    let declare = |config| {
+        (
+            NodeDecl::new("pool", config),
+            Mention::new("pool").connect(MainOutput).unfaded(),
         )
-        .unwrap()
-        .unfaded();
-    let _ = s.update();
-    park_a_retired_slot(&mut s, &handle);
-    park_a_retired_slot(&mut s, &bare_handle);
+    };
+    let tick = |s: &mut Session| {
+        let _ = s.update();
+        let block = left_block(s, 64);
+        let _ = s.update();
+        block
+    };
+    s.patch(declare(empty_pool())).expect("the patch applies");
+    s.play().expect("room");
+    let _ = tick(&mut s);
 
-    let _ = s.update();
-    assert_eq!(
-        tutti_rt::Reclaim::reclaim(&handle),
-        0,
-        "nothing left for a second sweep"
+    s.patch(declare(ramp_pool(&wave, tutti_units::Amplitude::new(0.5))))
+        .expect("the patch applies");
+    let sounding = tick(&mut s);
+    assert!(sounding.iter().any(|&x| x != 0.0), "the row's voice sounds");
+    assert!(
+        Arc::strong_count(&wave) > 1,
+        "the table and its voice hold the wave"
     );
-    assert_eq!(
-        handle.collect_retired(),
-        0,
-        "the update freed the graph pool's retired slot"
+
+    s.patch(declare(empty_pool())).expect("the patch applies");
+    let silent = tick(&mut s);
+    assert!(
+        silent.iter().all(|&x| x.to_bits() == 0.0f32.to_bits()),
+        "the removed row is silent from the next block"
     );
+    let _ = tick(&mut s);
     assert_eq!(
-        bare_handle.collect_retired(),
+        Arc::strong_count(&wave),
         1,
-        "a pool with no reclaimer keeps its parked slot"
+        "the update freed the retired voice and table"
     );
 }
 
-/// **A handle is `None` once its node is removed**: the key names a node the
-/// graph no longer holds, so `Graph::handle` finds no controls for it.
+/// **A pool the graph holds hears the table a patch declares**: a pool of one
+/// placed row of the ramp `(k + 1) / 4096` at gain 0.5 renders `0.5 * ramp`;
+/// the patch that declares the same row at gain 0.25 is written as the pool's
+/// table, and the next block after the update renders `0.25 * ramp`. Every
+/// product is an exact power-of-two scaling.
 #[cfg(feature = "sampler")]
 #[test]
-fn a_handle_is_none_once_its_node_is_removed() {
-    let mut s = session(1);
-    let pool = s.graph().add(tutti_sampler::VoicePool::new());
-    assert!(s.graph_ref().handle(&pool).is_some(), "in the graph");
-    s.remove(pool).unwrap();
-    assert!(s.graph_ref().handle(&pool).is_none(), "removed");
+fn a_pool_hears_the_table_a_patch_declares() {
+    use tutti_session::{Mention, NodeDecl, WireStart};
+    use tutti_units::Amplitude;
+    const BLOCK: usize = 256;
+    let mut s = session(2);
+    let wave = ramp_wave(4 * BLOCK);
+    let declare = |gain| {
+        (
+            NodeDecl::new("pool", ramp_pool(&wave, Amplitude::new(gain))),
+            Mention::new("pool").connect(MainOutput).unfaded(),
+        )
+    };
+    s.patch(declare(0.5)).expect("the patch applies");
+    let _ = s.update();
+    s.play().expect("room");
+    let first = left_block(&mut s, BLOCK);
+    for (k, &x) in first.iter().enumerate() {
+        assert_eq!(x, 0.5 * ((k + 1) as f32 / 4096.0), "frame {k} at gain 0.5");
+    }
+
+    s.patch(declare(0.25)).expect("the patch applies");
+    let _ = s.update();
+    let _ = left_block(&mut s, BLOCK);
+    let _ = s.update();
+    let heard = left_block(&mut s, BLOCK);
+    for (k, &x) in heard.iter().enumerate() {
+        let frame = 2 * BLOCK + k;
+        assert_eq!(
+            x,
+            0.25 * ((frame + 1) as f32 / 4096.0),
+            "frame {frame} at gain 0.25"
+        );
+    }
 }
 
-/// **A streamed voice keeps sounding after the host drops its clone of the
-/// pool's handle, and the graph's handle still commands it**: the pool's handle
-/// holds each streaming voice's `Stream`, and the last handle dropped closes
-/// it. The graph owns one for the node's life, so the file (a constant
-/// 0.25) still renders at unity gain on the main output's left channel (the file is
-/// mono) after the streamer has stepped past the drop, and a removal queued
-/// through `Graph::handle` silences it.
+/// **A streamed row keeps sounding while the graph holds the pool**: the
+/// config that held the stream is dropped once the pool is added, and the file
+/// (a constant 0.25) still renders at unity gain on the main output's left
+/// channel after the streamer has stepped past the drop.
 #[cfg(feature = "sampler")]
 #[test]
 fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
-    use tutti_sampler::{DiskStreamer, DiskVoice, Playback, SlotId, StreamStart, VoiceWindow};
+    use tutti_sampler::{
+        DiskStreamer, DiskVoice, SlotId, StreamStart, VoiceNodeConfig, VoicePool, VoicePoolConfig,
+        VoiceWindow,
+    };
+    use tutti_units::{Amplitude, Cents, StretchFactor};
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("level.wav");
     tutti_fixtures::signal::write_wav_f32(&path, RATE, 1, &[0.25f32; 48_000]);
@@ -1484,21 +1547,20 @@ fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
         .sample_rate(RATE)
         .build()
         .expect("builds");
-    let pool = s.graph().add(tutti_sampler::VoicePool::new());
-    let host = s
-        .graph()
-        .handle(&pool)
-        .expect("the pool is in the graph")
-        .clone();
-    s.graph().connect(pool, MainOutput).unwrap().unfaded();
-    host.add_streaming(
-        SlotId(1),
+    let row = VoiceNodeConfig::streaming(
         DiskVoice::from_reader(reader, VoiceWindow::from(tutti_units::Beat::new(0.0))),
         stream,
-        Playback::default(),
+        Amplitude::new(1.0),
+        StretchFactor::UNITY,
+        Cents::new(0.0),
     )
-    .expect("queued");
-    drop(host);
+    .expect("a finite gain and a width the sampler runs");
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("a stereo pool")
+        .row(SlotId(1), row)
+        .expect("a row in the table");
+    let pool = s.graph().add(VoicePool::from(config));
+    s.graph().connect(pool, MainOutput).unwrap().unfaded();
     let _ = streamer.step_until_idle(1_000);
     let _ = s.update();
     s.play().expect("room");
@@ -1508,15 +1570,67 @@ fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     }
     assert_eq!(block[1_022], 0.25, "the voice is still sounding");
+}
 
-    s.graph_ref()
-        .handle(&pool)
-        .expect("the pool is in the graph")
-        .remove(SlotId(1))
-        .expect("queued");
-    for _ in 0..4 {
-        let _ = streamer.step_until_idle(1_000);
-        s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
-    }
-    assert_eq!(block[1_022], 0.0, "the graph's handle removed the voice");
+/// **The graph reads whether a streamed row holds its reader, with no controls**: a pool
+/// of a streamed row and a resident row reads `Holding` for the streamed row once its
+/// voice is installed, and nothing for the resident row, for a key with no row, and for
+/// any key once the node is removed.
+#[cfg(feature = "sampler")]
+#[test]
+fn the_graph_reads_whether_a_streamed_row_holds_its_reader() {
+    use tutti_sampler::testing::placed_config;
+    use tutti_sampler::{
+        DiskStreamer, DiskVoice, SlotId, StreamHold, StreamStart, VoiceNodeConfig, VoicePool,
+        VoicePoolConfig, VoiceWindow,
+    };
+    use tutti_units::{Amplitude, Beat, Cents, StretchFactor};
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("level.wav");
+    tutti_fixtures::signal::write_wav_f32(&path, RATE, 1, &[0.25f32; 48_000]);
+    let mut streamer = DiskStreamer::manual(RATE, Default::default()).expect("builds");
+    let opening = streamer.open_stream(&path, StreamStart::HEAD);
+    let (stream, reader) =
+        tutti_sampler::testing::wait_for_open(&mut streamer, opening).expect("the file opens");
+    let mut s = Session::builder()
+        .sample_rate(RATE)
+        .build()
+        .expect("builds");
+    let streamed = VoiceNodeConfig::streaming(
+        DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0))),
+        stream,
+        Amplitude::new(1.0),
+        StretchFactor::UNITY,
+        Cents::new(0.0),
+    )
+    .expect("a finite gain and a width the sampler runs");
+    let resident = VoiceNodeConfig::placed(placed_config(
+        ramp_wave(64),
+        VoiceWindow::from(Beat::new(0.0)),
+    ))
+    .expect("a placed source");
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("a stereo pool")
+        .row(SlotId(1), streamed)
+        .expect("a row in the table")
+        .row(SlotId(2), resident)
+        .expect("another row");
+    let pool = s.graph().add(VoicePool::from(config));
+    let _ = s.update();
+    let graph = s.graph_ref();
+    assert_eq!(
+        graph.stream_hold(&pool, SlotId(1)),
+        Some(StreamHold::Holding),
+        "the streamed row holds its reader"
+    );
+    assert_eq!(graph.stream_hold(&pool, SlotId(2)), None, "a resident row");
+    assert_eq!(graph.stream_hold(&pool, SlotId(3)), None, "no such row");
+    assert_eq!(
+        graph.pool_drops(&pool).map(|drops| drops.leaked),
+        Some(0),
+        "nothing leaked"
+    );
+    assert!(s.remove(pool).is_ok());
+    assert_eq!(s.graph_ref().stream_hold(&pool, SlotId(1)), None, "removed");
+    assert_eq!(s.graph_ref().pool_drops(&pool), None, "removed");
 }

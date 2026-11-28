@@ -13,7 +13,7 @@
 //! Run: `cargo run --release -p tutti-verify --bin render_sampler_cases -- <outdir>`
 
 use tutti_buffers::Interleaved;
-use tutti_buffers::Planes;
+use tutti_buffers::{ChannelLayout, Planes};
 use tutti_sampler::VoiceWindow;
 
 use std::f32::consts::TAU;
@@ -22,8 +22,8 @@ use std::sync::Arc;
 
 use tutti_buffers::Wave;
 use tutti_graph::contract;
-use tutti_sampler::testing::{MockTransport, placed_source};
-use tutti_sampler::{Playback, SlotId, VoicePool};
+use tutti_sampler::testing::{MockTransport, placed_config};
+use tutti_sampler::{SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, StretchFactor};
 
 const SR: f64 = 48_000.0;
@@ -46,8 +46,6 @@ fn tone(freq: f32, frames: usize) -> Arc<Wave> {
 
 /// Render one case through a real pool and return interleaved stereo output.
 fn render(stretch: f64, cents: f64, seek_at: Option<usize>) -> Vec<f32> {
-    let (pool, handle) = VoicePool::new().with_handle();
-    let mut pool = contract::prepared(pool, SampleRate::of(SR), BLOCK);
     // A rolling transport this example advances by hand, a block at a time.
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     // 4x the output length: at the slowest factor the source is consumed far
@@ -55,16 +53,17 @@ fn render(stretch: f64, cents: f64, seek_at: Option<usize>) -> Vec<f32> {
     // and look like an attenuation bug.
     let wave = tone(440.0, FRAMES * 4);
 
-    let source = placed_source(wave, VoiceWindow::from(Beat::new(0.0)));
-    let play = Playback {
-        stretch: StretchFactor::new(stretch),
-        pitch: Cents::new(cents),
-        ..Default::default()
-    };
-
-    handle
-        .add(SlotId(1), source, play)
-        .expect("the command queue has room in a test");
+    let source = placed_config(wave, VoiceWindow::from(Beat::new(0.0)));
+    let row = VoiceNodeConfig::placed(source)
+        .expect("a finite gain and a nonempty width")
+        .stretch(StretchFactor::new(stretch))
+        .pitch(Cents::new(cents));
+    let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+        .expect("a stereo pool")
+        .row(SlotId(1), row)
+        .expect("a row in the table");
+    // The pool's table holds the voice, and the first block takes it in.
+    let mut pool = contract::prepared(VoicePool::from(config), SampleRate::of(SR), BLOCK);
 
     // Block-driven, as a host drives a node: each block's `Env` carries the
     // playhead where it stands, and it advances once per block.

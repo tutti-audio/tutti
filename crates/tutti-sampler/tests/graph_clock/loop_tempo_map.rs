@@ -23,9 +23,10 @@ use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Wave};
 use tutti_engine::Engine;
 use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare};
-use tutti_sampler::testing::{placed_source, wait_for_open};
+use tutti_sampler::testing::{placed_config, wait_for_open};
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Playback, SlotId, StreamStart, VoicePool, VoiceWindow,
+    DiskStreamer, DiskVoice, Row, SlotId, StreamStart, VoiceNodeConfig, VoicePool, VoicePoolConfig,
+    VoiceWindow,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{LoopEdit, MotionCommand, Transport};
@@ -67,7 +68,7 @@ fn render_with(
         DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
     // Held while the voice plays: dropping the stream ends it.
     let mut stream = None;
-    // The pool's handle, whose reclaim tick reads the loop the pool's blocks carried and sends the
+    // The pool's controls, whose reclaim tick reads the loop the pool's blocks carried and sends the
     // voice the spare it primes the wrap with.
     let mut tick = None;
     if tier == Tier::Disk {
@@ -95,26 +96,25 @@ fn render_with(
             wave.append(Interleaved::new(&[sample(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
-        let pool = VoicePool::new();
-        let handle = ed.insert(NodeKey(1), "voice", pool).controls;
-        tick = Some(handle.clone());
-        handle
-            .add(
-                SlotId(1),
-                source,
-                Playback {
-                    stretch: StretchFactor::new(if tier == Tier::Stretched { 1.5 } else { 1.0 }),
-                    ..Playback::default()
-                },
-            )
-            .expect("room");
-        if tier == Tier::Stretched {
-            // A vocoder resident at unity.
-            handle
-                .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
-                .expect("room");
-        }
+        let voice = VoiceNodeConfig::placed(placed_config(
+            Arc::new(wave),
+            VoiceWindow::from(Beat::new(0.0)),
+        ))
+        .expect("a finite gain");
+        // A vocoder resident at unity.
+        let row = if tier == Tier::Stretched {
+            Row::from(voice).stretching(StretchFactor::UNITY, Cents::new(0.0))
+        } else {
+            Row::from(voice)
+        };
+        let config = VoicePoolConfig::new(ChannelLayout::STEREO)
+            .expect("stereo is a width a pool runs")
+            .row(SlotId(1), row)
+            .expect("one row in a free key");
+        tick = Some(
+            ed.insert(NodeKey(1), "voice", VoicePool::from(config))
+                .controls,
+        );
     }
     ed.wire_declared_outputs(
         (0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),

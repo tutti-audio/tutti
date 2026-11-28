@@ -1,25 +1,8 @@
 //! Voice gain, end to end.
 //!
-//! The last `Playback` axis with no end-to-end coverage. It looks like the
-//! least interesting — one multiply — and the arithmetic is indeed trivial. What
-//! is not trivial is where the multiply happens, because there are two gain
-//! fields and two entry points, and the failure mode is applying gain twice.
-//!
-//! - [`MemorySource`] owns a `gain`, applied by `sample_into`.
-//! - [`Playback`] owns a `gain`, applied by `PlaybackSlot::read_clip_sample_into`.
-//!
-//! A voice played through a pool must take the second and not the first:
-//! the slot deliberately calls `sample_raw_into` (ungained) so gain lands
-//! exactly once. Its own doc says so — "gain is applied ONCE at this
-//! Voice/Playback level" — which is the kind of invariant that holds until
-//! someone rewrites one of the two paths. Squaring the gain is inaudible at
-//! unity, subtle at 0.9, and 12 dB down at 0.25.
-//!
-//! The two tiers also reach it differently: the memory tier is scaled at the
-//! slot, while the streaming tier applies its own gain inside `DiskVoice` and
-//! ignores `Playback::gain` entirely. That asymmetry is deliberate and
-//! documented, but it means "same clip, same gain, same level" is a claim worth
-//! checking rather than assuming.
+//! The gain of a pool's row is its source config's, applied exactly once: the
+//! failure mode is applying it twice (the source's own and the voice's), which is
+//! inaudible at unity, subtle at 0.9, and 12 dB down at 0.25.
 //!
 //! # DC, not a tone
 //!
@@ -36,7 +19,11 @@ use tutti_buffers::Planes;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{Env, Node, TransportChanges, contract};
-use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool};
+use tutti_sampler::testing::placed_config;
+use tutti_sampler::{
+    MemorySource, MemorySourceConfig, SlotId, VoiceNodeConfig, VoicePool, VoicePoolConfig,
+    VoiceWindow,
+};
 use tutti_units::{Amplitude, Beat, Bpm, Frame, SamplePosition, SampleRate, Samples};
 
 const SR: f64 = 48_000.0;
@@ -104,26 +91,28 @@ fn dc_wave(len: usize) -> Arc<Wave> {
     Arc::new(w)
 }
 
+/// A pool of placed voices, one per `gains` entry (each at its gain), plus the clock driving it.
+fn pool_of(gains: &[f64]) -> (VoicePool<f32>, Arc<Clock>) {
+    let config = gains.iter().zip(1u128..).fold(
+        VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo is a pool width"),
+        |config, (&gain, id)| {
+            let voice = VoiceNodeConfig::placed(
+                placed_config(dc_wave(SR as usize), VoiceWindow::default())
+                    .gain(Amplitude::new(gain)),
+            )
+            .expect("a finite gain");
+            config.row(SlotId(id), voice).expect("a free key")
+        },
+    );
+    (
+        contract::prepared(VoicePool::from(config), SampleRate::of(SR), BLOCK),
+        Clock::new(),
+    )
+}
+
 /// A placed voice in a pool at `play_gain`, plus the clock driving it.
 fn pool_at_gain(play_gain: f64) -> (VoicePool<f32>, Arc<Clock>) {
-    let clock = Clock::new();
-    let source = MemorySource::from(
-        MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
-            .expect("a placeable wave")
-            .window(tutti_sampler::VoiceWindow::default()),
-    );
-
-    let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            gain: Amplitude::new(play_gain),
-            ..Default::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width");
-    (pool, clock)
+    pool_of(&[play_gain])
 }
 
 /// Render a placed pool, advancing its clock once per block. Returns channel 0.
@@ -162,64 +151,6 @@ fn voice_gain_scales_the_output_by_exactly_its_value() {
             f64::from(LEVEL) * g * g
         );
     }
-}
-
-/// Gain is applied exactly once.
-///
-/// The specific hazard this file exists for. `MemorySource` carries its own
-/// `gain` and `PlaybackSlot` carries `Playback::gain`; the slot reads through
-/// `sample_raw_into` precisely so the source's copy is skipped. If a rewrite
-/// ever routed the slot through `sample_into` instead, both would apply and
-/// the output would be the gain *squared*.
-///
-/// Set the two gains to different values so the possible answers are all
-/// distinct. With a 0.5 source level, `Playback::gain = 0.5` and
-/// `MemorySource::gain = 0.25`, the output is 0.25 if only the slot's gain
-/// applied (correct), 0.125 if the source's won instead, and 0.0625 if both
-/// did. Only the first is right, and the number reported on failure says which
-/// of the other two happened.
-#[test]
-fn a_pooled_voice_applies_playback_gain_and_not_the_sources_own() {
-    let clock = Clock::new();
-    let source = MemorySource::from(
-        MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
-            .expect("a placeable wave")
-            .window(tutti_sampler::VoiceWindow::default())
-            // Deliberately NOT 1.0 and NOT equal to the playback gain below.
-            .gain(Amplitude::new(0.25)),
-    );
-
-    let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            gain: Amplitude::new(0.5),
-            ..Default::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width");
-
-    let out = render_placed(&mut pool, &clock, 8);
-    let got = settled_mean(&out);
-
-    let slot_only = (LEVEL * 0.5) as f64; // correct: 0.25
-    let source_only = (LEVEL * 0.25) as f64; // 0.125
-    let both = (LEVEL * 0.5 * 0.25) as f64; // 0.0625
-
-    // The three outcomes are distinct by construction, so the number reported on
-    // failure names the defect: routing the slot through
-    // `sample_into` (the gained read) yields `source_only`, and a slot that
-    // gained on top of it would yield `both`.
-    assert!(
-        (got - slot_only).abs() < 1e-4,
-        "output is {got:.6}. Expected {slot_only:.6} — Playback gain applied once, \
-         through the ungained `sample_raw_into`. \
-         {source_only:.6} means the slot read through `sample_into` and the \
-         source's own gain won instead; \
-         {both:.6} means BOTH were applied, which is the squared-gain bug \
-         `read_clip_sample_into` exists to prevent."
-    );
 }
 
 /// Zero gain is silence, not near-silence.
@@ -269,22 +200,7 @@ fn gain_above_unity_amplifies() {
 /// stereo image toward one side while the level meter still looked plausible.
 #[test]
 fn gain_scales_every_channel_equally() {
-    let clock = Clock::new();
-    let source = MemorySource::from(
-        MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
-            .expect("a placeable wave")
-            .window(tutti_sampler::VoiceWindow::default()),
-    );
-    let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
-    pool.insert(
-        SlotId(1),
-        source,
-        Playback {
-            gain: Amplitude::new(0.4),
-            ..Default::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width");
+    let (mut pool, clock) = pool_at_gain(0.4);
 
     let want = (LEVEL * 0.4) as f64;
 
@@ -340,25 +256,7 @@ fn a_bare_memory_source_applies_its_own_gain() {
 /// while still passing every single-voice test above.
 #[test]
 fn two_half_gain_voices_sum_to_one_full_gain_voice() {
-    let clock = Clock::new();
-    let mut pool = contract::prepared(VoicePool::new(), SampleRate::of(SR), BLOCK);
-
-    for id in [1u128, 2] {
-        let source = MemorySource::from(
-            MemorySourceConfig::new(dc_wave(SR as usize), ChannelLayout::STEREO)
-                .expect("a placeable wave")
-                .window(tutti_sampler::VoiceWindow::default()),
-        );
-        pool.insert(
-            SlotId(id),
-            source,
-            Playback {
-                gain: Amplitude::new(0.5),
-                ..Default::default()
-            },
-        )
-        .expect("a finite gain and a nonempty width");
-    }
+    let (mut pool, clock) = pool_of(&[0.5, 0.5]);
 
     let out = render_placed(&mut pool, &clock, 8);
     let got = settled_mean(&out);

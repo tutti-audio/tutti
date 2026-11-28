@@ -159,12 +159,6 @@ impl<F: Float> BlockScratch<F> {
         s
     }
 
-    /// Scratch sized as `other` is, for a copy of its owner. Allocates:
-    /// control thread.
-    pub(crate) fn sized_like(other: &Self) -> Self {
-        Self::new(other.frames(), other.width())
-    }
-
     /// The longest block a read through this scratch may be: the
     /// `max_block` it was last prepared for (0 before any `prepare`).
     #[inline]
@@ -173,6 +167,7 @@ impl<F: Float> BlockScratch<F> {
     }
 
     /// The channels its lanes are sized for.
+    #[cfg(test)]
     pub(crate) fn width(&self) -> usize {
         self.out.0.iter().take_while(|l| !l.is_empty()).count()
     }
@@ -290,6 +285,7 @@ mod tests {
     use super::*;
     use crate::VoiceWindow;
     use crate::testing::{placed_config, voice_node};
+    use tutti_buffers::ChannelLayout;
     use tutti_buffers::Interleaved;
     use tutti_buffers::MaxBlock;
 
@@ -389,7 +385,7 @@ mod tests {
     #[test]
     fn every_voice_node_sizes_its_scratch_from_max_block() {
         use crate::MemorySource;
-        use crate::voice::VoicePool;
+        use crate::{VoicePool, VoicePoolConfig};
         use tutti_graph::{Node, Prepare};
         use tutti_units::{Beat, SampleRate, Samples};
 
@@ -401,7 +397,8 @@ mod tests {
             std::sync::Arc::clone(&wave),
             VoiceWindow::from(Beat::new(0.0)),
         );
-        let mut pool = VoicePool::<f32>::new();
+        let mut pool =
+            VoicePool::from(VoicePoolConfig::<f32>::new(ChannelLayout::STEREO).expect("stereo"));
         let mut node = voice_node(source.clone(), Default::default());
         let mut memory = MemorySource::from(source);
         assert_eq!(pool.scratch_size(), (UNPREPARED_FRAMES, 2));
