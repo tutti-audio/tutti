@@ -7,9 +7,9 @@
 //! [`MainThreadMarker`](crate::MainThreadMarker).
 
 use crate::{
-    Answer, AutomationMode, AutomationModeError, BypassWrite, OwnBypass, ParamWriteError,
-    ParameterInfo, PipelineCounts, PluginFailure, RenderMode, StateError, StateUse,
-    TerminationReason, bypass_value,
+    Answer, AutomationMode, AutomationModeError, BypassWrite, EditOutcome, OwnBypass, ParamEdit,
+    ParamWriteError, ParameterInfo, PipelineCounts, PluginFailure, RenderMode, StateError,
+    StateUse, TerminationReason, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -149,6 +149,17 @@ pub trait AnyThread: Send + Sync {
     /// [`ParamWriteError::Unanswered`] when a served plugin gave no parameter
     /// list to check `id` against. Nothing is stored in any of the three.
     fn set_parameter_value(&self, id: ParamId, value: Normalized) -> Result<(), ParamWriteError>;
+
+    /// Tells the plugin the host holds a parameter, moves it or lets go: one
+    /// step of a host gesture ([`HostEdits`](crate::HostEdits)), from any
+    /// thread. The plugin hears it on its main thread, in the order posted
+    /// (VST3's `beginEditFromHost`, AU's gesture notifications). Never waits.
+    ///
+    /// [`EditOutcome::NotDefined`] for a format with no host gesture (CLAP,
+    /// VST2), and nothing is queued. A [`Change`](ParamEdit::Change) is the
+    /// value the gesture moved to; the value's write to the plugin itself is
+    /// [`set_parameter_value`](Self::set_parameter_value).
+    fn edit(&self, edit: ParamEdit) -> EditOutcome;
 
     /// The plain value `value` stands for, converted by the plugin's format
     /// ([`Control::parameter_plain`](crate::Control::parameter_plain)), so a
@@ -308,6 +319,9 @@ mod tests {
         ) -> Result<(), ParamWriteError> {
             self.written.lock().push((id, value.get()));
             Ok(())
+        }
+        fn edit(&self, _: ParamEdit) -> EditOutcome {
+            EditOutcome::NotDefined
         }
         fn bypassed(&self, _: OwnBypass) -> Option<bool> {
             None

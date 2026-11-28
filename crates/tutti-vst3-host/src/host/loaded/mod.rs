@@ -75,6 +75,10 @@ pub struct Vst3Loaded {
     /// Writes a rejoin took from the halves that no block had delivered, for
     /// the next activation's first block.
     pub(super) carried: Vec<(ParamId, Normalized)>,
+    /// The host's gestures toward the plugin's controller, drained on
+    /// [`flush_edits`](tutti_plugin_types::Control::flush_edits); the same list
+    /// for the plugin's life.
+    pub(in crate::host) host_edits: Arc<tutti_plugin_types::HostEdits>,
     /// The writes the Processor refused when it took them (an undeclared or
     /// read-only parameter), over the plugin's life: every activation's
     /// Processor adds to it, and the Control reads it.

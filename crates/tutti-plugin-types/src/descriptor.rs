@@ -214,6 +214,20 @@ pub enum PluginClass {
 }
 
 impl PluginClass {
+    /// Whether the format defines a host gesture toward the plugin: VST3 for a
+    /// controller with `IEditControllerHostEditing`, AU's gesture notifications.
+    /// CLAP and VST2 define none (`ext/params.h` scenario II; VST2's
+    /// `audioMasterBeginEdit` goes from plugin to host).
+    #[must_use]
+    pub fn host_edit(&self) -> crate::EditOutcome {
+        match self {
+            PluginClass::Vst3 { .. } | PluginClass::Au { .. } => crate::EditOutcome::Queued,
+            PluginClass::Unknown | PluginClass::Vst2 { .. } | PluginClass::Clap { .. } => {
+                crate::EditOutcome::NotDefined
+            }
+        }
+    }
+
     /// Returns the plugin format's short name: `"vst2"`, `"vst3"`, `"clap"`,
     /// `"au"`, or `"unknown"`.
     pub fn format_name(&self) -> &'static str {

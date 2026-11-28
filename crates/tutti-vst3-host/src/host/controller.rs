@@ -241,6 +241,11 @@ impl Wraps for Vst3Controller {
     /// Processor has the value through the block's parameter changes, and
     /// queueing it again would put it back over a value a later block moved.
     fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        // A parameter the host is holding takes its values from the gesture
+        // list, in order with the begin and the end.
+        if self.loaded().host_edits.holds(id) {
+            return;
+        }
         // A write the controller refuses (undeclared, read-only) has nothing to
         // follow, as the Processor's own refusal.
         let _ = self.loaded_mut().set_parameter(main, id, value);

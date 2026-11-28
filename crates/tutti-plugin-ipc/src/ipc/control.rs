@@ -9,12 +9,12 @@
 use dpi::Size;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
-    Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
-    MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass, ParamWriteError,
-    ParameterInfo, PipelineCounts, PluginDescriptor, PluginError, PluginFailure, PluginLearnError,
-    PluginPreset, PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode,
-    RenderModeSupport, Request, StateError, StateUse, TerminationReason, Told, TrackInfo,
-    WindowHandle, bypass_value,
+    Delivered, EditOutcome, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow,
+    Features, Health, MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass,
+    ParamEdit, ParamWriteError, ParameterInfo, PipelineCounts, PluginDescriptor, PluginError,
+    PluginFailure, PluginLearnError, PluginPreset, PluginResult, PluginWiring, PresetId,
+    ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request, StateError, StateUse,
+    TerminationReason, Told, TrackInfo, WindowHandle, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -80,6 +80,18 @@ macro_rules! served_control {
                 value: Normalized,
             ) -> Result<(), ParamWriteError> {
                 self.link.bridge.set_parameter_value(id, value)
+            }
+
+            /// Sent to the server on the control path, where its main loop
+            /// drains the plugin's list in the order the steps arrive. The
+            /// format is the descriptor's: a format with no host gesture sends
+            /// nothing.
+            fn edit(&self, edit: ParamEdit) -> EditOutcome {
+                let outcome = self.link.descriptor.class.host_edit();
+                if outcome == EditOutcome::Queued {
+                    let _ = self.link.bridge.host_edit(edit);
+                }
+                outcome
             }
 
             /// A parameter bypass is a parameter write: [`Lost`](BypassWrite::Lost)

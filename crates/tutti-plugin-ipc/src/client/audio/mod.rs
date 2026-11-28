@@ -34,7 +34,7 @@ use crate::transport::control::Announced;
 use crate::{
     Answered, ArmPluginMidiLearn, CloseEditor, GetCurrentPreset, GetParameter, GetParameterList,
     GetParameterNormalized, GetParameterPlain, GetParameterText, GetParameterValueFromText,
-    GetPresetList, GetWiring, LoadPreset, LoadState, OpenEditor, PresetLoaded, SaveState,
+    GetPresetList, GetWiring, HostEdit, LoadPreset, LoadState, OpenEditor, PresetLoaded, SaveState,
     SetAppMidiMap, SetAutomationState, SetEditorSize, SetSampleRate, SetTrackInfo,
     SetupSharedMemory, StateLoaded, StateReady, Unanswered,
 };
@@ -596,6 +596,14 @@ impl AudioBridge {
         mode: tutti_plugin_types::AutomationMode,
     ) -> Delivered {
         self.tell(SetAutomationState { mode })
+    }
+
+    /// Queues one step of a host gesture, in order with the control requests
+    /// around it. `Dropped` when the queue is full: the server's list then
+    /// misses the step, which its owner of the gesture sees as the count of
+    /// refused control commands.
+    pub(crate) fn host_edit(&self, edit: tutti_plugin_types::ParamEdit) -> Delivered {
+        self.tell(HostEdit { edit })
     }
 
     /// Queues what the host says of the plugin's track, saying **why** if it

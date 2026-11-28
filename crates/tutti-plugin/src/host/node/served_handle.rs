@@ -37,6 +37,10 @@ impl AnyThread for ServedHandle {
         self.served.set_parameter_value(id, value)
     }
 
+    fn edit(&self, edit: tutti_plugin_types::ParamEdit) -> tutti_plugin_types::EditOutcome {
+        self.served.edit(edit)
+    }
+
     fn parameter_plain(&self, id: ParamId, value: Normalized) -> Option<f64> {
         self.served.parameter_plain(id, value)
     }

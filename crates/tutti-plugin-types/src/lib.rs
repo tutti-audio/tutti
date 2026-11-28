@@ -204,6 +204,7 @@ mod format;
 mod guard;
 mod harmony;
 mod host;
+mod host_edits;
 mod hosting;
 mod invalidation;
 mod lifecycle;
@@ -362,6 +363,7 @@ pub use bypass::{BypassWrite, OwnBypass, bypass_parameter, bypass_value, is_bypa
 pub use control_role::{
     Axis, ControlRole, MidiAssignment, MidiMapApplied, MidiSource, effective_midi_map,
 };
+pub use host_edits::{EditOutcome, HostEdits};
 pub use locate::{Helper, Locator};
 pub use note_expression::{
     NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,

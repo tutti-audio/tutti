@@ -2,6 +2,7 @@
 //! by [`Vst3Loaded`] and, with parameter writes redirected, by
 //! [`Vst3Controller`](super::Vst3Controller).
 
+use std::sync::Arc;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
@@ -223,6 +224,16 @@ impl Vst3Loaded {
         ))
     }
 
+    /// Whether VST3 defines a host gesture for `id`: the parameter is a helper
+    /// (not automatable, not read-only, not hidden) and the controller
+    /// implements `IEditControllerHostEditing`.
+    fn host_editable(&self, main: MainThreadMarker, id: ParamId) -> bool {
+        self.plugin.has_host_editing()
+            && self.parameter_info(main, id).is_some_and(|info| {
+                !info.can_automate() && !info.is_read_only() && !info.is_hidden()
+            })
+    }
+
     /// `setParamNormalized` on the edit controller, for the Loaded state and
     /// the Controller's immediate half alike. `false` when the plugin has no
     /// controller.
@@ -238,8 +249,38 @@ impl Vst3Loaded {
 
 impl Control for Vst3Loaded {
     /// The controller alone is what a loaded plugin has: a write is the inform.
+    /// A parameter the host is holding is the gesture list's: its values reach
+    /// the controller from there, in order with the begin and the end.
     fn inform_controller(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
+        if self.host_edits.holds(id) {
+            return;
+        }
         let _ = Control::set_parameter(self, main, id, value);
+    }
+
+    fn host_edits(&self) -> Option<&Arc<tutti_plugin_types::HostEdits>> {
+        Some(&self.host_edits)
+    }
+
+    /// `beginEditFromHost`, `setParamNormalized` for each value, then
+    /// `endEditFromHost` (ivsteditcontroller.h, `IEditControllerHostEditing`).
+    /// The two calls are for a helper parameter (not automatable, not
+    /// read-only, not hidden) of a controller that implements the interface;
+    /// any other parameter has no host gesture in VST3 and takes the values
+    /// alone.
+    fn apply_host_edit(&mut self, main: MainThreadMarker, edit: ParamEdit) {
+        match edit {
+            ParamEdit::Begin(id) if self.host_editable(main, id) => {
+                let _ = self.plugin.begin_edit_from_host(main, id);
+            }
+            ParamEdit::End(id) if self.host_editable(main, id) => {
+                let _ = self.plugin.end_edit_from_host(main, id);
+            }
+            ParamEdit::Change { id, value, .. } => {
+                let _ = self.write_normalized(main, id, value);
+            }
+            ParamEdit::Begin(_) | ParamEdit::End(_) => {}
+        }
     }
 
     fn info(&self) -> &PluginDescriptor {
@@ -514,8 +555,13 @@ impl Control for Vst3Loaded {
 
     /// Forwards the controllers the realtime path captured while learn was armed
     /// to the plugin's `IMidiLearn`, on this (main) thread as the SDK requires.
-    fn flush_edits(&mut self, _main: MainThreadMarker) {
+    fn flush_edits(&mut self, main: MainThreadMarker) {
         self.midi_learn.forward_pending();
+        // An active plugin's Controller drains the list after the Processor's
+        // reports (`Wraps`' flush); a loaded one has none to wait for.
+        if !self.active.is_active() {
+            self.drain_host_edits(main);
+        }
     }
 
     /// Arms the plugin's `IMidiLearn`. While armed, the realtime path captures

@@ -12,9 +12,9 @@ use dpi::Size;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_plugin_types::{
-    AnyThread, AutomationMode, AutomationModeError, Control, EditorCapabilities, EditorError,
-    Health, ParamWriteError, PluginError, PluginFailure, PluginState, RenderMode, StateError,
-    TerminationReason, WindowHandle,
+    AnyThread, AutomationMode, AutomationModeError, Control, EditOutcome, EditorCapabilities,
+    EditorError, Health, ParamEdit, ParamWriteError, PluginError, PluginFailure, PluginState,
+    RenderMode, StateError, TerminationReason, WindowHandle,
 };
 use tutti_plugin_types::{BypassWrite, PipelineCounts};
 use tutti_plugin_types::{ContentScale, KeyEvent, KeyUse};
@@ -428,6 +428,13 @@ impl PluginHandle {
     /// ([`AnyThread::set_parameter_value`]).
     pub fn send_parameter(&self, id: ParamId, value: Normalized) -> Result<(), ParamWriteError> {
         self.any_thread.set_parameter_value(id, value)
+    }
+
+    /// One step of a host gesture toward the plugin ([`AnyThread::edit`]): the
+    /// plugin hears it, in order, on its main thread. Any thread, never waits;
+    /// [`EditOutcome::NotDefined`] for a format that defines no host gesture.
+    pub fn edit(&self, edit: ParamEdit) -> EditOutcome {
+        self.any_thread.edit(edit)
     }
 
     /// The plugin's display string for `value` ([`AnyThread::parameter_text`]).
@@ -1288,6 +1295,12 @@ mod tests {
                 _value: Normalized,
             ) -> Result<(), tutti_plugin_types::ParamWriteError> {
                 Ok(())
+            }
+            fn edit(
+                &self,
+                _edit: tutti_plugin_types::ParamEdit,
+            ) -> tutti_plugin_types::EditOutcome {
+                tutti_plugin_types::EditOutcome::NotDefined
             }
             fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
                 None
