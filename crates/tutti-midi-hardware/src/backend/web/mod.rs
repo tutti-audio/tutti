@@ -65,10 +65,13 @@ const SETTLED: page::Settled = page::Settled {
     failed,
 };
 
+/// The access is granted: the gate reads ready first, so a watch registered while the
+/// list is seeded seeds itself; the waiting `Start`s wake once every watch is seeded.
 fn ready() {
     let hub = hub();
+    let wakers = hub.gate.publish_ready();
     hub.registry.look_all();
-    hub.gate.publish_ready().wake();
+    wakers.wake();
 }
 
 fn changed() {

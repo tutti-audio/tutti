@@ -110,11 +110,10 @@ pub trait MidiEndpoints: Send + Sync {
     }
 
     /// Starts reporting the device list to `sink`: every device present, once the
-    /// backend can list them, then each change from a thread of the backend's own (the web: the browser's callback).
-    /// A backend with nothing to start (ALSA, Windows MIDI Services, winmm, the stub)
-    /// lists them before this returns; one that has a start to wait for (CoreMIDI,
-    /// Web MIDI) lists them when its
-    /// [`start`](Self::start) has resolved, and the watch stays registered if a start
+    /// backend can list them, then each change from a thread of the backend's own (the
+    /// web: the browser's callback). A backend with nothing to start (ALSA, Windows MIDI
+    /// Services, winmm, the stub) lists them before this returns; one that has a start to
+    /// wait for (CoreMIDI, Web MIDI) lists them when its [`start`](Self::start) has resolved, and the watch stays registered if a start
     /// fails and seeds when a later one succeeds. A reader of
     /// [`DeviceEvents::initial`](crate::DeviceEvents::initial) after the start has
     /// resolved sees the seeded list on every backend.
