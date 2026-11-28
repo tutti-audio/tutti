@@ -949,6 +949,8 @@ fn a_node_removed_while_its_rebuild_settles_leaves_nothing_behind() {
     let mut r = rebound(0);
     let node = r.node;
     r.change_ports(1);
+    // The first update that stages the wider node ends the wait. The Processor
+    // moves to it only at a later update, so it is still the old node's here.
     let _ = r.until("the wider node", |s| {
         s.graph_ref().node_outputs(node).is_ok_and(|n| n == 3)
     });
