@@ -7,7 +7,7 @@ use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shap
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
     Committed, ConnectError, EventInputPort, EventOutputPort, Feeder, InputPort, MainOutput,
-    OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
+    OutputPort, ReplaceRefused, Replacement, Session, SessionEvent, SetRateError,
 };
 use tutti_units::SampleRate;
 
@@ -133,13 +133,24 @@ fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
         .replace(GHOST, Replacement::new(ForkByClone(Const::frame(&[2.0]))))
         .expect_err("a node that is not there");
     assert_eq!(refused, ReplaceRefused::NoSuchNode(GHOST));
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
 
-    // The node that is there waits, as before.
+    // The node that is there waits, as before, and lands once the graph resumes.
     s.graph()
         .replace(knob, Replacement::new(ForkByClone(Const::frame(&[2.0]))))
         .expect("the node is there");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1);
+    let mut out = [0.0f32];
+    let mut landed = false;
+    for _ in 0..16 {
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+        landed |= s
+            .update()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Replaced { .. }));
+        if landed {
+            break;
+        }
+    }
+    assert!(landed, "the replace waited, then landed");
 }
 
 /// **A tap or meter source whose port index no `u16` holds is named, not

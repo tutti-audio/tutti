@@ -1095,12 +1095,6 @@ impl RebindState {
         Some(Self::Idle { rebinder, laid_out })
     }
 
-    /// Whether a rebuilt node's Processor has not arrived.
-    #[cfg(feature = "testing")]
-    pub(crate) fn is_settling(&self) -> bool {
-        matches!(self, Self::Staged(_) | Self::Settling { .. })
-    }
-
     pub(crate) fn laid_out(&self) -> &tutti_plugin_types::Layout {
         match self {
             Self::Idle { laid_out, .. } | Self::Settling { laid_out, .. } => laid_out,
@@ -1971,9 +1965,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
                 let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
-                let (node, _) = self
+                let node = self
                     .graph
-                    .place(NodeKey::fresh(), crate::graph::Split::of(bound));
+                    .add_split(NodeKey::fresh(), crate::graph::Split::of(bound));
                 let hosted = HostedPlugin::new(handle, loaded_ref, node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
                 self.graph.write_own_bypass(node.erase());
