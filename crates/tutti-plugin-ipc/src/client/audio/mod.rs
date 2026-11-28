@@ -1707,7 +1707,7 @@ fn preset_loaded(
         Err(Lost::Busy) => Err(PresetError::Busy),
         Err(Lost::Crashed) => Err(PresetError::Lost),
         Err(Lost::NoAnswer { after }) => Err(PresetError::Stalled { after }),
-        Err(Lost::Server(error)) => Err(PresetError::Server(error.to_string())),
+        Err(Lost::Server(error)) => Err(PresetError::Server(error)),
         // A `LoadPreset` carries no object, so `Object` is a reply of the wrong kind.
         Err(Lost::Wrong | Lost::Object(_)) => Err(PresetError::UnexpectedReply),
     }
@@ -1772,7 +1772,7 @@ mod preset_loaded_tests {
             ),
             (
                 Err(Lost::Server(server.clone())),
-                Err(PresetError::Server(server.to_string())),
+                Err(PresetError::Server(server)),
             ),
             (Err(Lost::Wrong), Err(PresetError::UnexpectedReply)),
             (

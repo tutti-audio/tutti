@@ -10,6 +10,7 @@
 
 use crate::editor::EditorError;
 use crate::load_stage::LoadStage;
+use crate::server_error::ServerError;
 
 /// Failure produced by a plugin-instance capability trait method.
 ///
@@ -127,10 +128,9 @@ pub enum PresetError {
     #[error("the plugin is lost")]
     Lost,
     /// Out of process only: the plugin server answered an error in place of the
-    /// plugin's answer, so the server, not the plugin, failed the request. The
-    /// text is the server's.
+    /// plugin's answer, so the server, not the plugin, failed the request.
     #[error("the plugin server failed the preset request: {0}")]
-    Server(String),
+    Server(ServerError),
     /// Out of process only: the plugin server answered with a reply of another
     /// kind, so the peer broke the protocol.
     #[error("the plugin server answered the preset request with an unexpected reply")]
