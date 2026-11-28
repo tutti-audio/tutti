@@ -180,7 +180,11 @@ impl AnyThread for Fake {
         }
         Ok(())
     }
-    fn edit(&self, edit: tutti_plugin_types::ParamEdit) -> tutti_plugin_types::EditOutcome {
+    fn edit(
+        &self,
+        edit: tutti_plugin_types::ParamEdit,
+        _: tutti_plugin_types::ParamRole,
+    ) -> tutti_plugin_types::EditOutcome {
         self.edits.lock().push(edit);
         tutti_plugin_types::EditOutcome::Queued
     }

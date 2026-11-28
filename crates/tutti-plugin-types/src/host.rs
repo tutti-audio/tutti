@@ -404,6 +404,13 @@ pub trait Control: EditorWindow {
         None
     }
 
+    /// Makes `list` the list of a plugin that replaces the one it was posted
+    /// for (a rebuild): the handle keeps posting to the same list, and the
+    /// replacement starts with none open. A format with no list ignores it.
+    fn adopt_host_edits(&mut self, list: Arc<HostEdits>) {
+        let _ = list;
+    }
+
     /// Applies one of the host's gestures to the plugin, on the main thread, in
     /// the order the list holds them. Only a format with a
     /// [`host_edits`](Self::host_edits) list is asked.
@@ -1029,6 +1036,10 @@ impl<W: Wraps> Control for W {
 
     fn apply_host_edit(&mut self, main: MainThreadMarker, edit: ParamEdit) {
         self.plugin_mut().apply_host_edit(main, edit);
+    }
+
+    fn adopt_host_edits(&mut self, list: Arc<HostEdits>) {
+        self.plugin_mut().adopt_host_edits(list);
     }
 
     fn run_main_thread(&mut self, main: MainThreadMarker) {

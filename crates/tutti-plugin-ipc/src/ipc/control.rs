@@ -11,10 +11,10 @@ use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
     Delivered, EditOutcome, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow,
     Features, Health, MainThreadMarker, MidiAssignment, MidiMapApplied, ModeTold, OwnBypass,
-    ParamEdit, ParamWriteError, ParameterInfo, PipelineCounts, PluginDescriptor, PluginError,
-    PluginFailure, PluginLearnError, PluginPreset, PluginResult, PluginWiring, PresetId,
-    ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request, StateError, StateUse,
-    TerminationReason, Told, TrackInfo, WindowHandle, bypass_value,
+    ParamEdit, ParamRole, ParamWriteError, ParameterInfo, PipelineCounts, PluginDescriptor,
+    PluginError, PluginFailure, PluginLearnError, PluginPreset, PluginResult, PluginWiring,
+    PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request, StateError,
+    StateUse, TerminationReason, Told, TrackInfo, WindowHandle, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -86,10 +86,10 @@ macro_rules! served_control {
             /// drains the plugin's list in the order the steps arrive. The
             /// format is the descriptor's: a format with no host gesture sends
             /// nothing.
-            fn edit(&self, edit: ParamEdit) -> EditOutcome {
-                let outcome = self.link.descriptor.class.host_edit();
+            fn edit(&self, edit: ParamEdit, role: ParamRole) -> EditOutcome {
+                let outcome = self.link.descriptor.class.host_edit(role);
                 if outcome == EditOutcome::Queued {
-                    let _ = self.link.bridge.host_edit(edit);
+                    self.link.bridge.host_edit(edit);
                 }
                 outcome
             }
@@ -232,6 +232,11 @@ macro_rules! served_control {
         }
 
         impl Control for $ty {
+            /// Retries the gesture steps a full control queue kept back.
+            fn flush_edits(&mut self, _main: MainThreadMarker) {
+                self.link.bridge.flush_host_edits();
+            }
+
             /// A count that never moves: A served plugin's refusals are the server's (`ServerLosses::edits_refused`), read through `Health`.
             fn refused_edits(&self) -> tutti_rt::Tally<u64> {
                 tutti_rt::tally()

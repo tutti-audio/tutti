@@ -34,7 +34,8 @@ use std::task::Poll;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_types::{
-    EditOutcome, MainThreadMarker, MainWorkHandle, ParamEdit, PluginState, PluginValue, StateUse,
+    EditOutcome, MainThreadMarker, MainWorkHandle, ParamEdit, ParamRole, PluginClass, PluginState,
+    PluginValue, StateUse,
 };
 
 use tutti_rt::Mutex;
@@ -76,6 +77,8 @@ pub(crate) struct ControlBackend<L: InProcess> {
     /// The plugin's format name, for the refusal of an advisory the plugin
     /// does not take.
     pub(crate) format: &'static str,
+    /// The plugin's class, which says what host gesture its format defines.
+    pub(crate) class: PluginClass,
     /// The collector of the plugin's owner: where an off-main call posts its
     /// work for the main thread's next tick.
     pub(crate) work: MainWorkHandle,
@@ -332,9 +335,11 @@ where
     /// Posted to the plugin's list, which its next main-thread tick drains
     /// ([`Control::flush_edits`]); a format with no list answers
     /// [`EditOutcome::NotDefined`].
-    fn edit(&self, edit: ParamEdit) -> EditOutcome {
+    fn edit(&self, edit: ParamEdit, role: ParamRole) -> EditOutcome {
         match &self.host_edits {
-            Some(list) if !self.lost.is_lost() => {
+            Some(list)
+                if !self.lost.is_lost() && self.class.host_edit(role) == EditOutcome::Queued =>
+            {
                 list.post(edit);
                 EditOutcome::Queued
             }

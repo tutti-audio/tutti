@@ -375,7 +375,8 @@ pub use param_edit::ParamEdit;
 pub use param_mapping::{LinearRange, ParamMapping, PlainMap};
 pub use param_unit::{ParamUnit, PlainUnit};
 pub use parameters::{
-    ParamAccess, ParamFlags, ParamSteps, ParamWriteError, ParameterInfo, PluginParamRange,
+    ParamAccess, ParamFlags, ParamRole, ParamSteps, ParamWriteError, ParameterInfo,
+    PluginParamRange,
 };
 pub use pipeline::{
     BridgeLosses, ChunkCounters, ChunkOutcomes, MAX_CHUNK, PipelineCounts, ServerLosses,

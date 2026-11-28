@@ -113,6 +113,25 @@ impl HostEdits {
         }
     }
 
+    /// Hands queued edits to `apply`, oldest first, until it answers `false`:
+    /// that edit and the rest stay queued, in order, for the next call. For a
+    /// receiver that can be full.
+    pub fn drain_while(&self, mut apply: impl FnMut(ParamEdit) -> bool) {
+        let mut list = self.list.lock();
+        while let Some(edit) = list.queued.pop_front() {
+            if !apply(edit) {
+                list.queued.push_front(edit);
+                break;
+            }
+        }
+    }
+
+    /// Forgets every open gesture and every queued edit: the plugin they were
+    /// for is gone, and its replacement never heard the begin.
+    pub fn reset(&self) {
+        *self.list.lock() = List::default();
+    }
+
     /// Whether the list holds `id`: its gesture is open, or an edit of it
     /// waits for the drain. A host that also writes the plugin's controller
     /// another way leaves `id` to the list meanwhile, so the controller hears
@@ -185,6 +204,37 @@ mod tests {
         edits.post(change(2, 0.4));
         edits.post(ParamEdit::End(id));
         assert_eq!(drained(&edits), [change(2, 0.4), ParamEdit::End(id)]);
+    }
+
+    /// A receiver that is full leaves the edit and the rest queued, in order.
+    #[test]
+    fn a_full_receiver_leaves_the_rest_queued_in_order() {
+        let edits = HostEdits::new();
+        let id = ParamId::new(5);
+        edits.post(ParamEdit::Begin(id));
+        edits.post(change(5, 0.5));
+        edits.post(ParamEdit::End(id));
+        let mut taken = Vec::new();
+        edits.drain_while(|edit| {
+            if taken.len() == 1 {
+                return false;
+            }
+            taken.push(edit);
+            true
+        });
+        assert_eq!(taken, [ParamEdit::Begin(id)]);
+        assert_eq!(drained(&edits), [change(5, 0.5), ParamEdit::End(id)]);
+    }
+
+    /// A reset forgets the hold: the end that follows is not queued.
+    #[test]
+    fn a_reset_forgets_the_open_gestures() {
+        let edits = HostEdits::new();
+        let id = ParamId::new(6);
+        edits.post(ParamEdit::Begin(id));
+        edits.reset();
+        edits.post(ParamEdit::End(id));
+        assert_eq!(drained(&edits), []);
     }
 
     /// Begin and end are never dropped, whatever the number of ids held; a

@@ -151,6 +151,10 @@ pub struct AudioBridge {
     /// declared parameters by the first write; its reader is the audio lane's
     /// ([`Channels::install_host_edits`]). Control side.
     host_edits: Arc<Mutex<Option<HostEdits>>>,
+    /// The host's gesture steps toward the plugin, not yet on the control
+    /// queue: an `End` is kept until the queue takes it, never dropped, and the
+    /// order is the order posted.
+    gesture_outbox: Arc<tutti_plugin_types::HostEdits>,
 }
 
 /// The host's parameter slots, as the control side writes them.
@@ -270,6 +274,7 @@ impl AudioBridge {
             listener,
             responses_lost,
             host_edits: Arc::default(),
+            gesture_outbox: tutti_plugin_types::HostEdits::new(),
         };
         Ok((bridge, thread, replies))
     }
@@ -598,12 +603,22 @@ impl AudioBridge {
         self.tell(SetAutomationState { mode })
     }
 
-    /// Queues one step of a host gesture, in order with the control requests
-    /// around it. `Dropped` when the queue is full: the server's list then
-    /// misses the step, which its owner of the gesture sees as the count of
-    /// refused control commands.
-    pub(crate) fn host_edit(&self, edit: tutti_plugin_types::ParamEdit) -> Delivered {
-        self.tell(HostEdit { edit })
+    /// Posts one step of a host gesture and sends what the control queue takes.
+    /// A step the full queue refuses stays queued in order, for
+    /// [`flush_host_edits`](Self::flush_host_edits): a begin and an end are
+    /// never dropped.
+    pub(crate) fn host_edit(&self, edit: tutti_plugin_types::ParamEdit) {
+        self.gesture_outbox.post(edit);
+        self.flush_host_edits();
+    }
+
+    /// Sends the gesture steps the control queue refused before.
+    pub(crate) fn flush_host_edits(&self) {
+        self.gesture_outbox.drain_while(|edit| {
+            self.channels
+                .push_control_back(ControlCommand::tell(HostEdit { edit }))
+                .is_ok()
+        });
     }
 
     /// Queues what the host says of the plugin's track, saying **why** if it
@@ -1369,6 +1384,7 @@ mod tests {
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
             host_edits: Arc::default(),
+            gesture_outbox: tutti_plugin_types::HostEdits::new(),
         }
     }
 
@@ -1467,6 +1483,7 @@ mod tests {
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
             host_edits: Arc::default(),
+            gesture_outbox: tutti_plugin_types::HostEdits::new(),
         };
         let mut held = Vec::new();
         while let Some(payload) = bridge.payloads.acquire() {
@@ -1512,6 +1529,7 @@ mod tests {
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
             host_edits: Arc::default(),
+            gesture_outbox: tutti_plugin_types::HostEdits::new(),
         };
         while bridge
             .channels

@@ -602,8 +602,18 @@ impl<L: Loaded> Lifecycle<L> {
                 return Reply::NotActive;
             }
         };
+        let edits = plugin.host_edits().cloned();
         match catch_unwind(AssertUnwindSafe(|| plugin.rebuild(main))) {
-            Ok(Ok(Rebuilt { plugin, restored })) => {
+            Ok(Ok(Rebuilt {
+                mut plugin,
+                restored,
+            })) => {
+                // The handle keeps posting to the same list; the replacement
+                // never heard the begins it holds.
+                if let Some(list) = edits {
+                    list.reset();
+                    plugin.adopt_host_edits(list);
+                }
                 *self = Self::Loaded(plugin);
                 Reply::Rebuilt { restored }
             }

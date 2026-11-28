@@ -262,6 +262,10 @@ impl Control for Vst3Loaded {
         Some(&self.host_edits)
     }
 
+    fn adopt_host_edits(&mut self, list: Arc<tutti_plugin_types::HostEdits>) {
+        self.host_edits = list;
+    }
+
     /// `beginEditFromHost`, `setParamNormalized` for each value, then
     /// `endEditFromHost` (ivsteditcontroller.h, `IEditControllerHostEditing`).
     /// The two calls are for a helper parameter (not automatable, not

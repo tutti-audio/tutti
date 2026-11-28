@@ -214,15 +214,20 @@ pub enum PluginClass {
 }
 
 impl PluginClass {
-    /// Whether the format defines a host gesture toward the plugin: VST3 for a
-    /// controller with `IEditControllerHostEditing`, AU's gesture notifications.
+    /// Whether the format defines a host gesture toward a parameter of `role`:
+    /// VST3 for a helper parameter (on a controller with
+    /// `IEditControllerHostEditing`, which only the plugin can answer), AU's
+    /// gesture notifications for every parameter.
     /// CLAP and VST2 define none (`ext/params.h` scenario II; VST2's
     /// `audioMasterBeginEdit` goes from plugin to host).
     #[must_use]
-    pub fn host_edit(&self) -> crate::EditOutcome {
-        match self {
-            PluginClass::Vst3 { .. } | PluginClass::Au { .. } => crate::EditOutcome::Queued,
-            PluginClass::Unknown | PluginClass::Vst2 { .. } | PluginClass::Clap { .. } => {
+    pub fn host_edit(&self, role: crate::ParamRole) -> crate::EditOutcome {
+        match (self, role) {
+            (PluginClass::Vst3 { .. }, crate::ParamRole::Helper) | (PluginClass::Au { .. }, _) => {
+                crate::EditOutcome::Queued
+            }
+            (PluginClass::Vst3 { .. }, crate::ParamRole::Other)
+            | (PluginClass::Unknown | PluginClass::Vst2 { .. } | PluginClass::Clap { .. }, _) => {
                 crate::EditOutcome::NotDefined
             }
         }

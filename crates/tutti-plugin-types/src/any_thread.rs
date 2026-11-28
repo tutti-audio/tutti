@@ -8,8 +8,8 @@
 
 use crate::{
     Answer, AutomationMode, AutomationModeError, BypassWrite, EditOutcome, OwnBypass, ParamEdit,
-    ParamWriteError, ParameterInfo, PipelineCounts, PluginFailure, RenderMode, StateError,
-    StateUse, TerminationReason, bypass_value,
+    ParamRole, ParamWriteError, ParameterInfo, PipelineCounts, PluginFailure, RenderMode,
+    StateError, StateUse, TerminationReason, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -155,11 +155,12 @@ pub trait AnyThread: Send + Sync {
     /// thread. The plugin hears it on its main thread, in the order posted
     /// (VST3's `beginEditFromHost`, AU's gesture notifications). Never waits.
     ///
-    /// [`EditOutcome::NotDefined`] for a format with no host gesture (CLAP,
-    /// VST2), and nothing is queued. A [`Change`](ParamEdit::Change) is the
+    /// [`EditOutcome::NotDefined`] for a format with no host gesture toward a
+    /// parameter of `role` (CLAP, VST2, a VST3 parameter that is not a helper),
+    /// and nothing is queued. A [`Change`](ParamEdit::Change) is the
     /// value the gesture moved to; the value's write to the plugin itself is
     /// [`set_parameter_value`](Self::set_parameter_value).
-    fn edit(&self, edit: ParamEdit) -> EditOutcome;
+    fn edit(&self, edit: ParamEdit, role: ParamRole) -> EditOutcome;
 
     /// The plain value `value` stands for, converted by the plugin's format
     /// ([`Control::parameter_plain`](crate::Control::parameter_plain)), so a
@@ -320,7 +321,7 @@ mod tests {
             self.written.lock().push((id, value.get()));
             Ok(())
         }
-        fn edit(&self, _: ParamEdit) -> EditOutcome {
+        fn edit(&self, _: ParamEdit, _: ParamRole) -> EditOutcome {
             EditOutcome::NotDefined
         }
         fn bypassed(&self, _: OwnBypass) -> Option<bool> {

@@ -12,8 +12,8 @@ use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
     AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamEdit,
-    ParamMapping, ParamUnit, ParamWriteError, ParameterInfo, PlainMap, PlainUnit, TrackInfo,
-    effective_midi_map,
+    ParamMapping, ParamRole, ParamUnit, ParamWriteError, ParameterInfo, PlainMap, PlainUnit,
+    TrackInfo, effective_midi_map,
 };
 use tutti_rt::Mutex;
 use tutti_units::{
@@ -93,8 +93,10 @@ impl<U> PluginParamTarget<U> {
     /// Tells the plugin `edit` of a gesture over the parameter, through its
     /// handle; nothing when the plugin is gone or not read yet.
     fn hold(self, params: &Params, edit: ParamEdit) {
-        if let Some(entry) = params.plugin(self.node) {
-            let _ = entry.handle.edit(edit);
+        if let Some(entry) = params.plugin(self.node)
+            && let Some(declared) = entry.param(self.id)
+        {
+            let _ = entry.handle.edit(edit, declared.role);
         }
     }
 
@@ -513,6 +515,8 @@ impl Owed {
 #[derive(Debug)]
 struct Declared {
     access: ParamAccess,
+    /// What the parameter is to a host gesture.
+    role: ParamRole,
     /// How the plain value follows from the position, when the declaration
     /// says; read at each call that converts, never held by a target.
     plain_map: Option<PlainMap>,
@@ -526,6 +530,7 @@ impl Declared {
     fn of(info: &ParameterInfo, value: Normalized) -> Self {
         Self {
             access: ParamAccess::of(info),
+            role: info.gesture_role(),
             plain_map: info.plain_map(),
             measures: info.measures(),
             value: AtomicU64::new(value.get().to_bits()),
@@ -539,6 +544,7 @@ impl Declared {
 pub(crate) struct CarriedParam {
     id: ParamId,
     access: ParamAccess,
+    role: ParamRole,
     plain_map: Option<PlainMap>,
     measures: Option<ParamUnit>,
     value: Normalized,
@@ -549,6 +555,7 @@ impl CarriedParam {
         Self {
             id: info.id(),
             access: ParamAccess::of(info),
+            role: info.gesture_role(),
             plain_map: info.plain_map(),
             measures: info.measures(),
             value,
@@ -582,6 +589,7 @@ impl PluginEntry {
                     .map(|p| {
                         let declared = Declared {
                             access: p.access,
+                            role: p.role,
                             plain_map: p.plain_map,
                             measures: p.measures,
                             value: AtomicU64::new(p.value.get().to_bits()),

@@ -215,6 +215,7 @@ where
         refused,
         host_edits,
         format: descriptor.class.format_name(),
+        class: descriptor.class.clone(),
         work: work.clone(),
     });
 
