@@ -2325,14 +2325,25 @@ impl<F: Float> Graph<F> {
     /// Moves every feeder's sources from sink `from` to sink `to`, replacing
     /// what each fed `to`: a host whose sink was re-bound to a new node keeps
     /// its feeds. `from` is left fed by nothing.
-    pub fn move_feeds(&mut self, from: impl Into<NodeKey>, to: impl Into<NodeKey>) {
+    ///
+    /// # Errors
+    ///
+    /// [`NoSuchNode`] when `from` or `to` is not in the graph; nothing changes.
+    pub fn move_feeds(
+        &mut self,
+        from: impl Into<NodeKey>,
+        to: impl Into<NodeKey>,
+    ) -> Result<(), NoSuchNode> {
         let from = from.into();
         let to = to.into();
+        if let Some(missing) = [from, to].into_iter().find(|k| !self.nodes.contains_key(k)) {
+            return Err(NoSuchNode::new(missing));
+        }
         if from == to {
-            return;
+            return Ok(());
         }
         let Some(moved) = self.feeds.remove(&from) else {
-            return;
+            return Ok(());
         };
         let into = self.feeds.entry(to).or_default();
         for (feeder, sources) in moved {
@@ -2340,6 +2351,7 @@ impl<F: Float> Graph<F> {
         }
         self.write_feeds(from);
         self.write_feeds(to);
+        Ok(())
     }
 
     /// Write `sink`'s feeds into its event input 0: the union of every
