@@ -532,6 +532,15 @@ pub struct PluginHeld {
 /// A plugin is declared under one key, and is taken by the first patch that adds
 /// it. The ports of the node are the plugin's own: a change of them is the
 /// plugin's, and the node at the key follows it.
+///
+/// A swap the graph refuses leaves the key in
+/// [`Patched::unconverged`](crate::Patched::unconverged). A swap refused as
+/// busy takes nothing, so the next patch tries it again with the same plugin.
+/// A swap refused for any other reason closes the incoming plugin, as
+/// [`swap_plugin`](crate::Session::swap_plugin) does. That plugin is spent: the
+/// next patch that declares it is refused with
+/// [`PluginPatchError::Spent`](crate::PluginPatchError::Spent), and it is
+/// loaded again to be declared again.
 #[cfg(feature = "plugin")]
 #[must_use = "a declaration is part of a patch only once `Session::patch` takes it"]
 pub struct PluginDecl<K> {
