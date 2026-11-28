@@ -241,7 +241,9 @@ mod vst3 {
         let (catalog, id, _dir) = crate::loading::catalog_of(&plugin);
         let s = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
-            .build_detached(SampleRate::DEFAULT)
+            .sample_rate(SampleRate::DEFAULT)
+            .block_dates(tutti_session::BlockDates::Frames)
+            .build()
             .expect("a detached session builds");
         let opened = s
             .load_out_of_process(&id, &catalog)
@@ -303,7 +305,9 @@ mod vst3 {
         let main = tutti_fixtures::main_thread();
         let mut s = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
-            .build_detached(SampleRate::DEFAULT)
+            .sample_rate(SampleRate::DEFAULT)
+            .block_dates(tutti_session::BlockDates::Frames)
+            .build()
             .expect("a detached session builds");
         let node = s.graph().add_plugin(Box::new(client(SampleRate::DEFAULT)));
         let other = s.graph().add_plugin(Box::new(client(SampleRate::DEFAULT)));
@@ -340,7 +344,9 @@ mod vst3 {
         let mut s = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
             .plugin_recovery(tutti_session::RecoveryPolicy::default())
-            .build_detached(SampleRate::DEFAULT)
+            .sample_rate(SampleRate::DEFAULT)
+            .block_dates(tutti_session::BlockDates::Frames)
+            .build()
             .expect("a detached session builds");
         let plugin = s.load_out_of_process(&id, &catalog).block().unwrap();
         let node = s.apply(plugin).unwrap();
@@ -390,18 +396,19 @@ mod vst2 {
     use tutti_plugin_types::PluginRef;
     use tutti_plugin_types::PresetId;
     use tutti_plugin_types::{PresetError, PresetSupport};
-    use tutti_session::DetachedSession;
     use tutti_session::{
         AnyPlugin, Key, Peer as _, PluginApplyError, PluginInstance, PresetStartError, Session,
     };
     use tutti_units::SampleRate;
 
-    fn probe_with(programs: &str) -> (DetachedSession, PluginInstance, Key<AnyPlugin>, ScopedEnv) {
+    fn probe_with(programs: &str) -> (Session, PluginInstance, Key<AnyPlugin>, ScopedEnv) {
         let mut env = ScopedEnv::new();
         env.set("TUTTI_VST2_PROBE_PROGRAMS", programs);
         let mut s = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
-            .build_detached(SampleRate::DEFAULT)
+            .sample_rate(SampleRate::DEFAULT)
+            .block_dates(tutti_session::BlockDates::Frames)
+            .build()
             .expect("a detached session builds");
         let (plugin, node) = s
             .load_plugin_handle(
@@ -498,7 +505,7 @@ mod vst2 {
     /// A session with the probe's three programs loaded from a catalog the
     /// test keeps: its catalog and id stay in hand for a second load.
     fn declared() -> (
-        DetachedSession,
+        Session,
         tutti_plugin_db::Catalog,
         tutti_plugin_types::PluginId,
         PluginInstance,
@@ -510,7 +517,9 @@ mod vst2 {
         env.set("TUTTI_VST2_PROBE_PROGRAMS", "3");
         let mut s = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
-            .build_detached(SampleRate::DEFAULT)
+            .sample_rate(SampleRate::DEFAULT)
+            .block_dates(tutti_session::BlockDates::Frames)
+            .build()
             .expect("a detached session builds");
         let plugin = PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf());
         let (catalog, id, dir) = crate::loading::catalog_of(&plugin);

@@ -9,9 +9,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_plugin_types::ParamUnit;
 use tutti_plugin_types::PluginRef;
-use tutti_session::{
-    DetachedSession, MainOutput, Session, SetRefusal, UnitError, ValueError, ValueErrorKind,
-};
+use tutti_session::{MainOutput, Session, SetRefusal, UnitError, ValueError, ValueErrorKind};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{Db, Hz, SampleRate};
@@ -37,11 +35,13 @@ fn probe_answering_properties() -> (libloading::Library, std::path::PathBuf) {
     (lib, path.to_path_buf())
 }
 
-fn session_with_probe() -> (DetachedSession, NodeKey, libloading::Library) {
+fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
     let (image, probe) = probe_answering_properties();
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
+        .sample_rate(SampleRate::DEFAULT)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("a detached session builds");
     let node = s
         .load_plugin_blocking(
