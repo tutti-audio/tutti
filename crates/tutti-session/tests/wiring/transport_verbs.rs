@@ -118,7 +118,9 @@ fn the_playhead_is_one_read_of_the_last_block() {
 #[test]
 fn a_detached_session_reads_a_resting_playhead() {
     let s = Session::builder()
-        .build_detached(SampleRate::SR_48K)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let p = s.playhead();
     assert!(!p.playing());

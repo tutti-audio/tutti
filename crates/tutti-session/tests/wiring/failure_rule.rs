@@ -2,22 +2,25 @@
 //! names a key or port that does not exist fails at the call with a named
 //! error, never later at the commit and never as silence.
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    Committed, ConnectError, DetachedSession, EventInputPort, EventOutputPort, Feeder, InputPort,
-    MainOutput, OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
+    Committed, ConnectError, EventInputPort, EventOutputPort, Feeder, InputPort, MainOutput,
+    OutputPort, ReplaceRefused, Replacement, Session, SetRateError,
 };
 use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const GHOST: NodeKey = NodeKey(u64::MAX);
 
-fn detached() -> DetachedSession {
+fn detached() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(RATE)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -120,7 +123,6 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
 #[test]
 fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
     let mut s = detached();
-    let _side = s.graph().take_audio_side();
     let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
     let _ = s.update();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
@@ -285,7 +287,7 @@ fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
     assert_eq!(
         s.commit(),
         Committed::Sent,
-        "nothing was sent: no re-prepare pends"
+        "no re-prepare pends, so the adds commit"
     );
 
     // Below the range is refused the same way, and both ends are accepted.
@@ -295,6 +297,15 @@ fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
     ));
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     assert_eq!(s.sample_rate(), SampleRate::SR_44K1);
+    // The second half of the re-prepare lands once a block has run.
+    let mut out = [0.0f32];
+    for _ in 0..16 {
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+        let _ = s.update();
+        if s.commit() != Committed::Retry {
+            break;
+        }
+    }
     s.set_sample_rate(SampleRate::SR_48K).unwrap();
     assert_eq!(s.sample_rate(), SampleRate::SR_48K);
 }

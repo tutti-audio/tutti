@@ -8,13 +8,16 @@ use tutti_graph::{
     Cx, DeclaredUnit, ForkByClone, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status,
 };
 use tutti_rt::Param;
-use tutti_session::{DetachedSession, Replacement, Session, SessionEvent, ValueErrorKind};
+use tutti_session::{Replacement, Session, SessionEvent, ValueErrorKind};
 use tutti_units::{Hz, Q, SampleRate, Seconds, UnitParam};
 
-fn detached() -> DetachedSession {
+fn detached() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -216,7 +219,6 @@ fn an_address_the_incoming_node_lacks_is_no_such_target() {
 #[test]
 fn a_parked_replace_seeds_the_same_way() {
     let mut s = detached();
-    let mut side = s.graph().take_audio_side();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set((tone.cutoff().to(Hz::new(800.0)), tone.q().to(Q::new(2.0))))
@@ -234,7 +236,7 @@ fn a_parked_replace_seeds_the_same_way() {
     let mut out = [0.0f32];
     let mut landed = false;
     for _ in 0..16 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         landed |= s
             .update()
             .iter()
@@ -253,7 +255,6 @@ fn a_parked_replace_seeds_the_same_way() {
 #[test]
 fn a_replace_behind_a_waiting_one_seeds_from_it() {
     let mut s = detached();
-    let _side = s.graph().take_audio_side();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
@@ -312,7 +313,6 @@ impl Node for Eventful {
 #[test]
 fn a_refused_parked_swap_gives_the_outgoing_params_back_whole() {
     let mut s = detached();
-    let mut side = s.graph().take_audio_side();
     let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set(tone.cutoff().to(Hz::new(800.0))).unwrap();
@@ -324,7 +324,7 @@ fn a_refused_parked_swap_gives_the_outgoing_params_back_whole() {
     let mut out = [0.0f32];
     let mut failed = false;
     for _ in 0..16 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         failed |= s
             .update()
             .iter()

@@ -3,9 +3,13 @@
 //!
 //! Design 015 §9.4.
 
+#[cfg(feature = "export")]
+use crate::bounced::{bounced, first_frames};
 use crate::committed::committed;
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
+#[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
@@ -18,8 +22,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    Committed, DetachedSession, Feeder, InputPort, MainOutput, OutputPort, RemoveError,
-    ReplaceRefused, Replacement, Session, SessionEvent, main_output_width,
+    Committed, Feeder, InputPort, MainOutput, OutputPort, RemoveError, ReplaceRefused, Replacement,
+    Session, SessionEvent, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -27,10 +31,13 @@ use tutti_units::{Latency, UnitParam};
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A detached session `outputs` wide at 48 kHz: the executor on this side.
-fn detached(outputs: usize) -> DetachedSession {
+fn detached(outputs: usize) -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
-        .build_detached(RATE)
+        .outputs(ChannelLayout::clamped(outputs))
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -255,7 +262,9 @@ impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
 fn every_source_reads_back_as_written() {
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(RATE)
+        .sample_rate(RATE)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let graph = s.graph();
     let stereo = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
@@ -431,7 +440,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
     );
     assert_eq!(committed(&events), 1, "one commit");
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 2.0, "the edit is what renders");
 }
 
@@ -476,7 +485,6 @@ fn a_replace_on_a_removed_node_is_refused_naming_it() {
 #[test]
 fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     let mut s = detached(1);
-    let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(knob, 0)])
@@ -484,7 +492,7 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
         .unfaded();
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     let mut out = [0.0f32];
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the knob plays");
 
     // The rate changes on the running graph: the first half is sent, and
@@ -501,10 +509,10 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     // out (a silent block), the editor sends them back, the executor
     // resumes. The replacement waits until an update finds the graph resumed.
     assert!(s.update().is_empty());
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert!(s.update().is_empty());
     s.set(knob.drive().to(Drive::new(7.0))).unwrap();
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(
         f64::from(out[0]),
         Knob::BUILT_WITH,
@@ -520,7 +528,7 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     }
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     for _ in 0..512 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(
         out[0], 7.0,
@@ -528,7 +536,7 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
     );
     s.set(knob.drive().to(Drive::new(9.0))).unwrap();
     for _ in 0..512 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(out[0], 9.0, "its params are addressed under the key");
 }
@@ -543,7 +551,6 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
     use std::sync::Arc;
 
     let mut s = detached(1);
-    let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
@@ -569,19 +576,14 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
                 .any(|e| matches!(e, SessionEvent::ReplaceFailed { .. })),
             "{events:?}"
         );
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
 }
 
 /// A detached session with a knob playing at the main output, its first plan sent,
 /// and the audio side taken: the running node a swap fades from.
-fn playing_knob() -> (
-    DetachedSession,
-    tutti_session::AudioSide,
-    tutti_session::Key<Params<Knob>>,
-) {
+fn playing_knob() -> (Session, tutti_session::Key<Params<Knob>>) {
     let mut s = detached(1);
-    let mut side = s.graph().take_audio_side();
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(knob, 0)])
@@ -589,9 +591,9 @@ fn playing_knob() -> (
         .unfaded();
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     let mut out = [0.0f32];
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the knob plays");
-    (s, side, knob)
+    (s, knob)
 }
 
 /// **A fade over a node of another shape is refused, and a zero fade cuts**:
@@ -602,7 +604,7 @@ fn playing_knob() -> (
 /// the first frame after the commit.
 #[test]
 fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
-    let (mut s, mut side, knob) = playing_knob();
+    let (mut s, knob) = playing_knob();
     let refused = s
         .graph()
         .replace(knob, Replacement::new(ForkByClone(Events::<0, 1>)))
@@ -626,7 +628,7 @@ fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
     let mut out = [0.0f32];
     // A write ramps over the declick, then holds.
     for _ in 0..512 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(out[0], 4.0, "the refused swap left the running knob");
 
@@ -638,7 +640,7 @@ fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
         )
         .expect("a cut over a shape change is accepted");
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(out[0], 0.0, "the incoming node, with no blend of the knob");
 }
 
@@ -651,7 +653,7 @@ fn a_fade_over_a_shape_change_is_refused_and_a_zero_fade_cuts() {
 fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
     use std::sync::Arc;
 
-    let (mut s, mut side, knob) = playing_knob();
+    let (mut s, knob) = playing_knob();
     let token = Arc::new(());
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
@@ -671,7 +673,7 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
                 failed = Some((node, refused));
             }
         }
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     let (node, refused) = failed.expect("the retry was refused");
     assert_eq!(node, knob.erase());
@@ -687,7 +689,7 @@ fn a_parked_swap_over_a_shape_change_fails_when_it_lands() {
 /// swap does at once.
 #[test]
 fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
-    let (mut s, mut side, knob) = playing_knob();
+    let (mut s, knob) = playing_knob();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(
@@ -702,7 +704,7 @@ fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
             .update()
             .iter()
             .any(|e| matches!(e, SessionEvent::Replaced { node } if *node == knob.erase()));
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert!(landed, "reported as replaced");
     assert_eq!(out[0], 0.0, "the incoming node renders");
@@ -715,7 +717,7 @@ fn a_parked_swap_with_a_zero_fade_lands_over_a_shape_change() {
 #[test]
 fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
     // The same type.
-    let (mut s, mut side, knob) = playing_knob();
+    let (mut s, knob) = playing_knob();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let same = s
         .graph()
@@ -727,23 +729,23 @@ fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
     // block) and resumes them; the swap waits for an update that finds the
     // graph resumed.
     assert!(s.update().is_empty());
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert!(s.update().is_empty());
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     assert_eq!(f64::from(out[0]), Knob::BUILT_WITH, "the outgoing plays on");
     for _ in 0..8 {
         let _ = s.update();
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     for _ in 0..512 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(out[0], 7.0, "the write, not the incoming default 3.0");
 
     // Another type: a write through its key, which the outgoing node's
     // table would refuse as a type mismatch.
-    let (mut s, mut side, knob) = playing_knob();
+    let (mut s, knob) = playing_knob();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     let dial = s
         .graph()
@@ -753,11 +755,11 @@ fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
         .expect("the key's targets are the incoming node's");
     for _ in 0..8 {
         let _ = s.update();
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     for _ in 0..512 {
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(out[0], 5.0, "the write, not the incoming default 3.0");
 }
@@ -770,7 +772,6 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
     use tutti_nodes::{MultibandBands, MultibandCompressorConfig, MultibandCompressorNode};
 
     let mut s = detached(1);
-    let _side = s.graph().take_audio_side();
     let band = |n| {
         MultibandCompressorNode::from(MultibandCompressorConfig::new(
             tutti_buffers::ChannelTopology::STEREO,
@@ -796,7 +797,7 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
 /// `ReplaceDropped` for the node, once.
 #[test]
 fn removing_a_node_reports_the_parked_swap_it_drops() {
-    let (mut s, _side, knob) = playing_knob();
+    let (mut s, knob) = playing_knob();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))))
@@ -819,14 +820,14 @@ fn removing_a_node_reports_the_parked_swap_it_drops() {
 #[test]
 fn an_unfaded_removal_cuts_where_the_default_fades_out() {
     for unfaded in [false, true] {
-        let (mut s, mut side, knob) = playing_knob();
+        let (mut s, knob) = playing_knob();
         let removal = s.remove(knob).unwrap();
         if unfaded {
             let _ = removal.unfaded();
         }
         assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
         let mut out = [0.0f32];
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
         if unfaded {
             assert_eq!(out[0], 0.0, "cut at the block boundary");
         } else {
@@ -847,9 +848,14 @@ fn a_replace_on_a_poisoned_graph_is_refused() {
     let knob = s.graph().add(Params(Knob::new()));
     s.graph().add(Unforkable(Grenade));
     let _ = s.update();
-    // Both halves run here (the executor is local); the second panics in
-    // the grenade's `prepare` and poisons the editor.
+    // The second half runs once a block has checked the units out; it panics
+    // in the grenade's `prepare` and poisons the editor.
     s.set_sample_rate(SampleRate::SR_96K).unwrap();
+    let mut out = [0.0f32];
+    for _ in 0..4 {
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+        let _ = s.update();
+    }
     let refused = s
         .graph()
         .replace(knob, Replacement::new(Params(Knob::at(3.0))));
@@ -869,6 +875,7 @@ fn a_replace_on_a_poisoned_graph_is_refused() {
 /// through the node's addressed `ParamSet`, and a write through the
 /// session's `Values` handle. A fork starts from the values its cells hold.
 /// (The modulated paths are `mod_lanes.rs`'.)
+#[cfg(feature = "export")]
 #[test]
 fn every_param_write_path_reaches_a_fork() {
     let mut s = detached(2);
@@ -887,16 +894,13 @@ fn every_param_write_path_reaches_a_fork() {
     s.set(k0.drive().to(Drive::new(5.0))).unwrap();
     s.values().set(k1.drive().to(Drive::new(4.0))).unwrap();
     let mut live = [0.0f32; 2];
-    s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut live).unwrap());
     assert_eq!(live, [5.0, 4.0], "each write reaches the live node");
-    let mut fork = s
-        .graph_ref()
-        .testing()
-        .fork_live()
-        .expect("every knob forks");
-    let mut forked = [0.0f32; 2];
-    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
-    assert_eq!(forked, [5.0, 4.0], "and the fork");
+    let forked = bounced(&mut s, first_frames(1))
+        .expect("every knob forks")
+        .into_main_output()
+        .to_planes();
+    assert_eq!(forked, [[5.0], [4.0]], "and the fork");
 }
 
 // ---- event feeds ----------------------------------------------------------------
@@ -1201,6 +1205,13 @@ fn replace_under_a_held_borrow(controls: &PublishedControls) {
 #[test]
 fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
     let mut s = detached(1);
+    // An update sends the edits, a block applies them and hands the units
+    // they replaced back, and the next update collects those.
+    let land = |s: &mut Session| {
+        let _ = s.update();
+        s.render(&mut InterleavedMut::one_frame(&mut [0.0f32]).unwrap());
+        let _ = s.update();
+    };
     let (published, first) = Published::new();
     let node = s.graph().add(published);
     s.graph()
@@ -1237,7 +1248,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
         3,
         "the incoming one's kept"
     );
-    let _ = s.update();
+    land(&mut s);
     assert_eq!(
         Arc::strong_count(&first.token),
         1,
@@ -1262,7 +1273,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
         2,
         "the replaced node's reclaimer went with it"
     );
-    let _ = s.update();
+    land(&mut s);
     assert_eq!(
         Arc::strong_count(&second.token),
         1,
@@ -1279,7 +1290,7 @@ fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
         "the removal dropped its reclaimer; its controls wait for its unit"
     );
     replace_under_a_held_borrow(&third);
-    let _ = s.update();
+    land(&mut s);
     assert_eq!(
         Arc::strong_count(&third.token),
         1,
@@ -1336,7 +1347,6 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
 #[test]
 fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
     let mut s = detached(1);
-    let mut side = s.graph().take_audio_side();
     let (published, outgoing) = Published::new();
     let node = s.graph().add(published);
     s.graph()
@@ -1345,7 +1355,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
         .unfaded();
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     let mut out = [0.0f32];
-    side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
 
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
     s.graph()
@@ -1363,7 +1373,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
     let mut events = Vec::new();
     for _ in 0..8 {
         events.extend(s.update());
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     assert!(
@@ -1383,7 +1393,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
         .expect("the key addresses the node that landed");
     for _ in 0..512 {
         let _ = s.update();
-        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     }
     assert_eq!(out[0], 7.0, "the write reached the second node");
     assert_eq!(
@@ -1396,7 +1406,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
 /// A pool's voice added and then removed, rendered through, so the pool's
 /// audio side parks the removed slot in its retire ring.
 #[cfg(feature = "sampler")]
-fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoolHandle<f32>) {
+fn park_a_retired_slot(s: &mut Session, handle: &tutti_sampler::VoicePoolHandle<f32>) {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoiceWindow};
     let source = MemorySource::placed(
         Arc::new(tutti_buffers::Wave::new(1, SampleRate::SR_48K)),
@@ -1407,9 +1417,9 @@ fn park_a_retired_slot(s: &mut DetachedSession, handle: &tutti_sampler::VoicePoo
         .add(SlotId(1), source, Playback::default())
         .expect("queued");
     let mut out = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
     handle.remove(SlotId(1)).expect("queued");
-    s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
 }
 
 /// **The update frees the slots a pool the graph holds retired**: `Graph::add`

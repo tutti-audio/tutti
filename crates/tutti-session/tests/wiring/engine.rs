@@ -6,11 +6,15 @@
 //! render at two block sizes, which a voice's frames do not depend on). No
 //! test pins a past render.
 
+#[cfg(feature = "export")]
+use crate::bounced::{bounced, first_frames};
 use crate::committed::committed;
 use crate::offline::offline_48k;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 use tutti_buffers::MaxBlock;
+#[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
 use tutti_graph::ForkByClone;
 
 use tutti_buffers::ChannelLayout;
@@ -342,7 +346,7 @@ fn a_voice_plays_in_time_at_every_device_block_size() {
 }
 
 /// An offline session's [`Session::render`] feeds its load and block counts,
-/// one block per call; a detached session has no engine and no readings.
+/// one block per call.
 #[test]
 fn an_offline_render_feeds_the_load_and_the_block_counts() {
     let mut s = offline_48k();
@@ -353,17 +357,10 @@ fn an_offline_render_feeds_the_load_and_the_block_counts() {
     assert_eq!(s.blocks().expect("an offline engine").get().blocks, 4);
     let mean = s.load().expect("an offline engine").get().get();
     assert!(mean > 0.0, "a render takes some time");
-    let detached = Session::builder()
-        .build_detached(SampleRate::of(RATE))
-        .expect("builds");
-    assert!(detached.load().is_none());
-    assert!(detached.blocks().is_none());
 }
 
 /// A session's main output meter is an op in its plan, declared and on from the
-/// build: [`Session::render`] feeds it as a device callback would, and so does
-/// a detached session's [`Session::render_frame`] (it had no meter while the
-/// engine fed it).
+/// build: [`Session::render`] feeds it as a device callback would.
 #[test]
 fn an_offline_render_feeds_the_main_output_meter() {
     let mut s = offline_48k();
@@ -384,27 +381,6 @@ fn an_offline_render_feeds_the_main_output_meter() {
     assert!((r[0].peak.get() - 0.5).abs() < 1e-6, "{r:?}");
     assert!((r[1].rms.get() - 0.5).abs() < 1e-6, "{r:?}");
     assert_eq!(r[0].frames, Samples::new(128));
-
-    let mut detached = Session::builder()
-        .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::of(RATE))
-        .expect("builds");
-    let mut meter = detached
-        .take_main_output_meter()
-        .expect("declared at the build");
-    let dc = detached.graph().add(ForkByClone(Const::mono(0.5)));
-    detached
-        .graph()
-        .set_sources(MainOutput::channel(0), [OutputPort::new(dc, 0)])
-        .unwrap()
-        .unfaded();
-    let mut frame = [0.0f32];
-    detached.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
-    assert_eq!(meter.read()[0].peak.get(), 0.5);
-    assert!(
-        detached.take_main_output_meter().is_none(),
-        "taken once: one consumer"
-    );
 }
 
 /// Opening a tap or a meter on a source the graph lacks is refused, with the
@@ -585,13 +561,6 @@ fn closing_the_heard_tap_with_none_open_is_a_no_op() {
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     assert_eq!(tap.available(), Samples::new(0), "closed before it wrote");
     drop(tap);
-    let mut detached = Session::builder()
-        .build_detached(SampleRate::of(RATE))
-        .expect("builds");
-    assert_eq!(
-        detached.close_heard_tap(),
-        Err(tutti_session::SessionHeardTapError::Detached)
-    );
 }
 
 /// A tap on an offline session's outputs is fed by [`Session::render`]: a
@@ -686,37 +655,6 @@ fn a_dropped_reader_leaves_the_plan_at_the_reclaim_phase() {
         "the reclaim of this update closed it; the plan is the next commit's"
     );
     assert_eq!(committed(&s.update()), 1, "the tap's op left the plan");
-}
-
-/// A detached session renders by hand ([`Session::render_frame`]) and its
-/// taps are fed too: the tap is an op in the plan, not the engine's.
-#[test]
-fn a_detached_render_feeds_a_tap() {
-    let mut s = Session::builder()
-        .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::of(RATE))
-        .expect("builds");
-    let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
-    s.graph()
-        .set_sources(MainOutput::channel(0), [OutputPort::new(dc, 0)])
-        .unwrap()
-        .unfaded();
-    let mut tap = s
-        .graph()
-        .taps()
-        .open_main_output(Samples::new(16))
-        .expect("the sources exist");
-    let mut frame = [0.0f32];
-    for _ in 0..3 {
-        s.render_frame(InterleavedMut::one_frame(&mut frame).unwrap());
-    }
-    let mut got = [f32::NAN; 3];
-    assert_eq!(
-        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
-            .unwrap(),
-        Samples::new(3)
-    );
-    assert_eq!(got, [0.5; 3]);
 }
 
 /// A source that plays 0.5 only while the transport rolls, as every
@@ -892,9 +830,9 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     assert!((cliff - 0.5).abs() < 1e-6, "the plan tap steps: {cliff}");
 }
 
-/// Offline, a block `render` pulls is written whole; a detached session has no
-/// engine and says so; a fork (what an export renders) has no write into the
-/// live tap.
+/// Offline, a block `render` pulls is written whole; a fork (what an export
+/// renders) has no write into the live tap.
+#[cfg(feature = "export")]
 #[test]
 fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     let mut s = offline_48k();
@@ -918,21 +856,12 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     assert!(first.writer_gone(), "superseded: its writer was freed");
     assert_eq!(first.available(), Samples::new(0));
     // An export renders a fork, without the engine: nothing reaches the tap.
-    let mut fork = s.graph_ref().testing().fork_live().expect("forks");
-    let mut out = [0.0f32; 2];
-    for _ in 0..64 {
-        fork.tick(InterleavedMut::one_frame(&mut out).unwrap());
-    }
+    let forked = bounced(&mut s, first_frames(64))
+        .expect("forks")
+        .into_main_output()
+        .to_planes();
     assert_eq!(tap.available(), Samples::new(64), "the fork wrote nothing");
-    assert_eq!(out, [0.5, 0.5]);
-    tap.take_lost();
-    let mut detached = Session::builder()
-        .build_detached(SampleRate::of(RATE))
-        .expect("builds");
-    assert_eq!(
-        detached.open_heard_tap(Samples::new(8)).err(),
-        Some(tutti_session::SessionHeardTapError::Detached)
-    );
+    assert_eq!(forked, [[0.5; 64], [0.5; 64]]);
 }
 
 /// A project the device has no place for is refused when the session is built,

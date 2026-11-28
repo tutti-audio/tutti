@@ -8,7 +8,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_session::{ConnectError, DetachedSession, Session};
+use tutti_session::{ConnectError, Session};
 use tutti_units::SampleRate;
 
 /// A node with `IN` event inputs and `OUT` event outputs and nothing else.
@@ -27,10 +27,13 @@ impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
     fn reset(&mut self) {}
 }
 
-fn detached() -> DetachedSession {
+fn detached() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 

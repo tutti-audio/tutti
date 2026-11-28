@@ -4,18 +4,21 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
-use tutti_session::{ChangedBy, DetachedSession, Key, OutputPolicy, Session, ValueErrorKind};
+use tutti_session::{ChangedBy, Key, OutputPolicy, Session, ValueErrorKind};
 use tutti_tempo::TempoMap;
 use tutti_units::{Bpm, Hz, Q, SampleRate};
 
-fn detached() -> DetachedSession {
+fn detached() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
-fn filter(s: &mut DetachedSession) -> Key<SvfFilterNode<f32>> {
+fn filter(s: &mut Session) -> Key<SvfFilterNode<f32>> {
     s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))

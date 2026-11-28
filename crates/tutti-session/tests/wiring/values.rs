@@ -14,19 +14,21 @@ use tutti_nodes::{
 };
 use tutti_rt::Param;
 use tutti_session::{
-    Assign, DetachedSession, ParamTarget, Replacement, Session, SetRefusal, TargetInfo,
-    ValueErrorKind, Values,
+    Assign, ParamTarget, Replacement, Session, SetRefusal, TargetInfo, ValueErrorKind, Values,
 };
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds, UnitAddr, UnitParam};
 
-fn detached() -> DetachedSession {
+fn detached() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
-fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
+fn filter(s: &mut Session, cutoff: f64) -> tutti_session::Key<SvfFilterNode<f32>> {
     s.graph().add(SvfFilterNode::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(cutoff))
@@ -34,7 +36,7 @@ fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterN
     ))
 }
 
-fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>> {
+fn compressor(s: &mut Session) -> tutti_session::Key<CompressorNode<f32>> {
     s.graph().add(CompressorNode::from(
         CompressorConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
@@ -43,7 +45,7 @@ fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>
 }
 
 /// A node whose `Seconds` params are `f64` cells.
-fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode<f32>> {
+fn multiband(s: &mut Session) -> tutti_session::Key<MultibandCompressorNode<f32>> {
     s.graph().add(MultibandCompressorNode::from(
         MultibandCompressorConfig::new(ChannelTopology::STEREO, MultibandBands::of(2)),
     ))
@@ -418,7 +420,7 @@ impl ParamNode for Slow {
 tutti_graph::declare_params!([] Slow, n { Cutoff => Seconds = &n.cutoff });
 
 fn swap<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send + 'static>(
-    s: &mut DetachedSession,
+    s: &mut Session,
     key: tutti_session::Key<SvfFilterNode<f32>>,
     incoming: N,
 ) {

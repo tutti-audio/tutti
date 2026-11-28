@@ -25,7 +25,9 @@ fn build_and_drop_fit_a_small_stack() {
                 .expect("an offline session builds");
             drop(offline);
             let detached = Session::builder()
-                .build_detached(SampleRate::SR_48K)
+                .sample_rate(SampleRate::SR_48K)
+                .block_dates(tutti_session::BlockDates::Frames)
+                .build()
                 .expect("a detached session builds");
             drop(detached);
         })

@@ -4,8 +4,12 @@
 //! own `ParamNode` is inserted as `Params(node)` with nothing
 //! implemented for the session.
 
+#[cfg(feature = "export")]
+use crate::bounced::first_frames;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
+#[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
 use tutti_graph::{
     Cx, Fade, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
@@ -14,13 +18,16 @@ use tutti_nodes::{
     SvfFilterNode, SvfType,
 };
 use tutti_rt::Param;
-use tutti_session::{DetachedSession, Replacement, Session, ValueErrorKind};
+use tutti_session::{Replacement, Session, ValueErrorKind};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, UnitAddr, UnitParam};
 
-fn detached() -> DetachedSession {
+fn detached() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds")
 }
 
@@ -162,6 +169,7 @@ tutti_graph::declare_params!([] Mine, n { Cutoff => Hz = &n.cutoff });
 /// no `IntoNode` of its own. Its params are addressed
 /// (`set_param` reaches it), its key has the typed method its declaration
 /// gives, and a fork of it starts from the value set.
+#[cfg(feature = "export")]
 #[test]
 fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     let mut s = detached();
@@ -177,16 +185,15 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     s.set(mine.cutoff().to(Hz::new(440.0))).unwrap();
     assert_eq!(s.get(mine.cutoff()).unwrap(), Hz::new(440.0));
     let mut live = [0.0f32];
-    s.render_frame(InterleavedMut::one_frame(&mut live).unwrap());
+    s.render(&mut InterleavedMut::one_frame(&mut live).unwrap());
     assert_eq!(live, [440.0], "the live node reads it");
 
-    let mut fork = s
-        .graph_ref()
-        .testing()
-        .fork_live()
-        .expect("a Params node forks");
+    let fork = s.bounce(first_frames(1)).expect("a Params node forks");
     s.set(mine.cutoff().to(Hz::new(880.0))).unwrap();
-    let mut forked = [0.0f32];
-    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
-    assert_eq!(forked, [440.0], "the fork has the value set at the fork");
+    let forked = s
+        .apply(tutti_fixtures::block_on(fork))
+        .unwrap()
+        .into_main_output()
+        .to_planes();
+    assert_eq!(forked, [[440.0]], "the fork has the value set at the fork");
 }
