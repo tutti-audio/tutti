@@ -6,7 +6,7 @@ use crate::host::{InputStream, OutputStream};
 use crate::types::StateContext;
 use std::path::Path;
 use tutti_clap_ffi::CallError;
-use tutti_plugin_types::MainThreadMarker;
+use tutti_plugin_types::{MainThreadMarker, PresetError};
 
 impl ClapLoaded {
     /// Serializes the plugin's state to bytes via `CLAP_EXT_STATE`.
@@ -156,24 +156,21 @@ impl ClapLoaded {
     /// `CLAP_EXT_PRESET_LOAD`.
     ///
     /// # Errors
-    /// [`ClapError::StateError`] if the plugin doesn't implement preset
-    /// loading, the path isn't valid UTF-8, or the plugin rejects the load.
+    /// [`PresetError::Unsupported`] if the plugin implements no
+    /// `preset-load.from_location` or the path is no C string (a nul byte);
+    /// [`PresetError::Refused`] if the plugin answers `false` to the load.
     pub fn load_preset_file(
         &mut self,
         main: MainThreadMarker,
         path: impl AsRef<Path>,
-    ) -> Result<()> {
-        match self.plugin.preset_load_file(main, path.as_ref()) {
-            Ok(()) => Ok(()),
-            Err(CallError::NoExtension) => Err(ClapError::StateError(
-                "No preset-load extension".to_string(),
-            )),
-            Err(CallError::NoFunction) => Err(ClapError::StateError(
-                "No from_location function".to_string(),
-            )),
-            Err(CallError::Failed | CallError::WrongState | CallError::InvalidPath) => {
-                Err(ClapError::StateError("Preset load failed".to_string()))
-            }
-        }
+    ) -> std::result::Result<(), PresetError> {
+        self.plugin
+            .preset_load_file(main, path.as_ref())
+            .map_err(|call| match call {
+                CallError::NoExtension | CallError::NoFunction | CallError::InvalidPath => {
+                    PresetError::Unsupported
+                }
+                CallError::Failed | CallError::WrongState => PresetError::Refused,
+            })
     }
 }

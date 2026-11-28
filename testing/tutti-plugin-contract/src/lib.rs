@@ -64,6 +64,7 @@ macro_rules! contract {
             a_host_gesture_reaches_the_plugin_as_the_format_defines,
             parameters_listed,
             presets_listed_in_order,
+            an_unlisted_preset_is_answered_as_the_format_defines,
             own_bypass_is_declared_and_written,
             the_bypass_parameter_is_not_a_listed_control,
             a_control_carries_what_the_plugin_declares_of_it,

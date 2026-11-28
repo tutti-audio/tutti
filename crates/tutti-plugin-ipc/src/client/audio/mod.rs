@@ -1078,12 +1078,12 @@ impl AudioBridge {
         list.ok().map(|list| list.presets)
     }
 
-    /// Ask the plugin to load a preset. `false` when it refused, the format has
-    /// no load path, or the subprocess is gone — all three mean the preset did
-    /// not load, and a caller must leave its selection where it was.
-    pub(crate) fn load_preset(&self, id: PresetId) -> bool {
+    /// Ask the plugin to load a preset: what its control answered, or why the
+    /// bridge has no answer ([`PresetError::Lost`], `Busy`, `Stalled`). On an
+    /// error a caller must leave its selection where it was.
+    pub(crate) fn load_preset(&self, id: PresetId) -> std::result::Result<(), PresetError> {
         self.reset_host_edits();
-        preset_loaded(self.call(LoadPreset { id }, Deadline::Query, Object::None)).is_ok()
+        preset_loaded(self.call(LoadPreset { id }, Deadline::Query, Object::None))
     }
 
     // --- Requests answered into a future ---
@@ -1694,18 +1694,19 @@ fn editor_lost(lost: Lost, crashed: bool) -> EditorError {
     }
 }
 
-/// A [`LoadPreset`]'s answer: the preset loaded, or why it did not. No answer
-/// within the window is not a refusal: the plugin was asked and may have loaded
-/// it.
+/// A [`LoadPreset`]'s answer: what the plugin's control answered, as it
+/// answered it, or why the bridge has none. No answer within the window is not a
+/// refusal: the plugin was asked and may have loaded it. A server that answers
+/// an error, or another kind of reply, declined.
 fn preset_loaded(
     answer: std::result::Result<PresetLoaded, Lost>,
 ) -> std::result::Result<(), PresetError> {
     match answer {
-        Ok(PresetLoaded { ok: true }) => Ok(()),
+        Ok(PresetLoaded { result }) => result,
         Err(Lost::Busy) => Err(PresetError::Busy),
         Err(Lost::Crashed) => Err(PresetError::Lost),
         Err(Lost::NoAnswer { after }) => Err(PresetError::Stalled { after }),
-        Ok(_) | Err(_) => Err(PresetError::Refused),
+        Err(Lost::Server(_) | Lost::Wrong | Lost::Object(_)) => Err(PresetError::Refused),
     }
 }
 

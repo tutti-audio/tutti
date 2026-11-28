@@ -20,8 +20,8 @@ use tutti_plugin_types::{
     MidiMapApplied, OwnBypass, ParamEdit, ParamFlags, ParamGroup, ParamMapping, ParamSteps,
     ParamWriteError, ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor,
     PluginError, PluginId, PluginParamRange, PluginPreset, PluginResult, PluginTail, PluginVersion,
-    PluginWiring, PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps,
-    taken,
+    PluginWiring, PresetError, PresetId, RenderModeSupport, Request, RescanScope, StateUse,
+    WindowHandle, Wraps, taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -601,14 +601,18 @@ impl Control for AuLoaded {
             .collect()
     }
 
-    /// `false` for an id this format cannot address, and for a number the unit
-    /// does not advertise (the AU is still renderable afterwards, parameters
-    /// untouched).
-    fn load_preset(&mut self, _main: MainThreadMarker, id: &PresetId) -> bool {
-        match au_selector(id) {
-            Some(number) => self.load_factory_preset(number).is_ok(),
-            None => false,
+    /// [`PresetError::Unsupported`] for an id this format cannot address,
+    /// [`PresetError::Unlisted`] for a number the unit does not advertise in
+    /// `kAudioUnitProperty_FactoryPresets`, [`PresetError::Refused`] when the
+    /// unit rejects an advertised one (the AU is still renderable afterwards,
+    /// parameters untouched).
+    fn load_preset(&mut self, _main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
+        let number = au_selector(id).ok_or(PresetError::Unsupported)?;
+        if !self.factory_presets().iter().any(|p| p.number == number) {
+            return Err(PresetError::Unlisted);
         }
+        self.load_factory_preset(number)
+            .map_err(|_| PresetError::Refused)
     }
 
     /// `None` when the unit does not implement `kAudioUnitProperty_PresentPreset`:

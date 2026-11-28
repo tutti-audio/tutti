@@ -1110,7 +1110,7 @@ fn a_state_carries_the_program_and_a_restore_selects_it_first() {
     const SET_CHUNK: i32 = 24;
     let probe = Probe::acquire();
     let mut live = probe.load();
-    assert!(live.set_program(main_thread(), 1));
+    assert_eq!(live.set_program(main_thread(), 1), Ok(()));
     let saved = Control::save_state(
         &mut live,
         main_thread(),

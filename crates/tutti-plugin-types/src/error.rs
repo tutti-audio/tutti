@@ -95,9 +95,12 @@ pub enum Delivered {
 
 /// Why a preset call did not do what it was asked.
 ///
-/// Three answers a bare `Option<bool>` kept in one value: the plugin has no
-/// route to presets, it was asked and refused, or it is gone.
+/// What a load answers, one value per cause: the plugin cannot address the id,
+/// does not list it, was asked and refused, or is gone; the bridge adds a full
+/// queue and a missed deadline. The plugin's own answers cross the wire as they
+/// are.
 #[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum PresetError {
     /// This plugin cannot do that with presets: it has no preset route, or the
@@ -105,8 +108,16 @@ pub enum PresetError {
     /// load no file).
     #[error("this plugin does not support that preset operation")]
     Unsupported,
-    /// The plugin was asked and declined (an id it does not know, a file it
-    /// cannot read). Leave the selection where it was.
+    /// The id has the shape the format addresses, but no listed preset has it:
+    /// a VST2 program index outside `[0, numPrograms)` (`effSetProgram`), a VST3
+    /// program past its list's `programCount` or in a list no parameter owns
+    /// (`IUnitInfo::getProgramListInfo`), an AU number outside
+    /// `kAudioUnitProperty_FactoryPresets`. The plugin was not asked.
+    #[error("no listed preset has that id")]
+    Unlisted,
+    /// The plugin was asked about a preset it could address and declined (a
+    /// file it cannot read, a program selection its controller rejects). Leave
+    /// the selection where it was.
     #[error("the plugin refused the preset")]
     Refused,
     /// The plugin is gone, so nothing was asked.

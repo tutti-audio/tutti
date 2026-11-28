@@ -2390,6 +2390,39 @@ fn an_awaited_preset_load_the_server_never_answers_stalls_at_the_lanes_deadline(
     );
 }
 
+/// **A preset load answers what the server's plugin answered**, each typed
+/// outcome unchanged, through the awaited and the synchronous path alike.
+#[test]
+fn a_preset_load_reaches_the_client_as_the_servers_plugin_answered() {
+    use tutti_plugin_types::{PresetError, PresetId};
+    let answers = [
+        Ok(()),
+        Err(PresetError::Unsupported),
+        Err(PresetError::Unlisted),
+        Err(PresetError::Refused),
+        Err(PresetError::Lost),
+    ];
+    for answer in answers {
+        let mock = MockServer::start("preset-answers", move |msg| match msg {
+            ControlRequest::LoadPreset { .. } => {
+                Action::Reply(Box::new(ControlReply::PresetLoaded { result: answer }))
+            }
+            _ => Action::Silent,
+        });
+        let id = PresetId::Number(3);
+        assert_eq!(
+            await_answer(mock.bridge.audio().load_preset_answer(id.clone())),
+            Some(answer),
+            "the awaited load answers {answer:?}"
+        );
+        assert_eq!(
+            mock.bridge.audio().load_preset(id),
+            answer,
+            "the synchronous load answers {answer:?}"
+        );
+    }
+}
+
 /// **A server that dies mid-request drops the sender**, which resolves the
 /// answer as canceled: it never hangs.
 #[test]

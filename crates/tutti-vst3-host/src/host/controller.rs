@@ -11,8 +11,8 @@ use tutti_rt::Generation;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     Control, Controller, EditWriter, Loaded, ParamAccess, ParamEdit, ParamWriteError, PluginError,
-    PluginTail, Prepare, PresetId, Processor, Rebuilt, Refused, ReportDrain, Request, RestartRules,
-    Samples, Stuck, Widths, Wraps,
+    PluginTail, Prepare, PresetError, PresetId, Processor, Rebuilt, Refused, ReportDrain, Request,
+    RestartRules, Samples, Stuck, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -254,17 +254,15 @@ impl Wraps for Vst3Controller {
     /// Looks the program up once and refuses, without touching the plugin, an
     /// id that is no program or a program parameter the host may not write;
     /// otherwise runs the restore hooks around the load itself.
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         let loaded = self.loaded();
-        let Some((param, value)) = loaded.program_write(main, id) else {
-            return false;
-        };
-        if loaded.parameter_writable(main, param).is_err() {
-            return false;
-        }
+        let (param, value) = loaded.program_write(main, id)?;
+        loaded
+            .parameter_writable(main, param)
+            .map_err(|_| PresetError::Refused)?;
         self.before_restore(main);
         let selected = self.loaded_mut().select_program(main, param, value);
-        if selected {
+        if selected.is_ok() {
             self.after_restore(main);
         }
         selected
