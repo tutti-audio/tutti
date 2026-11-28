@@ -48,7 +48,7 @@ fn render(cfg: SynthConfig, notes: &[u8]) -> (Vec<f32>, Vec<f32>) {
     let rate = tutti_units::SampleRate::of(SR);
     // Driven as a graph drives it: `Node::process`, the notes on its event
     // input in the first block.
-    let mut synth = Direct::new(PolySynth::<f32>::new(cfg), rate, BLOCK);
+    let mut synth = Direct::new(PolySynth::<f32>::from(cfg), rate, BLOCK);
     let at = Offset::of(Samples::new(0), Samples::new(BLOCK));
     let events: Vec<Event> = notes
         .iter()

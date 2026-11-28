@@ -22,7 +22,7 @@ impl Subject for Poly {
     const CUT: usize = 1;
 
     fn rig() -> Rig {
-        let synth = PolySynth::new(
+        let synth = PolySynth::from(
             SynthConfig::new()
                 .polyphony(std::num::NonZeroUsize::new(8).unwrap())
                 .oscillator(OscillatorType::Saw)

@@ -75,7 +75,7 @@ fn render_stem(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>)
 
 /// A saw with an instant attack, built at the live graph's rate.
 fn poly() -> PolySynth<f32> {
-    PolySynth::<f32>::new(
+    PolySynth::<f32>::from(
         SynthConfig::new()
             .oscillator(OscillatorType::Saw)
             .envelope(Adsr {

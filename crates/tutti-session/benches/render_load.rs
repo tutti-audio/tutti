@@ -248,7 +248,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let mut strips = Vec::new();
     let mut sends = Vec::new();
     for i in 0..SYNTHS {
-        let synth = PolySynth::new(
+        let synth = PolySynth::from(
             SynthConfig::new()
                 .polyphony(std::num::NonZeroUsize::new(NOTES).expect("at least one voice"))
                 .oscillator(OscillatorType::Saw)

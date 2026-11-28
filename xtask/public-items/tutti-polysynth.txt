@@ -15,7 +15,6 @@ enum synth::OscillatorType
 enum synth::SvfMode
 enum tuning::TuningError
 enum voice::VoiceMode
-fn instrument::NoteInstrument::new
 fn instrument::NoteInstrument::sounding
 fn instrument::additive::AdditiveVoiceConfig::envelope
 fn instrument::additive::AdditiveVoiceConfig::new
@@ -36,7 +35,6 @@ fn instrument::waveguide::WaveguideVoiceConfig::strike
 fn polysynth::PolySynth::active_voice_count
 fn polysynth::PolySynth::apply_midi
 fn polysynth::PolySynth::fork_instance
-fn polysynth::PolySynth::new
 fn polysynth::PolySynth::unison_voice_count
 fn polysynth::PolySynth::volume
 fn portamento::GlideTime::get
