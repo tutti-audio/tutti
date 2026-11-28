@@ -166,13 +166,12 @@ tutti-plugin-types  option-arg  crates/tutti-plugin-types/src/parameters.rs::Par
 
 # tutti-sampler
 tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
-tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_handle
 tutti-sampler  with-prefix  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_handle
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::channels
 tutti-sampler  chain-result  crates/tutti-sampler/src/clip.rs::Clip::gain
 tutti-sampler  chain-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::with_crossfade
 tutti-sampler  setter  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamer::set_sample_rate
-tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoiceNodeHandle::set_gain
+tutti-sampler  setter  crates/tutti-sampler/src/voice/node_controls.rs::VoiceNodeControls::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_direction
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_gain
 tutti-sampler  setter  crates/tutti-sampler/src/voice/command.rs::VoicePoolHandle::set_loop

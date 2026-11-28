@@ -422,12 +422,6 @@ impl<F: Float> MemorySource<F> {
         self.placement = Some(window);
     }
 
-    /// Takes the source off the transport: it reads on its own cursor from
-    /// the next frame.
-    pub fn free_run(&mut self) {
-        self.placement = None;
-    }
-
     /// Places this source on the transport at `window`.
     #[must_use]
     pub fn placed_at(mut self, window: VoiceWindow) -> Self {

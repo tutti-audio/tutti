@@ -32,6 +32,7 @@ mod offline_read;
 // The voice pool, one file per duty.
 pub(crate) mod command;
 pub(crate) mod node;
+pub(crate) mod node_controls;
 pub(crate) mod pool;
 pub(crate) mod slot;
 pub(crate) mod stretched;
@@ -51,11 +52,9 @@ mod wrap_fade;
 
 /// A voice built from a decoded wave, and the width a file's voice runs at.
 pub use build::{memory_voice, voice_width};
-/// The control-plane protocol and the two handles that send it — one per owner
-/// ([`VoicePool`] and [`VoiceNode`]). Documented on `command`.
-pub use command::{
-    GainError, PlayError, SendError, StreamingAddError, VoiceNodeHandle, VoicePoolHandle,
-};
+/// The pool's control-plane protocol and the handle that sends it. Documented
+/// on `command`.
+pub use command::{GainError, SendError, StreamingAddError, VoicePoolHandle};
 /// Disk-streaming playback: the reader, its source and its configuration.
 ///
 /// See `disk_voice` for the full docs on each; they are re-exported flat so a
@@ -70,6 +69,7 @@ pub use memory_source::{MemorySource, MemorySourceConfig, VoiceWindow};
 /// One voice as a standalone graph node. Documented on `node`.
 pub use node::{DirectionKind, LoopingKind, SpeedKind, VoiceNode, VoiceNodeError, WindowKind};
 /// The per-track multi-voice mixer. Documented on `pool`.
+pub use node_controls::{FreeRunning, VoiceNodeControls};
 pub use pool::{PoolDrops, VoicePool};
 /// The voice vocabulary: what a voice is, which tier it reads from, and the
 /// control intent recorded for it. Documented on `types`.
