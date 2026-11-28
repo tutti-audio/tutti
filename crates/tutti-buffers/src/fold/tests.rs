@@ -1883,3 +1883,16 @@ fn route_sends_channels_to_channels() {
         Err(FoldError::Buffer(BufferError::WidthMismatch { .. }))
     ));
 }
+
+/// Narrowing keeps the routing and rounds each gain once: the 5.1 to stereo fold built in
+/// `f64` and narrowed to `f32` has the ITU table's gains (1 for the front, −3 dB for the centre
+/// and the surround) and is the fold built in `f32`; narrowed to `f64` it is the fold itself.
+#[test]
+fn a_narrowed_fold_applies_the_same_gains() {
+    let wide = Fold::<f64>::between(&smpte(6), &smpte(2)).unwrap();
+    assert_eq!(wide.narrowed::<f64>(), wide);
+    let narrow: Fold<f32> = wide.narrowed();
+    assert_eq!(narrow, Fold::<f32>::between(&smpte(6), &smpte(2)).unwrap());
+    assert_eq!(narrow.contributions(0), [(0, 1.0), (2, M), (4, M)]);
+    assert_eq!(narrow.contributions(1), [(1, 1.0), (2, M), (5, M)]);
+}

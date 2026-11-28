@@ -104,6 +104,18 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a density and a rate must agree (at most one impulse a frame): validity of two arguments together, which neither type can carry",
     ),
     ty(
+        "crates/tutti-dsp/src/convolver/matrix.rs",
+        "MatrixResponses::new",
+        CTOR,
+        "a shape and a response count must agree (`inputs * outputs`): validity of the arguments together, which neither type can carry",
+    ),
+    ty(
+        "crates/tutti-nodes/src/convolution/node.rs",
+        "ConvolverConfig::matrix",
+        CTOR,
+        "a matrix layout, the bus and the caller's checked responses must agree (a pair for true stereo, the shape of the paths): validity of the arguments together, which neither type can carry",
+    ),
+    ty(
         "crates/tutti-dsp/src/decorrelator.rs",
         "Decorrelator::new",
         CTOR,

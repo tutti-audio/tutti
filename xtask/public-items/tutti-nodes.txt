@@ -14,6 +14,7 @@ const signal::sender::SOURCE_EVENT_CAPACITY
 enum automation::recording::RecordMode
 enum click::MetronomeMode
 enum convolution::layout::IrLayout
+enum convolution::layout::MatrixLayout
 enum convolution::node::ConvolverError
 enum granular::GranularError
 enum lfo::LfoSync
@@ -82,9 +83,9 @@ fn click::ClickSettings::snapshot
 fn click::ClickSettings::volume
 fn comb::CombFilterConfig::gain
 fn comb::CombFilterConfig::new
-fn convolution::layout::IrLayout::input
-fn convolution::layout::IrLayout::ir_count
+fn convolution::layout::MatrixLayout::input
 fn convolution::node::ConvolverConfig::block_size
+fn convolution::node::ConvolverConfig::matrix
 fn convolution::node::ConvolverConfig::new
 fn convolution::node::ConvolverConfig::zero_latency
 fn convolution::node::ConvolverNode::gain

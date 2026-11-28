@@ -431,8 +431,11 @@ mod convolver {
     #[test]
     fn a_zero_latency_convolver_declares_none_and_answers_at_frame_zero() {
         use std::sync::Arc;
-        use tutti_buffers::ChannelTopology;
-        use tutti_nodes::{ConvolverConfig, ConvolverNode, ImpulseResponses, IrLayout};
+        use tutti_buffers::{ChannelLayout, ChannelTopology};
+        use tutti_dsp::MatrixResponses;
+        use tutti_nodes::{
+            ConvolverConfig, ConvolverNode, ImpulseResponses, IrLayout, MatrixLayout,
+        };
         let (a, b) = (response(700, -1.0), response(300, 1.0));
         let (c, d) = (response(90, 1.0), response(1000, -1.0));
         let mono = ConvolverNode::<f32>::from(
@@ -446,15 +449,17 @@ mod convolver {
             .zero_latency(),
         );
         let stereo = ConvolverNode::<f32>::from(
-            ConvolverConfig::new(
+            ConvolverConfig::matrix(
                 ChannelTopology::STEREO,
-                IrLayout::TrueStereo,
-                Arc::new(ImpulseResponses::new(&[
-                    Mono::new(&a),
-                    Mono::new(&c),
-                    Mono::new(&b),
-                    Mono::new(&d),
-                ])),
+                MatrixLayout::TrueStereo,
+                Arc::new(
+                    MatrixResponses::new(
+                        ChannelLayout::STEREO,
+                        ChannelLayout::STEREO,
+                        &[Mono::new(&a), Mono::new(&c), Mono::new(&b), Mono::new(&d)],
+                    )
+                    .unwrap(),
+                ),
             )
             .unwrap()
             .block_size(Samples::new(64))
@@ -694,10 +699,17 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::from(
-        tutti_nodes::ConvolverConfig::new(
+        tutti_nodes::ConvolverConfig::matrix(
             tutti_buffers::ChannelTopology::STEREO,
-            tutti_nodes::IrLayout::TrueStereo,
-            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ll, lr, rl, rr])),
+            tutti_nodes::MatrixLayout::TrueStereo,
+            std::sync::Arc::new(
+                tutti_dsp::MatrixResponses::new(
+                    tutti_buffers::ChannelLayout::STEREO,
+                    tutti_buffers::ChannelLayout::STEREO,
+                    &[ll, lr, rl, rr],
+                )
+                .expect("four responses"),
+            ),
         )
         .expect("four responses on a stereo pair")
         .block_size(block_size),
