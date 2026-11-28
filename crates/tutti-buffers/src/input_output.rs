@@ -3,7 +3,7 @@
 
 use tutti_units::Samples;
 
-use crate::{BufferError, ByWidth, Float, OverFloat, Planes, PlanesMut, Sample};
+use crate::{BlockSide, BufferError, ByWidth, Float, OverFloat, Planes, PlanesMut, Sample};
 
 /// One block: its frame count, and its input and output views at that count.
 ///
@@ -43,24 +43,6 @@ pub struct InputOutput<'data, S: Sample = f32> {
     frames: Samples,
     input: Planes<'data, S>,
     output: PlanesMut<'data, 'data, S>,
-}
-
-/// Which view of a block a [`BufferError::BlockLengthMismatch`] names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum BlockSide {
-    /// The input planes.
-    Input,
-    /// The output planes.
-    Output,
-}
-
-impl core::fmt::Display for BlockSide {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            Self::Input => "input",
-            Self::Output => "output",
-        })
-    }
 }
 
 impl<'data, S: Sample> InputOutput<'data, S> {

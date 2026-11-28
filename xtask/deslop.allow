@@ -1,17 +1,12 @@
 # Existing architectural debt suppressed by `deslop-please --allow`.
 # Fixing an entry here never fails CI; new issues not listed here fail.
 module-cycle tutti_alsa_ffi::client,tutti_alsa_ffi::error,tutti_alsa_ffi::records
-module-cycle tutti_buffers::bed,tutti_buffers::topology
-module-cycle tutti_buffers::error,tutti_buffers::input_output,tutti_buffers::planes
 module-cycle tutti_clap_ffi::audio,tutti_clap_ffi::gui,tutti_clap_ffi::host,tutti_clap_ffi::library,tutti_clap_ffi::plugin,tutti_clap_ffi::pool
 module-cycle tutti_clap_host::instance::audio,tutti_clap_host::instance::processor
 module-cycle tutti_clap_host::instance::control,tutti_clap_host::instance::controller,tutti_clap_host::instance::lifecycle,tutti_clap_host::instance::load,tutti_clap_host::instance::ports
 module-cycle tutti_clap_host::instance::editor_instance,tutti_clap_host::instance::hosting
 module-cycle tutti_clap_host::instance::params,tutti_clap_host::instance::table
 module-cycle tutti_clap_test_plugin::params_state,tutti_clap_test_plugin::rt_probe,tutti_clap_test_plugin::subprocess
-module-cycle tutti_codec::format,tutti_codec::spec,tutti_codec::wav
-module-cycle tutti_cpal::driver,tutti_cpal::output
-module-cycle tutti_cpal::driver_seam,tutti_cpal::error,tutti_cpal::host,tutti_cpal::owner,tutti_cpal::supported
 module-cycle tutti_dsp::all_pass,tutti_dsp::comb,tutti_dsp::delay,tutti_dsp::model,tutti_dsp::reverb
 module-cycle tutti_dsp::dynamics,tutti_dsp::filter,tutti_dsp::sos
 module-cycle tutti_dsp::filter::svf::kernel,tutti_dsp::filter::svf::model
@@ -123,7 +118,6 @@ tangle tutti_units::units::amounts::StereoWidth,tutti_units::units::measures::Co
 tangle tutti_vst2_host::controller::Vst2Controller,tutti_vst2_host::loaded::Vst2Loaded
 tangle tutti_vst3_ffi::module::Module,tutti_vst3_ffi::plugin::MidiLearn,tutti_vst3_ffi::plugin::Parts,tutti_vst3_ffi::plugin::Plugin,tutti_vst3_ffi::plugin::lifecycle::query_controller
 tangle tutti_vst3_host::conformance_support::active::Active,tutti_vst3_host::conformance_support::active::Typed,tutti_vst3_host::host::controller::Vst3Controller,tutti_vst3_host::host::editor_instance::Vst3Editor,tutti_vst3_host::host::instance::Staged,tutti_vst3_host::host::loaded::Vst3Loaded,tutti_vst3_host::host::processor::ProcessorAny,tutti_vst3_host::host::processor::ProcessorParts,tutti_vst3_host::host::processor::Vst3Processor,tutti_vst3_host::host::shell::Hold,tutti_vst3_host::host::shell::RETIRED,tutti_vst3_host::host::shell::Shell,tutti_vst3_host::host::shell::State,tutti_vst3_host::host::shell::reap,tutti_vst3_host::host::shell::retire,tutti_vst3_host::host::shell::retired
-field-leak tutti_buffers::wave::Wave::topology
 field-leak tutti_clap_ffi::audio::AudioSide::core
 field-leak tutti_clap_ffi::audio::Typed::input_bufs
 field-leak tutti_clap_ffi::audio::Typed::output_bufs
@@ -590,4 +584,3 @@ long-file crates/tutti-vst2-ffi/src/host/tests.rs
 long-file crates/tutti-vst3-host/src/events/tests.rs
 long-file testing/tutti-clap-test-plugin/src/lib.rs
 long-file xtask/src/gates/conformance.rs
-long-file xtask/src/gates/midi_spec.rs

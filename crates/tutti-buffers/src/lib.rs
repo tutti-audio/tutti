@@ -92,10 +92,10 @@ pub use convert::{
     convert, convert_counting_clips, convert_mono, convert_planes, deinterleave, interleave,
 };
 pub use edge::{Pull, Sink, SinkFailed, Source, Stop};
-pub use error::BufferError;
+pub use error::{BlockSide, BufferError};
 pub use fold::{Fold, FoldEnd, FoldError, FoldLevel, FoldLevels, FoldSpec};
 pub use i24::{I24, I24OutOfRange};
-pub use input_output::{BlockMut, BlockSide, InputOutput};
+pub use input_output::{BlockMut, InputOutput};
 pub use interleaved::{Frames, FramesMut, Interleaved, InterleavedMut};
 pub use max_block::{InvalidMaxBlock, MaxBlock};
 pub use mono::{Mono, MonoMut};
