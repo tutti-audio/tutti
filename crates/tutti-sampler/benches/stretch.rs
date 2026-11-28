@@ -18,7 +18,7 @@ use std::sync::Arc;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use tutti_buffers::Wave;
 use tutti_graph::contract::Direct;
-use tutti_sampler::testing::{MockTransport, placed_source};
+use tutti_sampler::testing::{MockTransport, placed_config, placed_source, voice_node};
 use tutti_sampler::{Playback, SlotId, VoiceNode, VoicePool, VoiceWindow};
 use tutti_units::{Beat, Bpm, Cents, SampleRate, Seconds, StretchFactor};
 
@@ -35,13 +35,13 @@ fn stretch(c: &mut Criterion) {
         wave.set(0, i, s);
         wave.set(1, i, s);
     }
-    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
+    let source = placed_config(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)));
     let play = Playback {
         stretch: StretchFactor::new(1.5),
         pitch: Cents::new(200.0),
         ..Playback::default()
     };
-    let node = VoiceNode::<f32>::new(source, play).expect("a finite gain and a nonempty width");
+    let node: VoiceNode<f32> = voice_node(source, play);
     let mut direct = Direct::new(node, RATE, BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut blocks = 0usize;

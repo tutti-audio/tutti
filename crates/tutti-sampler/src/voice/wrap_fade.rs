@@ -8,7 +8,7 @@
 //! a cut shows as a step of the tone's amplitude.
 
 use crate::VoiceWindow;
-use crate::testing::{free_source, placed_source};
+use crate::testing::{free_source, placed_config, voice_node};
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 
@@ -142,7 +142,7 @@ impl Rig {
         duration: Option<f64>,
         play: Playback,
     ) {
-        let mut source = placed_source(
+        let config = placed_config(
             Arc::clone(wave),
             match duration {
                 Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
@@ -151,6 +151,7 @@ impl Rig {
         );
         match &mut self.host {
             Hosted::Pool(pool) => {
+                let mut source = MemorySource::from(config);
                 source.set_render_rate(SampleRate::of(SR));
                 pool.insert_voice(
                     SlotId(id),
@@ -161,8 +162,7 @@ impl Rig {
                 );
             }
             Hosted::Voice(slot) => {
-                let mut node =
-                    VoiceNode::new(source, play).expect("a finite gain and a nonempty width");
+                let mut node = voice_node(config, play);
                 node.prepare(&Prepare::new(
                     SampleRate::of(SR),
                     MaxBlock::of(Samples::new(self.max_block)),
@@ -170,6 +170,7 @@ impl Rig {
                 *slot = Some(Box::new(node));
             }
             Hosted::Node(node) => {
+                let mut source = MemorySource::from(config);
                 source.store_gain(play.gain);
                 source.set_loop(play.loop_);
                 source.prepare(&Prepare::new(

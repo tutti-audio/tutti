@@ -190,14 +190,8 @@ tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySo
 tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_speed
 tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_wave
 tutti-sampler  setter  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::set_window
-tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::new
-tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::streaming
-tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_channels
 tutti-sampler  ctor-result  crates/tutti-sampler/src/clip.rs::Clip::new
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::new
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/node.rs::VoiceNode::new
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/node.rs::VoiceNode::streaming
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_channels
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/pool.rs::VoicePool::with_channels
 
 # tutti-session

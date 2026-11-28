@@ -45,3 +45,6 @@ mod sampler_values;
 #[cfg(feature = "export")]
 #[path = "../support/bounced.rs"]
 mod bounced;
+// A streamed voice declared through `Session::patch` builds a live voice every time.
+#[cfg(feature = "sampler")]
+mod streamed_patch;

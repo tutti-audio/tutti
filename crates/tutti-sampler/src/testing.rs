@@ -65,6 +65,81 @@ pub fn placed_source<F: Float>(
     )
 }
 
+/// A source config over `wave`, `channels` wide: free-running, or placed at `window`.
+///
+/// # Panics
+///
+/// If the wave has no place in `channels`: a test's wave is one the sampler plays.
+pub fn source_config<F: Float>(
+    wave: impl Into<Shared<Wave<F>>>,
+    channels: impl Into<ChannelLayout>,
+    window: Option<VoiceWindow>,
+) -> MemorySourceConfig<F> {
+    let config = MemorySourceConfig::new(wave, channels)
+        .expect("a test's wave has a place in the width it asks for");
+    match window {
+        Some(window) => config.window(window),
+        None => config,
+    }
+}
+
+/// The node over `source`, played as `play` says: placed when the source has a window,
+/// free-running when it has none. `play`'s gain, speed and loop replace the source's.
+///
+/// # Panics
+///
+/// On a non-finite gain in `play`: a test's gain is a literal.
+pub fn voice_node<F: crate::SamplerFloat>(
+    source: MemorySourceConfig<F>,
+    play: crate::Playback,
+) -> crate::VoiceNode<F> {
+    use crate::VoiceNodeConfig;
+    let source = source.gain(play.gain).speed(play.speed);
+    let source = match play.loop_ {
+        Some(looped) => source.looped(looped),
+        None => source,
+    };
+    let expected = "a test's gain is finite";
+    if source.window_value().is_some() {
+        let config = VoiceNodeConfig::placed(source).expect(expected);
+        crate::VoiceNode::from(
+            config
+                .direction(play.direction)
+                .stretch(play.stretch)
+                .pitch(play.pitch),
+        )
+    } else {
+        let config = VoiceNodeConfig::free(source).expect(expected);
+        crate::VoiceNode::from(
+            config
+                .direction(play.direction)
+                .stretch(play.stretch)
+                .pitch(play.pitch),
+        )
+    }
+}
+
+/// A stereo source config over `wave`, free-running.
+///
+/// # Panics
+///
+/// As [`free_source`].
+pub fn free_config<F: Float>(wave: impl Into<Shared<Wave<F>>>) -> MemorySourceConfig<F> {
+    source_config(wave, ChannelLayout::STEREO, None)
+}
+
+/// A stereo source config over `wave`, placed on the transport at `window`.
+///
+/// # Panics
+///
+/// As [`free_source`].
+pub fn placed_config<F: Float>(
+    wave: impl Into<Shared<Wave<F>>>,
+    window: VoiceWindow,
+) -> MemorySourceConfig<F> {
+    source_config(wave, ChannelLayout::STEREO, Some(window))
+}
+
 /// `node` with fresh cells and the controls that write them, without a graph:
 /// what a test that drives a node by hand steers it through. A node inserted
 /// into a graph takes its controls from `into_parts`.

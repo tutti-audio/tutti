@@ -6,7 +6,7 @@
 use crate::offline::offline_48k;
 use tutti_buffers::{ChannelLayout, Interleaved, InterleavedMut, Wave};
 use tutti_graph::NodeKey;
-use tutti_sampler::testing::free_source;
+use tutti_sampler::testing::{free_config, voice_node};
 use tutti_sampler::{Clip, Playback, VoiceNode, VoiceNodeControls, VoiceWindow};
 use tutti_session::{MainOutput, OutputPort, Replacement, Session, ValueErrorKind};
 use tutti_units::{Amplitude, Beat, SampleRate};
@@ -163,8 +163,7 @@ fn free_ramp(s: &mut Session) -> (tutti_session::Key<VoiceNode<f32>>, VoiceNodeC
         wave.append(Interleaved::new(&[ramp_value(i)], wave.layout()).unwrap())
             .unwrap();
     }
-    let node = VoiceNode::new(free_source(std::sync::Arc::new(wave)), Playback::default())
-        .expect("a finite gain");
+    let node = voice_node(free_config(std::sync::Arc::new(wave)), Playback::default());
     let key = s.graph().add(node);
     let handle = handle_of(s, &key);
     wire(s, key.erase());
@@ -335,8 +334,7 @@ impl Rig<VoiceNode<f32>> {
             wave.append(Interleaved::new(&[ramp(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let node = VoiceNode::new(free_source(std::sync::Arc::new(wave)), Playback::default())
-            .expect("a finite gain");
+        let node = voice_node(free_config(std::sync::Arc::new(wave)), Playback::default());
         Rig::over(offline_48k(), node, None, dir)
     }
 }

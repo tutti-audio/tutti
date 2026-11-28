@@ -26,6 +26,9 @@ mod device_input;
 mod device_listing;
 #[cfg(feature = "device")]
 mod f64_device;
+// A streamed voice re-declared before the block that returns its old node.
+#[cfg(all(feature = "device", feature = "sampler"))]
+mod streamed_readd;
 // An `f64` session's take.
 #[cfg(all(feature = "capture", feature = "sampler"))]
 mod f64_takes;

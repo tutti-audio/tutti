@@ -289,7 +289,7 @@ pub(crate) fn scale<F: Float>(lane: &mut [F], gain: F) {
 mod tests {
     use super::*;
     use crate::VoiceWindow;
-    use crate::testing::placed_source;
+    use crate::testing::{placed_config, voice_node};
     use tutti_buffers::Interleaved;
     use tutti_buffers::MaxBlock;
 
@@ -388,7 +388,8 @@ mod tests {
     /// `disk_voice::tests::a_disk_voice_sizes_its_positions_from_max_block`.)
     #[test]
     fn every_voice_node_sizes_its_scratch_from_max_block() {
-        use crate::voice::{VoiceNode, VoicePool};
+        use crate::MemorySource;
+        use crate::voice::VoicePool;
         use tutti_graph::{Node, Prepare};
         use tutti_units::{Beat, SampleRate, Samples};
 
@@ -396,14 +397,13 @@ mod tests {
         wave.append(Interleaved::new(&[0.0, 0.0], wave.layout()).unwrap())
             .unwrap();
         let wave = std::sync::Arc::new(wave);
-        let source = placed_source(
+        let source = placed_config(
             std::sync::Arc::clone(&wave),
             VoiceWindow::from(Beat::new(0.0)),
         );
         let mut pool = VoicePool::<f32>::new();
-        let mut node = VoiceNode::new(source.clone(), Default::default())
-            .expect("a finite gain and a nonempty width");
-        let mut memory = source;
+        let mut node = voice_node(source.clone(), Default::default());
+        let mut memory = MemorySource::from(source);
         assert_eq!(pool.scratch_size(), (UNPREPARED_FRAMES, 2));
         assert_eq!(node.scratch_size(), (UNPREPARED_FRAMES, 2));
         assert_eq!(memory.scratch_frames(), 0);
