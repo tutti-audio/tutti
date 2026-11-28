@@ -29,7 +29,9 @@ fn load_test_soundfont() -> Arc<SoundFont> {
 
 /// The unit's dry pair, which is linear in the channel gain.
 fn unit() -> Hand {
-    Hand::new(SoundFontUnit::try_from(SoundFontConfig::new(load_test_soundfont())).unwrap())
+    Hand::new(SoundFontUnit::from(
+        SoundFontConfig::new(load_test_soundfont()).expect("a font with a playable preset"),
+    ))
 }
 
 const BLOCK_FRAMES: usize = support::BLOCK;
@@ -37,7 +39,9 @@ const BLOCK_FRAMES: usize = support::BLOCK;
 /// A unit on GM program 16 at `rate`.
 fn unit_at(rate: SampleRate) -> Hand {
     let mut unit = Hand::at(
-        SoundFontUnit::try_from(SoundFontConfig::new(load_test_soundfont())).unwrap(),
+        SoundFontUnit::from(
+            SoundFontConfig::new(load_test_soundfont()).expect("a font with a playable preset"),
+        ),
         rate,
     );
     unit.program_change(MidiChannel::FIRST, U7::of(16));
@@ -478,22 +482,29 @@ fn a_unit_plays_its_own_groups_channels_only() {
     };
     let group2 = MidiGroup::of(1);
     let heard = |config: SoundFontConfig, group: MidiGroup| {
-        let mut unit = Hand::new(SoundFontUnit::try_from(config).unwrap());
+        let mut unit = Hand::new(SoundFontUnit::from(config));
         unit.program_change(MidiChannel::FIRST, U7::of(16));
         rms(&render(&mut unit, &[note(group)], 11_025))
     };
     assert!(
         heard(
-            SoundFontConfig::new(load_test_soundfont()),
+            SoundFontConfig::new(load_test_soundfont()).expect("a font with a playable preset"),
             MidiGroup::FIRST
         ) > 0.001
     );
     assert_eq!(
-        heard(SoundFontConfig::new(load_test_soundfont()), group2),
+        heard(
+            SoundFontConfig::new(load_test_soundfont()).expect("a font with a playable preset"),
+            group2
+        ),
         0.0,
         "Group 2 is not Group 1's"
     );
-    let second = || SoundFontConfig::new(load_test_soundfont()).group(group2);
+    let second = || {
+        SoundFontConfig::new(load_test_soundfont())
+            .expect("a font with a playable preset")
+            .group(group2)
+    };
     assert!(heard(second(), group2) > 0.001);
     assert_eq!(
         heard(second(), MidiGroup::FIRST),

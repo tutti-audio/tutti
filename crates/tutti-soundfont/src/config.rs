@@ -7,13 +7,13 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use crate::SoundFontUnit;
-use crate::player::Player;
-use tutti_buffers::Float;
-use tutti_dsp::SimdLanes;
+use std::collections::HashMap;
+
+use crate::error::Error;
+use tutti_graph::Shared;
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_sf2::SoundFont;
-use tutti_ump::MidiGroup;
+use tutti_ump::{MidiGroup, U7};
 
 /// The most voices a unit sounds at once: 1 to [`MAX`](Self::MAX).
 ///
@@ -96,9 +96,13 @@ impl From<Polyphony> for usize {
     }
 }
 
-/// What a [`SoundFontUnit`] is made from: the decoded SoundFont, and what differs from the
+/// What a [`SoundFontUnit`](crate::SoundFontUnit) is made from: the decoded SoundFont, and what differs from the
 /// defaults, [`polyphony`](Self::polyphony), [`group`](Self::group) and
-/// [`device`](Self::device). Convert it with `SoundFontUnit::try_from`, which makes the unit.
+/// [`device`](Self::device). Convert it with `SoundFontUnit::from`, which makes the unit.
+///
+/// A config exists only over a font with a playable preset ([`new`](Self::new) refuses
+/// another), so the unit's build cannot fail. It is a [`NodeConfig`](tutti_graph::NodeConfig) with no param: every
+/// field is structure, and a font is the same one when it is the same allocation.
 ///
 /// The rate is not here: a unit renders at the rate its graph prepares it at.
 ///
@@ -107,19 +111,22 @@ impl From<Polyphony> for usize {
 /// Group's messages are not this unit's.
 ///
 /// ```no_run
+/// use std::sync::Arc;
 /// use tutti_sf2::SoundFont;
 /// use tutti_soundfont::{Polyphony, SoundFontConfig, SoundFontUnit};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let font = SoundFont::open("piano.sf2")?;
-/// let config = SoundFontConfig::new(font).polyphony(Polyphony::of(16));
-/// let unit = SoundFontUnit::<f32>::try_from(config)?;
+/// let config = SoundFontConfig::new(Arc::new(font))?.polyphony(Polyphony::of(16));
+/// let unit = SoundFontUnit::<f32>::from(config);
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct SoundFontConfig {
-    pub(crate) font: Arc<SoundFont>,
+    pub(crate) font: Shared<SoundFont>,
+    /// The font's playable presets, read once in [`new`](Self::new).
+    pub(crate) index: Arc<PresetIndex>,
     pub(crate) polyphony: Polyphony,
     pub(crate) group: MidiGroup,
     pub(crate) device: SysexDeviceId,
@@ -128,14 +135,21 @@ pub struct SoundFontConfig {
 impl SoundFontConfig {
     /// A config over `font` with 64 voices, playing the first Group. An `Arc` is shared
     /// rather than copied.
-    #[must_use]
-    pub fn new(font: impl Into<Arc<SoundFont>>) -> Self {
-        Self {
-            font: font.into(),
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoPlayablePreset`] for a font none of whose
+    /// presets has a MIDI bank and program.
+    pub fn new(font: impl Into<Shared<SoundFont>>) -> crate::Result<Self> {
+        let font = font.into();
+        let index = Arc::new(PresetIndex::of(&font)?);
+        Ok(Self {
+            font,
+            index,
             polyphony: Polyphony::DEFAULT,
             group: MidiGroup::FIRST,
             device: SysexDeviceId::DEFAULT,
-        }
+        })
     }
 
     /// This config with `polyphony` voices at most sounding at once.
@@ -164,20 +178,50 @@ impl SoundFontConfig {
     }
 }
 
-/// A unit of float `F` over the config's SoundFont, which it shares rather than copies.
-///
-/// The unit renders at 44.1 kHz until its graph prepares it at the graph's rate ("The
-/// rate" on [`SoundFontUnit`]). Allocates the voices and reads every zone of the font
-/// once (for the tail), so convert off the audio thread.
-///
-/// # Errors
-///
-/// [`Error::NoPlayablePreset`](crate::Error::NoPlayablePreset) for a font none of whose
-/// presets has a MIDI bank and program.
-impl<F: Float + SimdLanes> TryFrom<SoundFontConfig> for SoundFontUnit<F> {
-    type Error = crate::Error;
+/// The key of a preset in the player's lookup: its bank in the upper 16 bits,
+/// its program in the lower.
+pub(crate) fn preset_id(bank: tutti_sf2::Bank, program: U7) -> i32 {
+    (i32::from(bank.get()) << 16) | i32::from(program.get())
+}
 
-    fn try_from(config: SoundFontConfig) -> crate::Result<Self> {
-        Ok(Self::from_player(Player::new(config)?, 0))
+/// Which preset of a font each bank and program selects, and the one a channel plays when
+/// its selection names none: the font's playable presets, read once by
+/// [`PresetIndex::of`] when the config is made.
+#[derive(Debug)]
+pub(crate) struct PresetIndex {
+    pub(crate) presets: HashMap<i32, usize>,
+    pub(crate) default_preset: usize,
+}
+
+impl PresetIndex {
+    /// The index of `font`'s presets.
+    ///
+    /// A preset whose bank or program is not MIDI's cannot be played (SF2 2.04 section
+    /// 7.2): it is kept in the font and not looked up. Of two presets with one bank and
+    /// program, the first in the file is the active one (section 7.2). The default is the
+    /// preset of the smallest id, which is the piano of a General MIDI font.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoPlayablePreset`] when no preset of the font has a MIDI bank and program: a
+    /// unit over it would sound a preset the file says cannot be played, or nothing at all.
+    pub(crate) fn of(font: &SoundFont) -> crate::Result<Self> {
+        let mut presets: HashMap<i32, usize> = HashMap::new();
+        let mut default_preset: Option<(i32, usize)> = None;
+        for (i, preset) in font.presets().iter().enumerate() {
+            let (Some(bank), Some(patch)) = (preset.bank(), preset.patch()) else {
+                continue;
+            };
+            let id = preset_id(bank, patch);
+            presets.entry(id).or_insert(i);
+            if default_preset.is_none_or(|(least, _)| id < least) {
+                default_preset = Some((id, i));
+            }
+        }
+        let (_, default_preset) = default_preset.ok_or(Error::NoPlayablePreset)?;
+        Ok(Self {
+            presets,
+            default_preset,
+        })
     }
 }
