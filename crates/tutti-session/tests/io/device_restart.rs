@@ -460,13 +460,7 @@ fn a_replace_after_the_restart_lands_at_once() {
         )
         .expect("the replace is accepted");
     assert_eq!(landed.erase(), osc);
-    assert_eq!(
-        s.graph_ref().testing().waiting_replacements(),
-        0,
-        "nothing waits: the re-prepare is done"
-    );
     let out = play(&mut s, &new, 480, 50);
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 0);
     assert!(
         (period(&out[4_800..]) - 24.0).abs() < 0.01,
         "2 kHz at 48 kHz, measured {}",

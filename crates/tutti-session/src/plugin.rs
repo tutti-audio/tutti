@@ -1095,12 +1095,6 @@ impl RebindState {
         Some(Self::Idle { rebinder, laid_out })
     }
 
-    /// Whether a rebuilt node's Processor has not arrived.
-    #[cfg(feature = "testing")]
-    pub(crate) fn is_settling(&self) -> bool {
-        matches!(self, Self::Staged(_) | Self::Settling { .. })
-    }
-
     pub(crate) fn laid_out(&self) -> &tutti_plugin_types::Layout {
         match self {
             Self::Idle { laid_out, .. } | Self::Settling { laid_out, .. } => laid_out,

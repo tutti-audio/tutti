@@ -229,8 +229,6 @@ pub use error::{
 pub use error::{MidiError, RouteDeclarer};
 #[cfg(feature = "soundfont")]
 pub use general_midi::GeneralMidi;
-#[cfg(feature = "testing")]
-pub use graph::Testing;
 pub use graph::{
     Committed, Feeder, Graph, LIVE_MAX_BLOCK, MainOutputReader, Meters, NotReopened, Reopened,
     ReplaceRefused, Replacement, Taps,

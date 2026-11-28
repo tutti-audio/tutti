@@ -67,13 +67,9 @@ use tutti_units::{Samples, Tail};
 
 mod observe;
 mod phases;
-#[cfg(feature = "testing")]
-mod testing;
 mod wiring;
 
 pub use observe::{MainOutputReader, Meters, NotReopened, Reopened, Taps};
-#[cfg(feature = "testing")]
-pub use testing::Testing;
 pub(crate) use wiring::Pending;
 
 use crate::key::{
