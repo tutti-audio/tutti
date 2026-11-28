@@ -2,6 +2,7 @@
 
 use super::ClapProcessor;
 use super::config::AudioScratch;
+use crate::ParamBounds;
 use crate::error::{ClapError, Result};
 use crate::events::{ClapEvent, EventList};
 use crate::types::{ClapNoteExpression, ParameterChanges, TransportInfo};
@@ -332,13 +333,22 @@ impl ClapProcessor {
         // The Controller's parameter edits go in first, at time 0, so where an
         // edit and the block's automation set one parameter at one time the
         // automation has the last word. The range table is lent once for the
-        // block (never parked), and the edits are denormalized against it.
+        // block (never parked), and the edits are denormalized against it. What
+        // a flush kept for this block follows them, unless a newer write of
+        // the parameter was drained.
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
-            let drain = &mut self.drain;
+            let (drain, held) = (&mut self.drain, &mut self.held);
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
-                drain.drain(each);
+                // Read before the drain: the epoch a kept value is judged
+                // against is never later than the one the drain checks.
+                let epoch = drain.epoch();
+                drain.drain(|id, value| {
+                    held.supersede(id);
+                    each(id, value);
+                });
+                held.take(epoch, each);
             });
             if !param_changes.is_empty() {
                 input_events.add_param_changes(param_changes, &table.ranges, table.claims);
@@ -376,20 +386,57 @@ impl ClapProcessor {
     }
 
     /// Delivers `changes` between blocks with `clap.params.flush`, the
-    /// Controller's writes first, as at the head of a block. `false` when the
-    /// plugin has no flush entry or is busy.
+    /// Controller's writes first, as at the head of a block.
+    ///
+    /// The plugin is active, so a parameter flagged `REQUIRES_PROCESS` is not
+    /// flushed: its latest value is kept for the next block's `process`, where
+    /// CLAP takes it in event order ([`holds_parameters`](tutti_plugin_types::Processor::holds_parameters)).
+    /// A kept value is dropped, never sent, once a
+    /// [`reset`](tutti_plugin_types::EditWriter::reset) has made it stale. The
+    /// applied mark is published only while nothing is kept: one mark cannot
+    /// cover the values the plugin has and not the one it has not, so the
+    /// block that takes the kept value publishes for all of them.
+    ///
+    /// `false` when the plugin has no flush entry or is busy, or a value had no
+    /// room to be kept.
     pub fn flush_parameters(&mut self, changes: &tutti_plugin_types::ParameterChanges) -> bool {
         self.scratch.input_events.clear();
         self.scratch.output_events.clear();
+        // Read first: a value is stamped with an epoch no later than the one
+        // it was checked against, so a reset after the check is a reset after
+        // the stamp.
+        let epoch = self.drain.epoch();
+        self.held.drop_stale(epoch);
+        let mut kept = true;
         {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
-            let drain = &mut self.drain;
+            let (drain, held) = (&mut self.drain, &mut self.held);
+            // Both sources of a value take one route: a parameter that waits
+            // for `process` is kept for the block, any other goes out of band
+            // now. A drained value carries the epoch its drain checked it in;
+            // a host change was checked by its sender before this call, so it
+            // takes the epoch read above.
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
-                drain.drain(each);
+                drain.drain_in_epoch(|id, value, observed| {
+                    if waits_for_process(ParamBounds::find(&table.ranges, id)) {
+                        kept &= held.keep(id, value, observed);
+                    } else {
+                        each(id, value);
+                    }
+                });
             });
+            for queue in &changes.queues {
+                if waits_for_process(ParamBounds::find(&table.ranges, queue.param_id))
+                    && let Some(point) = queue.points.last()
+                {
+                    kept &= held.keep(queue.param_id, point.value, epoch);
+                }
+            }
             if !changes.is_empty() {
-                input_events.add_param_changes(changes, &table.ranges, table.claims);
+                input_events.add_param_changes_where(changes, &table.ranges, table.claims, |b| {
+                    !waits_for_process(b)
+                });
             }
         }
         self.scratch.input_events.sort_by_time();
@@ -401,12 +448,14 @@ impl ClapProcessor {
         } = &mut *self.scratch;
         let flushed = self.audio_side.params_flush(&*input_events, output_events);
         if flushed {
-            self.drain.publish_applied(drained);
+            if self.held.is_empty() {
+                self.drain.publish_applied(drained);
+            }
             // What the plugin said while it took them (its own edits and
             // gestures) goes where a block's goes: to the Controller's reports.
             self.report_edits();
         }
-        flushed
+        flushed && kept
     }
 
     /// Hands the block to the plugin through the FFI crate, which binds the
@@ -512,6 +561,14 @@ impl ClapProcessor {
             note_expressions: &self.scratch.out_note_expressions,
         })
     }
+}
+
+/// Whether a change to the parameter with `bounds` waits for the next block's
+/// `process`: the plugin is active and the parameter requires it
+/// (`CLAP_PARAM_REQUIRES_PROCESS`), so a flush never delivers it. The one
+/// predicate for what a flush keeps and what it sends.
+fn waits_for_process(bounds: Option<&ParamBounds>) -> bool {
+    bounds.is_some_and(|b| b.requires_process && !b.read_only)
 }
 
 pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_transport {

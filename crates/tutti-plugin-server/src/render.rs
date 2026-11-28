@@ -132,7 +132,9 @@ pub(crate) trait RenderEnd: Render + Send {
     /// Delivers parameter changes between blocks by the format's own route
     /// ([`Processor::flush_parameters`]), and says what became of them: a
     /// plugin whose Processor is not here has nothing to deliver them to
-    /// ([`Unseated`](ApplyOutcome::Unseated)).
+    /// ([`Unseated`](ApplyOutcome::Unseated)), and one that keeps writes for
+    /// the next block ([`Processor::holds_parameters`]) has not delivered them
+    /// ([`Held`](ApplyOutcome::Held)).
     fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome;
 }
 
@@ -196,6 +198,7 @@ impl<P: Processor + 'static> RenderEnd for End<P> {
     fn flush_parameters(&mut self, changes: &ParameterChanges) -> ApplyOutcome {
         match self.rt.held() {
             Some(processor) => match processor.flush_parameters(changes) {
+                Ok(()) if processor.holds_parameters() => ApplyOutcome::Held,
                 Ok(()) => ApplyOutcome::Applied,
                 Err(_) => ApplyOutcome::Refused,
             },

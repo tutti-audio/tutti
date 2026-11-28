@@ -575,9 +575,10 @@ pub trait Processor: Send {
     /// `changes`, as at the head of a block, so a later write is the last word.
     ///
     /// Per format: CLAP `params.flush` (an audio-thread entry, never beside
-    /// `process`); VST3 `process` with `numSamples = 0`, which the SDK
-    /// allows for flushing parameters; VST2 and AU a direct set of each
-    /// parameter's last value.
+    /// `process`), except that a `REQUIRES_PROCESS` parameter's value waits for
+    /// the next block ([`holds_parameters`](Self::holds_parameters)); VST3
+    /// `process` with `numSamples = 0`, which the SDK allows for flushing
+    /// parameters; VST2 and AU a direct set of each parameter's last value.
     ///
     /// The default refuses: a Processor takes parameters in a block only.
     ///
@@ -590,6 +591,17 @@ pub trait Processor: Send {
         Err(PluginError::Block(
             "this Processor takes parameters in a block only",
         ))
+    }
+
+    /// Whether a write [`flush_parameters`](Self::flush_parameters) was given
+    /// waits for the next block's `process` (a CLAP parameter flagged
+    /// `REQUIRES_PROCESS`, which the format takes there, in event order, while
+    /// the plugin is active): the plugin does not have it yet, and a flush made
+    /// now is not its delivery. The caller reads the writes it handed over as
+    /// not yet applied until a block has run. The default is a format that
+    /// applies a flush at once.
+    fn holds_parameters(&self) -> bool {
+        false
     }
 
     /// The frames this Processor renders in, if it renders in fixed chunks
