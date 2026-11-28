@@ -104,9 +104,11 @@ pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarg
 #[cfg(feature = "sampler")]
 pub use slot::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 pub use state::Values;
-pub(crate) use state::{Outgoing, ValueState, ValueTable};
-pub(crate) use target::target_builders;
+pub(crate) use state::{Outgoing, Params, ValueState, ValueTable};
 pub use target::{
     AnyAssign, AnyTarget, Assign, Effective, Info, Modify, Modulatable, ScalarTarget, Target,
 };
-pub use watcher::{Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher};
+pub(crate) use target::{no_host_gesture, target_builders};
+pub use watcher::{
+    Change, ChangedBy, GestureId, GestureState, IntoTargets, IntoWatched, Watchable, Watcher,
+};

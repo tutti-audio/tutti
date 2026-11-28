@@ -410,14 +410,12 @@ impl Feed {
     }
 }
 
-/// The sealed half of [`IntoTargets`].
+/// The sealed halves of [`IntoTargets`] and [`IntoWatched`].
 mod seal {
     use super::*;
 
+    /// What a write and a gesture do with a set of targets.
     pub trait Sealed {
-        /// The changes of the targets, in the argument's shape.
-        type Changes;
-
         /// Checks every target is there and lists its id; `at` counts items.
         fn register(
             &self,
@@ -428,9 +426,6 @@ mod seal {
 
         /// Whether any target is still there.
         fn any_live(&self, params: &Params) -> bool;
-
-        /// Each target's change in `drained`.
-        fn changes(&self, drained: &Drained) -> Self::Changes;
 
         /// What a gesture writes: one absolute value per target, in the
         /// argument's shape.
@@ -448,19 +443,61 @@ mod seal {
             moved: &mut BTreeMap<TargetId, Erased>,
             out: &mut Vec<StoredChange>,
         );
+
+        /// Tells each target a gesture opened over it.
+        fn begin(&self, params: &Params);
+
+        /// Tells each target the gesture over it dropped, whether or not it
+        /// moved.
+        fn end(&self, params: &Params);
+
+        /// Tells each target the value a gesture wrote to it.
+        fn wrote(&self, params: &Params, values: &Self::Values);
+    }
+
+    /// What a watcher reads of a set of targets.
+    pub trait Watched: Sealed {
+        /// The changes of the targets, in the argument's shape.
+        type Changes;
+
+        /// Each target's change in `drained`.
+        fn changes(&self, drained: &Drained) -> Self::Changes;
     }
 }
-use seal::Sealed as Targets;
+use seal::{Sealed as Targets, Watched};
+
+/// What [`Session::gesture`](crate::Session::gesture) takes: any target, or
+/// tuples of up to 12 of them (nested too), arrays, `Vec`s and `Option`s
+/// (`None` holds nothing but keeps its position). Sealed.
+pub trait IntoTargets: Targets + Send + 'static {}
 
 /// What [`Session::watch`](crate::Session::watch) takes: a target (every one
 /// but a plugin's parameter), or tuples of up to 12 of them (nested too),
 /// arrays, `Vec`s and `Option`s (`None` watches nothing but keeps its
 /// position). It answers in the argument's shape. Sealed.
-pub trait IntoTargets: Targets + Send + 'static {}
+///
+/// ```
+/// # fn watched<T: tutti_session::IntoWatched>() {}
+/// watched::<tutti_session::TempoTarget>();
+/// ```
+#[cfg_attr(
+    feature = "plugin",
+    doc = "
+A plugin's parameter is a target to gesture over, not one to watch:
 
-impl<T: Watchable + Store> Targets for T {
-    type Changes = Option<Change<T>>;
+```compile_fail
+# fn watched<T: tutti_session::IntoWatched>() {}
+watched::<tutti_session::PluginParamTarget>();
+```
 
+```
+# fn gestured<T: tutti_session::IntoTargets>() {}
+gestured::<tutti_session::PluginParamTarget>();
+```"
+)]
+pub trait IntoWatched: Watched + IntoTargets {}
+
+impl<T: Store> Targets for T {
     fn register(
         &self,
         params: &Params,
@@ -487,28 +524,6 @@ impl<T: Watchable + Store> Targets for T {
         (*self).resolve(params).is_some()
     }
 
-    fn changes(&self, drained: &Drained) -> Option<Change<T>> {
-        const ONE_TYPE: &str = "one target id names one value type";
-        let record = drained.get(&Sealed::id(*self))?;
-        Some(Change {
-            value: record
-                .value
-                .downcast_ref::<T::Value>()
-                .expect(ONE_TYPE)
-                .clone(),
-            by: record.by,
-            gesture: record.gesture.as_ref().map(|g| GestureState {
-                id: g.id,
-                base: record
-                    .base
-                    .downcast_ref::<T::Value>()
-                    .expect(ONE_TYPE)
-                    .clone(),
-                ended: g.ended,
-            }),
-        })
-    }
-
     type Values = T::Value;
 
     fn stage(&self, value: T::Value, batch: &mut Batch<'_>) -> Result<(), Failure> {
@@ -532,12 +547,49 @@ impl<T: Watchable + Store> Targets for T {
             out.push(StoredChange::ended(id, base, now));
         }
     }
+
+    fn begin(&self, params: &Params) {
+        Store::begin(*self, params);
+    }
+
+    fn end(&self, params: &Params) {
+        Store::end(*self, params);
+    }
+
+    fn wrote(&self, params: &Params, value: &T::Value) {
+        Store::wrote(*self, params, value);
+    }
 }
-impl<T: Watchable + Store> IntoTargets for T {}
+impl<T: Store> IntoTargets for T {}
+
+impl<T: Watchable + Store> Watched for T {
+    type Changes = Option<Change<T>>;
+
+    fn changes(&self, drained: &Drained) -> Option<Change<T>> {
+        const ONE_TYPE: &str = "one target id names one value type";
+        let record = drained.get(&Sealed::id(*self))?;
+        Some(Change {
+            value: record
+                .value
+                .downcast_ref::<T::Value>()
+                .expect(ONE_TYPE)
+                .clone(),
+            by: record.by,
+            gesture: record.gesture.as_ref().map(|g| GestureState {
+                id: g.id,
+                base: record
+                    .base
+                    .downcast_ref::<T::Value>()
+                    .expect(ONE_TYPE)
+                    .clone(),
+                ended: g.ended,
+            }),
+        })
+    }
+}
+impl<T: Watchable + Store> IntoWatched for T {}
 
 impl<A: Targets> Targets for Option<A> {
-    type Changes = Option<A::Changes>;
-
     fn register(
         &self,
         params: &Params,
@@ -555,10 +607,6 @@ impl<A: Targets> Targets for Option<A> {
 
     fn any_live(&self, params: &Params) -> bool {
         self.as_ref().is_some_and(|item| item.any_live(params))
-    }
-
-    fn changes(&self, drained: &Drained) -> Self::Changes {
-        self.as_ref().map(|item| item.changes(drained))
     }
 
     type Values = Option<A::Values>;
@@ -583,12 +631,37 @@ impl<A: Targets> Targets for Option<A> {
             item.ended(params, moved, out);
         }
     }
+
+    fn begin(&self, params: &Params) {
+        if let Some(item) = self {
+            item.begin(params);
+        }
+    }
+
+    fn end(&self, params: &Params) {
+        if let Some(item) = self {
+            item.end(params);
+        }
+    }
+
+    fn wrote(&self, params: &Params, values: &Self::Values) {
+        if let Some((item, value)) = self.as_ref().zip(values.as_ref()) {
+            item.wrote(params, value);
+        }
+    }
 }
 impl<A: IntoTargets> IntoTargets for Option<A> {}
 
-impl<A: Targets> Targets for Vec<A> {
-    type Changes = Vec<A::Changes>;
+impl<A: Watched> Watched for Option<A> {
+    type Changes = Option<A::Changes>;
 
+    fn changes(&self, drained: &Drained) -> Self::Changes {
+        self.as_ref().map(|item| item.changes(drained))
+    }
+}
+impl<A: IntoWatched> IntoWatched for Option<A> {}
+
+impl<A: Targets> Targets for Vec<A> {
     fn register(
         &self,
         params: &Params,
@@ -601,10 +674,6 @@ impl<A: Targets> Targets for Vec<A> {
 
     fn any_live(&self, params: &Params) -> bool {
         self.iter().any(|item| item.any_live(params))
-    }
-
-    fn changes(&self, drained: &Drained) -> Self::Changes {
-        self.iter().map(|item| item.changes(drained)).collect()
     }
 
     type Values = Vec<A::Values>;
@@ -629,12 +698,33 @@ impl<A: Targets> Targets for Vec<A> {
     ) {
         self.iter().for_each(|item| item.ended(params, moved, out));
     }
+
+    fn begin(&self, params: &Params) {
+        self.iter().for_each(|item| item.begin(params));
+    }
+
+    fn end(&self, params: &Params) {
+        self.iter().for_each(|item| item.end(params));
+    }
+
+    fn wrote(&self, params: &Params, values: &Self::Values) {
+        self.iter()
+            .zip(values)
+            .for_each(|(item, value)| item.wrote(params, value));
+    }
 }
 impl<A: IntoTargets> IntoTargets for Vec<A> {}
 
-impl<A: Targets, const N: usize> Targets for [A; N] {
-    type Changes = [A::Changes; N];
+impl<A: Watched> Watched for Vec<A> {
+    type Changes = Vec<A::Changes>;
 
+    fn changes(&self, drained: &Drained) -> Self::Changes {
+        self.iter().map(|item| item.changes(drained)).collect()
+    }
+}
+impl<A: IntoWatched> IntoWatched for Vec<A> {}
+
+impl<A: Targets, const N: usize> Targets for [A; N] {
     fn register(
         &self,
         params: &Params,
@@ -647,10 +737,6 @@ impl<A: Targets, const N: usize> Targets for [A; N] {
 
     fn any_live(&self, params: &Params) -> bool {
         self.iter().any(|item| item.any_live(params))
-    }
-
-    fn changes(&self, drained: &Drained) -> Self::Changes {
-        self.each_ref().map(|item| item.changes(drained))
     }
 
     type Values = [A::Values; N];
@@ -669,14 +755,35 @@ impl<A: Targets, const N: usize> Targets for [A; N] {
     ) {
         self.iter().for_each(|item| item.ended(params, moved, out));
     }
+
+    fn begin(&self, params: &Params) {
+        self.iter().for_each(|item| item.begin(params));
+    }
+
+    fn end(&self, params: &Params) {
+        self.iter().for_each(|item| item.end(params));
+    }
+
+    fn wrote(&self, params: &Params, values: &Self::Values) {
+        self.iter()
+            .zip(values)
+            .for_each(|(item, value)| item.wrote(params, value));
+    }
 }
 impl<A: IntoTargets, const N: usize> IntoTargets for [A; N] {}
+
+impl<A: Watched, const N: usize> Watched for [A; N] {
+    type Changes = [A::Changes; N];
+
+    fn changes(&self, drained: &Drained) -> Self::Changes {
+        self.each_ref().map(|item| item.changes(drained))
+    }
+}
+impl<A: IntoWatched, const N: usize> IntoWatched for [A; N] {}
 
 macro_rules! tuples {
     ($(($($name:ident $at:tt),+))+) => {$(
         impl<$($name: Targets),+> Targets for ($($name,)+) {
-            type Changes = ($($name::Changes,)+);
-
             fn register(
                 &self,
                 params: &Params,
@@ -689,10 +796,6 @@ macro_rules! tuples {
 
             fn any_live(&self, params: &Params) -> bool {
                 false $(|| self.$at.any_live(params))+
-            }
-
-            fn changes(&self, drained: &Drained) -> Self::Changes {
-                ($(self.$at.changes(drained),)+)
             }
 
             type Values = ($($name::Values,)+);
@@ -710,8 +813,29 @@ macro_rules! tuples {
             ) {
                 $(self.$at.ended(params, moved, out);)+
             }
+
+            fn begin(&self, params: &Params) {
+                $(self.$at.begin(params);)+
+            }
+
+            fn end(&self, params: &Params) {
+                $(self.$at.end(params);)+
+            }
+
+            fn wrote(&self, params: &Params, values: &Self::Values) {
+                $(self.$at.wrote(params, &values.$at);)+
+            }
         }
         impl<$($name: IntoTargets),+> IntoTargets for ($($name,)+) {}
+
+        impl<$($name: Watched),+> Watched for ($($name,)+) {
+            type Changes = ($($name::Changes,)+);
+
+            fn changes(&self, drained: &Drained) -> Self::Changes {
+                ($(self.$at.changes(drained),)+)
+            }
+        }
+        impl<$($name: IntoWatched),+> IntoWatched for ($($name,)+) {}
     )+};
 }
 
@@ -750,13 +874,13 @@ tuples! {
 /// fn clone<T: Clone>() {}
 /// clone::<tutti_session::Watcher<&'static str, tutti_session::TempoTarget>>();
 /// ```
-pub struct Watcher<K: AppKey, W: IntoTargets> {
+pub struct Watcher<K: AppKey, W: IntoWatched> {
     state: Weak<ValueState<K>>,
     slot: Arc<WatchSlot>,
     targets: W,
 }
 
-impl<K: AppKey, W: IntoTargets> Watcher<K, W> {
+impl<K: AppKey, W: IntoWatched> Watcher<K, W> {
     pub(super) fn new(state: &Arc<ValueState<K>>, ids: Vec<TargetId>, targets: W) -> Self {
         Self {
             slot: state.feed().subscribe(ids),
@@ -785,7 +909,7 @@ impl<K: AppKey, W: IntoTargets> Watcher<K, W> {
     }
 }
 
-impl<K: AppKey, W: IntoTargets> Drop for Watcher<K, W> {
+impl<K: AppKey, W: IntoWatched> Drop for Watcher<K, W> {
     fn drop(&mut self) {
         if let Some(state) = self.state.upgrade() {
             state.feed().unsubscribe(&self.slot);
@@ -793,7 +917,7 @@ impl<K: AppKey, W: IntoTargets> Drop for Watcher<K, W> {
     }
 }
 
-impl<K: AppKey, W: IntoTargets> fmt::Debug for Watcher<K, W> {
+impl<K: AppKey, W: IntoWatched> fmt::Debug for Watcher<K, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Watcher").finish_non_exhaustive()
     }
@@ -802,7 +926,7 @@ impl<K: AppKey, W: IntoTargets> fmt::Debug for Watcher<K, W> {
 impl<K: AppKey> ValueState<K> {
     /// A watcher of `targets`, which are all there. Subscribed under the value
     /// lock, so no change lands between the check and the subscription.
-    pub(crate) fn watch<W: IntoTargets>(
+    pub(crate) fn watch<W: IntoWatched>(
         self: &Arc<Self>,
         targets: W,
     ) -> Result<Watcher<K, W>, ValueError<K>> {
@@ -817,7 +941,7 @@ impl<K: AppKey> ValueState<K> {
     }
 
     /// What `slot` recorded since the last call, in `targets`' shape.
-    fn changes<W: IntoTargets>(
+    fn changes<W: IntoWatched>(
         &self,
         slot: &WatchSlot,
         targets: &W,

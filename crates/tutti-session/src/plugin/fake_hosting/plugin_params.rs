@@ -73,6 +73,8 @@ pub(super) struct Fake {
     infos: Mutex<Vec<ParameterInfo>>,
     values: Mutex<HashMap<ParamId, Normalized>>,
     sets: Mutex<Vec<(ParamId, Normalized)>>,
+    /// The host's gesture steps, as `edit` received them.
+    edits: Mutex<Vec<tutti_plugin_types::ParamEdit>>,
     /// Writes the host made while `held`, which the plugin has not taken yet.
     held: std::sync::atomic::AtomicBool,
     pending: Mutex<Vec<(ParamId, Normalized)>>,
@@ -124,6 +126,10 @@ impl Fake {
         self.sets.lock().push((id, value));
     }
 
+    fn edits(&self) -> Vec<tutti_plugin_types::ParamEdit> {
+        self.edits.lock().clone()
+    }
+
     fn sets(&self) -> Vec<(ParamId, f64)> {
         self.sets
             .lock()
@@ -173,6 +179,10 @@ impl AnyThread for Fake {
             self.take(id, value);
         }
         Ok(())
+    }
+    fn edit(&self, edit: tutti_plugin_types::ParamEdit) -> tutti_plugin_types::EditOutcome {
+        self.edits.lock().push(edit);
+        tutti_plugin_types::EditOutcome::Queued
     }
     fn bypassed(&self, _site: tutti_plugin_types::OwnBypass) -> Option<bool> {
         None

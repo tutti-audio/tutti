@@ -48,6 +48,16 @@ pub(crate) mod sealed {
         /// Stores `value` through `cell`. Infallible and panic-free.
         fn store(cell: &Self::Cell, value: &Self::Value);
 
+        /// A gesture opened over the target: tells whatever the value is
+        /// written to that it is held. Runs at open, under the value lock.
+        fn begin(self, params: &Params);
+
+        /// The gesture over the target dropped, whether or not it moved.
+        fn end(self, params: &Params);
+
+        /// The gesture wrote `value` to the target, beside the write itself.
+        fn wrote(self, params: &Params, value: &Self::Value);
+
         /// What a watcher is told of a stored value that is not the base it
         /// was read at. A target whose value type a watcher does not name
         /// (the cell's raw) tells it in the type it does.
@@ -324,6 +334,17 @@ pub(super) trait Staged {
     /// slot was read at.
     fn store(self: Box<Self>) -> Option<StoredChange>;
 }
+
+/// The `begin`, `end` and `wrote` of a target nothing outside the session is
+/// told a gesture of: each answers that it has no one to tell.
+macro_rules! no_host_gesture {
+    () => {
+        fn begin(self, _: &$crate::value::Params) {}
+        fn end(self, _: &$crate::value::Params) {}
+        fn wrote(self, _: &$crate::value::Params, _: &Self::Value) {}
+    };
+}
+pub(crate) use no_host_gesture;
 
 /// Writes the builders every target type has, from the target's generics.
 ///

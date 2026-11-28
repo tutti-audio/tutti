@@ -104,6 +104,9 @@ impl Drop for Inert {
 }
 
 impl tutti_plugin_types::AnyThread for Inert {
+    fn edit(&self, _: tutti_plugin_types::ParamEdit) -> tutti_plugin_types::EditOutcome {
+        tutti_plugin_types::EditOutcome::NotDefined
+    }
     fn parameter_descriptors(&self) -> tutti_plugin_types::Answer<Option<Vec<ParameterInfo>>> {
         tutti_plugin_types::Answer::ready(None)
     }

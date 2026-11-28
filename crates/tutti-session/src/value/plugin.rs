@@ -144,6 +144,8 @@ pub struct PluginCell {
 impl sealed::Store for PluginParamTarget {
     type Cell = PluginCell;
 
+    crate::value::no_host_gesture!();
+
     fn resolve(self, params: &Params) -> Option<(PluginCell, Normalized)> {
         let entry = params.plugin(self.node)?;
         let base = entry.load(self.id)?;
@@ -307,6 +309,8 @@ macro_rules! unit_targets {
 
         impl sealed::Store for PluginParamTarget<$ty> {
             type Cell = UnitCell;
+
+            crate::value::no_host_gesture!();
 
             fn resolve(self, params: &Params) -> Option<(UnitCell, $ty)> {
                 self.resolve_unit(params)
@@ -965,6 +969,8 @@ impl std::fmt::Debug for MidiMapCell {
 
 impl sealed::Store for PluginMidiMapTarget {
     type Cell = MidiMapCell;
+
+    crate::value::no_host_gesture!();
 
     fn resolve(self, params: &Params) -> Option<(MidiMapCell, MidiMap)> {
         let entry = params.plugin(self.0)?;
