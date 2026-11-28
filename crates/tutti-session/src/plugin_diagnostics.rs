@@ -127,6 +127,14 @@ impl<'a> Diagnostics<'a> {
         self.hosted.failed_snapshots.get()
     }
 
+    /// Parameters a [`PluginDecl`](crate::PluginDecl) declared an initial for
+    /// that were not written because the plugin no longer lists them (a rescan
+    /// dropped them), over the life of the node. A later patch that declares one
+    /// is refused ([`PluginPatchError::NoSuchParam`](crate::PluginPatchError::NoSuchParam)).
+    pub fn unlisted_initials(&self) -> tutti_units::Calls {
+        self.hosted.unlisted_initials.get()
+    }
+
     /// The callbacks the plugin made from a thread its format forbids, which the
     /// host refused and answered with the callback's fallback, over the life of
     /// the node: a nonzero count is a plugin that breaks its format's thread

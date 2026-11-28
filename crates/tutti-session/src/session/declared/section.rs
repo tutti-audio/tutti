@@ -7,7 +7,9 @@ use tutti_buffers::Float;
 
 use super::wire::Resolved;
 use super::{Kept, PatchError, Patched};
-use crate::patch::{Declaration, Declarations, Deps, PendingSection, WireDecl, WireEnds, WireId};
+use crate::patch::{
+    Body, Declaration, Declarations, Deps, PendingSection, WireDecl, WireEnds, WireId,
+};
 use crate::{AppKey, Graph};
 
 /// What the last patch made of one section: its deps while it converged, and
@@ -173,15 +175,27 @@ pub(super) fn kind<F: Float, K: AppKey>(
     key: &K,
     declaration: &Declaration<Graph<F>>,
 ) -> Kind {
-    let new = &declaration.config;
     let Some(old) = kept.nodes.get(key) else {
         return Kind::Add;
     };
-    let same_type = old.declaration.config.config_type() == new.config_type()
-        && old.declaration.config.played().is_some() == new.played().is_some();
-    if !graph.contains(old.node) || !same_type {
+    // What the two declarations are, and whether the old node is still the
+    // declared one: a plugin whose record retired is spent, so its key gets a
+    // new node.
+    let (same_type, same_structure, standing) = match (&old.declaration.body, &declaration.body) {
+        (Body::Node(old), Body::Node(new)) => (
+            old.config_type() == new.config_type()
+                && old.played().is_some() == new.played().is_some(),
+            old.same_structure(&**new),
+            true,
+        ),
+        #[cfg(feature = "plugin")]
+        (Body::Plugin(old), Body::Plugin(new)) => (true, old.is_plugin_of(new), !old.is_closed()),
+        #[cfg(feature = "plugin")]
+        _ => (false, false, true),
+    };
+    if !graph.contains(old.node) || !same_type || !standing {
         Kind::Readd
-    } else if old.declaration.config.same_structure(&**new) {
+    } else if same_structure {
         Kind::Values
     } else {
         Kind::Swap

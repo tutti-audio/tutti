@@ -22,6 +22,29 @@ pub trait Sealed: tutti_rt::RingFloat {
     #[doc(hidden)]
     fn announce_render_mode<K: AppKey, C: Clock<Float = Self>>(session: &mut Session<K, C>);
 
+    /// Puts the plugin `loaded` in the session's graph as a node, taken from its
+    /// load: only an `f32` session hosts plugins, and a `PluginDecl` is part of
+    /// an `f32` patch alone, so an `f64` session has nothing to install.
+    #[doc(hidden)]
+    #[cfg(feature = "plugin")]
+    fn install_declared<K: AppKey, C: Clock<Float = Self>>(
+        session: &mut Session<K, C>,
+        loaded: &crate::LoadedPlugin,
+    ) -> crate::Key<crate::AnyPlugin>;
+
+    /// Swaps the plugin at `node` for `loaded`'s, as `install_declared` takes it.
+    ///
+    /// # Errors
+    ///
+    /// Why the graph refused the swap.
+    #[doc(hidden)]
+    #[cfg(feature = "plugin")]
+    fn swap_declared<K: AppKey, C: Clock<Float = Self>>(
+        session: &mut Session<K, C>,
+        node: tutti_graph::NodeKey,
+        loaded: &crate::LoadedPlugin,
+    ) -> Result<(), crate::ReplaceRefused>;
+
     /// A builder's opener, which serves both floats, as the opener of this one.
     #[doc(hidden)]
     #[cfg(feature = "capture")]
@@ -51,6 +74,25 @@ impl Sealed for f32 {
         #[cfg(not(feature = "plugin"))]
         let _ = session;
     }
+
+    #[cfg(feature = "plugin")]
+    fn install_declared<K: AppKey, C: Clock<Float = f32>>(
+        session: &mut Session<K, C>,
+        loaded: &crate::LoadedPlugin,
+    ) -> crate::Key<crate::AnyPlugin> {
+        session
+            .add_loaded(loaded)
+            .expect("a plugin is installed only while it is in its slot: the plan checked")
+    }
+
+    #[cfg(feature = "plugin")]
+    fn swap_declared<K: AppKey, C: Clock<Float = f32>>(
+        session: &mut Session<K, C>,
+        node: tutti_graph::NodeKey,
+        loaded: &crate::LoadedPlugin,
+    ) -> Result<(), crate::ReplaceRefused> {
+        session.swap_loaded(node, loaded)
+    }
 }
 
 impl Sealed for f64 {
@@ -67,4 +109,21 @@ impl Sealed for f64 {
     }
 
     fn announce_render_mode<K: AppKey, C: Clock<Float = f64>>(_: &mut Session<K, C>) {}
+
+    #[cfg(feature = "plugin")]
+    fn install_declared<K: AppKey, C: Clock<Float = f64>>(
+        _: &mut Session<K, C>,
+        _: &crate::LoadedPlugin,
+    ) -> crate::Key<crate::AnyPlugin> {
+        unreachable!("a plugin is declared in an f32 patch, and an f64 session patches f64")
+    }
+
+    #[cfg(feature = "plugin")]
+    fn swap_declared<K: AppKey, C: Clock<Float = f64>>(
+        _: &mut Session<K, C>,
+        _: tutti_graph::NodeKey,
+        _: &crate::LoadedPlugin,
+    ) -> Result<(), crate::ReplaceRefused> {
+        unreachable!("a plugin is declared in an f32 patch, and an f64 session patches f64")
+    }
 }

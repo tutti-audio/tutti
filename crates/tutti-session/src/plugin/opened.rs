@@ -4,7 +4,7 @@
 //! [`Shared`] is the observer's half: what the load says of the plugin
 //! ([`PluginInfo`]), its ports, and its [`Standing`]: whether its live part is
 //! gone, or it has no plugin behind it. [`Install`] is the plugin and its
-//! parameter mirror, owned by one [`LoadedPlugin`](crate::LoadedPlugin). The parts
+//! parameter mirror, which [`Shared`] holds in a slot until a node takes it. The parts
 //! that only the main thread may drop (an in-process plugin) go to the main
 //! thread when they are dropped on another: the format's own handle defers its
 //! close to the session's main-work collector.
@@ -212,6 +212,11 @@ pub(super) struct Shared {
     pub(super) standing: Arc<Standing>,
     /// The plugin's ports as a node over it would have them.
     pub(super) ports: PluginPorts,
+    /// The plugin, until a node takes it: a slot taken once, on the control
+    /// side, by whichever clone of the [`LoadedPlugin`](crate::LoadedPlugin)
+    /// reaches a node first. Boxed: an opened plugin is far larger than the
+    /// errors that hand a load back.
+    pub(super) install: Mutex<Option<Box<Install>>>,
 }
 
 impl fmt::Debug for Shared {
@@ -234,7 +239,7 @@ impl Shared {
         loadable: Loadable,
         config: AudioConfig,
         read: impl FnOnce(&HostPlugin) -> Result<Vec<PluginPreset>, PresetError>,
-    ) -> Result<(Self, Install), LoadError> {
+    ) -> Result<Self, LoadError> {
         let Open {
             plugin,
             restore: _,
@@ -272,14 +277,14 @@ impl Shared {
                 retired: AtomicBool::new(false),
             }),
             ports,
+            install: Mutex::new(Some(Box::new(Install {
+                plugin,
+                mirror,
+                origin: Origin { config, loadable },
+                replay,
+            }))),
         };
-        let install = Install {
-            plugin,
-            mirror,
-            origin: Origin { config, loadable },
-            replay,
-        };
-        Ok((shared, install))
+        Ok(shared)
     }
 }
 

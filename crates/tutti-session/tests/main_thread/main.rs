@@ -21,7 +21,7 @@ static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 mod support;
 
 // A plugin's parameter values, read through the host's mirror.
-#[cfg(feature = "vst2")]
+#[cfg(any(feature = "vst2", feature = "clap"))]
 #[path = "../support/param_reads.rs"]
 mod param_reads;
 
@@ -40,6 +40,13 @@ mod plugin_in_process_main;
 // A plugin hosted in process, as a load: the handle's last clone closes it on the main thread.
 #[cfg(feature = "clap")]
 mod plugin_load_main;
+// A plugin declared as a node of a patch, hosted in process: the cases
+// `tests/plugin` runs against a plugin server, with the same figures.
+#[cfg(feature = "clap")]
+#[path = "../support/plugin_decl.rs"]
+mod decl;
+#[cfg(feature = "clap")]
+mod plugin_decl;
 // What plugins hand to the main thread: each session runs its own, and `close` runs what is owed.
 #[cfg(feature = "vst2")]
 mod main_work;
@@ -73,6 +80,8 @@ fn main() {
     cases.extend_from_slice(plugin_in_process_main::CASES);
     #[cfg(feature = "clap")]
     cases.extend_from_slice(plugin_load_main::CASES);
+    #[cfg(feature = "clap")]
+    cases.extend_from_slice(plugin_decl::CASES);
     cases.extend_from_slice(plugin_event_sources::CASES);
     #[cfg(all(feature = "export", feature = "clap"))]
     cases.extend_from_slice(export_fork_plugin::CASES);

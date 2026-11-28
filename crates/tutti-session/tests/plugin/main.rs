@@ -84,6 +84,14 @@ mod plugin_diagnostics;
 #[cfg(all(feature = "clap", unix))]
 mod plugin_scan;
 
+// A plugin declared as a node of a patch, against a real `plugin-server`: the
+// cases `tests/main_thread` runs in process, with the same figures.
+#[cfg(feature = "clap")]
+#[path = "../support/plugin_decl.rs"]
+mod decl;
+#[cfg(feature = "clap")]
+mod plugin_decl;
+
 // Starts a bounce, awaits its render and applies it.
 #[cfg(all(feature = "clap", feature = "export"))]
 #[path = "../support/bounced.rs"]

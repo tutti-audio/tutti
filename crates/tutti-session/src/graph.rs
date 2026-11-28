@@ -133,6 +133,10 @@ pub enum ReplaceRefused {
     /// The node is not in the graph.
     #[error("{0:?} is not in the graph")]
     NoSuchNode(NodeKey),
+    /// The graph is between the two commits of a re-prepare: the swap waits for
+    /// the next patch, which tries again.
+    #[error("the graph is re-preparing; swap again after an update")]
+    Busy,
     /// The editor refused the swap.
     #[error("the graph refused the swap: {0}")]
     Editor(tutti_graph::CommitError),

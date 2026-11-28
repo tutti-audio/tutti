@@ -12,9 +12,9 @@ use tutti_units::Samples;
 
 use super::instrument::Parts;
 use super::wire::{KeptWire, Ports, Resolved};
-use super::{Fate, Kept, PatchError, Planned};
+use super::{Kept, PatchError, Planned};
 use crate::key::BusEnd;
-use crate::patch::{Built, WireEnds, WireId};
+use crate::patch::{WireEnds, WireId};
 use crate::{AppKey, BusInputPort, ConnectError, EventInputPort, Graph, OutputPort};
 
 /// Refuses what the declared nodes and wires cannot make, with nothing changed,
@@ -81,7 +81,7 @@ fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
 /// event input for its queue and the two outputs of its main pair.
 fn ports<K: AppKey, F: Float>(planned: &Planned<K, F>) -> Result<(), PatchError<K>> {
     for p in &planned.nodes {
-        let (Fate::Add(built) | Fate::Readd(built) | Fate::Swap(built)) = &p.fate else {
+        let Some(built) = p.plan.built() else {
             continue;
         };
         let Some(main) = built.main else {
@@ -230,7 +230,7 @@ fn acyclic<K: AppKey, F: Float>(
             planned
                 .nodes
                 .iter()
-                .filter(|p| matches!(p.fate, Fate::Readd(_)))
+                .filter(|p| p.plan.is_readd())
                 .map(|p| &p.key),
         );
     let gone: BTreeSet<NodeKey> = leaving
@@ -247,17 +247,13 @@ fn acyclic<K: AppKey, F: Float>(
     }
     // A new instrument's strip reads its node's main pair.
     for p in &planned.nodes {
-        if let (
-            Fate::Add(Built {
-                main: Some(main), ..
-            })
-            | Fate::Readd(Built {
-                main: Some(main), ..
-            }),
-            Some(parts),
-        ) = (&p.fate, &p.parts)
-        {
-            for wire in parts.audio(p.id, *main) {
+        let main = p
+            .plan
+            .built()
+            .filter(|_| p.plan.is_new())
+            .and_then(|built| built.main);
+        if let (Some(main), Some(parts)) = (main, &p.parts) {
+            for wire in parts.audio(p.id, main) {
                 wire.in_spec(&mut spec, graph, pending, true);
             }
         }

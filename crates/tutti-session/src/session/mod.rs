@@ -15,6 +15,8 @@ mod transport;
 
 #[cfg(feature = "midi")]
 pub use declared::LeaseError;
+#[cfg(feature = "plugin")]
+pub use declared::PluginPatchError;
 pub use declared::{PatchError, Patched};
 pub use event::SessionEvent;
 pub use main_output::MainOutputTopologyStatus;

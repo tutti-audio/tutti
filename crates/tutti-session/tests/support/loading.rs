@@ -218,6 +218,40 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
         hosting: Hosting,
         state: Option<PeerState>,
     ) -> Result<(PluginInstance, Key<AnyPlugin>), LoadError> {
+        let opened = self.open_from(main, catalog, id, hosting, state)?;
+        let handle = opened.instance();
+        let node = self.apply(opened).expect("a plugin just loaded enters");
+        Ok((handle, node))
+    }
+}
+
+/// A plugin of a test's own catalog, loaded and in no node.
+pub(crate) trait OpenFrom {
+    /// Loads `id` (hosted as `hosting`, from `state` when given), and leaves it
+    /// for the caller to put in a node.
+    ///
+    /// # Errors
+    ///
+    /// Why the load failed.
+    fn open_from(
+        &self,
+        main: MainThreadMarker,
+        catalog: &Catalog,
+        id: &PluginId,
+        hosting: Hosting,
+        state: Option<PeerState>,
+    ) -> Result<tutti_session::LoadedPlugin, LoadError>;
+}
+
+impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> OpenFrom for Session<K, C> {
+    fn open_from(
+        &self,
+        main: MainThreadMarker,
+        catalog: &Catalog,
+        id: &PluginId,
+        hosting: Hosting,
+        state: Option<PeerState>,
+    ) -> Result<tutti_session::LoadedPlugin, LoadError> {
         let load = match hosting {
             Hosting::Auto => self.load_plugin(id, catalog),
             Hosting::InProcess => self.load_plugin_as(id, catalog, ResolvedHosting::InProcess),
@@ -225,25 +259,22 @@ impl<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>> LoadFrom fo
                 self.load_plugin_as(id, catalog, ResolvedHosting::OutOfProcess)
             }
         };
-        let opened = match load? {
+        match load? {
             Load::InProcess(mut load) => {
                 if let Some(state) = state {
                     load.initial_state(Saved::new(state))
                         .expect("a state of the plugin");
                 }
-                load.run(main)?
+                load.run(main)
             }
             Load::OutOfProcess(mut load) => {
                 if let Some(state) = state {
                     load.initial_state(Saved::new(state))
                         .expect("a state of the plugin");
                 }
-                load.block()?
+                load.block()
             }
-        };
-        let handle = opened.instance();
-        let node = self.apply(opened).expect("a plugin just loaded enters");
-        Ok((handle, node))
+        }
     }
 }
 
