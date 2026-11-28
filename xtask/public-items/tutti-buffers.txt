@@ -23,11 +23,11 @@ enum bed::Bed
 enum channels::LayoutError
 enum edge::Pull
 enum edge::Stop
+enum error::BlockSide
 enum error::BufferError
 enum fold::FoldEnd
 enum fold::FoldError
 enum fold::levels::FoldLevel
-enum input_output::BlockSide
 enum sample::ByWidth
 enum sample::FloatWidth
 enum sample::SampleFormat
@@ -48,6 +48,8 @@ fn bed::Bed::from_topology
 fn bed::Bed::label
 fn bed::Bed::topology
 fn bed::Bed::width
+fn bed::ChannelTopology::bed
+fn bed::ChannelTopology::default_for
 fn channel_set::ChannelSet::default_for
 fn channel_set::ChannelSet::topology
 fn channel_set::ChannelSet::unassigned
@@ -79,6 +81,7 @@ fn fold::Fold::fold_planar_channel
 fn fold::Fold::fold_planar_to_interleaved
 fn fold::Fold::frame
 fn fold::Fold::is_identity
+fn fold::Fold::narrowed
 fn fold::Fold::select
 fn fold::Fold::spec
 fn fold::Fold::src_layout
@@ -221,8 +224,6 @@ fn stereo::StereoPlanes::right
 fn stereo::StereoPlanes::slice
 fn stereo::StereoPlanes::split_at
 fn topology::ChannelTopology::ambisonic
-fn topology::ChannelTopology::bed
-fn topology::ChannelTopology::default_for
 fn topology::ChannelTopology::index_of
 fn topology::ChannelTopology::is_fully_named
 fn topology::ChannelTopology::is_unassigned
@@ -250,6 +251,7 @@ fn topology::Speakers::new
 fn topology::Speakers::unassigned
 fn wave::Wave::append
 fn wave::Wave::append_planes
+fn wave::Wave::apply_gain
 fn wave::Wave::at
 fn wave::Wave::channel
 fn wave::Wave::channel_mut
@@ -271,6 +273,7 @@ fn wave::Wave::reserve
 fn wave::Wave::sample_rate
 fn wave::Wave::set
 fn wave::Wave::topology
+fn wave::Wave::try_reserve
 fn wave::Wave::with_capacity
 fn wave::Wave::with_placement
 fn wave::Wave::with_topology

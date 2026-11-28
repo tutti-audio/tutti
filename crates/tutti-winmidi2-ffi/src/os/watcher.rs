@@ -24,7 +24,7 @@ pub enum Change {
     Added(Endpoint),
     /// The endpoint with this device id left.
     Removed(String),
-    /// An endpoint's properties changed, its name among them.
+    /// An endpoint's properties changed: its name and what it declares, as they read now.
     Updated(Endpoint),
 }
 

@@ -172,9 +172,12 @@ fn per_channel_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(unassigned_bus(width), irs).block_size(block_size),
+    tutti_nodes::ConvolverConfig::new(
+        unassigned_bus(width),
+        tutti_nodes::IrLayout::PerChannel,
+        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
     )
+    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }
 
 /// True stereo from `[LL, LR, RL, RR]`.
@@ -185,15 +188,22 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     rr: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(
+    tutti_nodes::ConvolverNode::from(
+        tutti_nodes::ConvolverConfig::matrix(
             tutti_buffers::ChannelTopology::STEREO,
-            &[ll, lr, rl, rr],
+            tutti_nodes::MatrixLayout::TrueStereo,
+            std::sync::Arc::new(
+                tutti_dsp::MatrixResponses::new(
+                    tutti_buffers::ChannelLayout::STEREO,
+                    tutti_buffers::ChannelLayout::STEREO,
+                    &[ll, lr, rl, rr],
+                )
+                .expect("four responses"),
+            ),
         )
-        .true_stereo()
+        .expect("four responses on a stereo pair")
         .block_size(block_size),
     )
-    .expect("four responses on a stereo pair")
 }
 
 /// An ambisonic set of `input` in, `output` out.
@@ -203,9 +213,9 @@ fn ambisonic_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sa
     irs: &[tutti_buffers::Mono<'_, S>],
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(output, irs)
-            .ambisonic(input)
-            .block_size(block_size),
-    )
+    let layout = tutti_nodes::MatrixLayout::Ambisonic(input);
+    let responses =
+        tutti_dsp::MatrixResponses::new(layout.input(output).width(), output.width(), irs)?;
+    tutti_nodes::ConvolverConfig::matrix(output, layout, std::sync::Arc::new(responses))
+        .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }

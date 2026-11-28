@@ -42,6 +42,12 @@ impl ToFile {
         self
     }
 
+    /// Whether a path that already exists is replaced ([`replace`](Self::replace)).
+    #[must_use]
+    pub fn replaces(&self) -> bool {
+        self.replace
+    }
+
     /// Where the file lands.
     #[must_use]
     pub fn path(&self) -> &Path {

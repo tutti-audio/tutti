@@ -3,10 +3,11 @@
 //! send, because a panner never feeds the LFE.
 
 use tutti_buffers::{Bed, ChannelLayout, Speaker};
+use tutti_dsp::{BedLayout, SpeakerGeometryError};
 use tutti_graph::{GraphBuilder, NodeKey};
 use tutti_units::{Azimuth, Hz, Q, UnitParam};
 
-use crate::{SvfFilterConfig, SvfFilterNode, SvfType, VbapError, VbapPannerConfig, VbapPannerNode};
+use crate::{SvfFilterConfig, SvfFilterNode, SvfType, VbapPannerConfig, VbapPannerNode};
 
 /// Wire a panner over `bed` per `(source, bearing)` into `g`'s outputs: the
 /// source's ports 0 and 1 feed the panner (at ear level), and each
@@ -15,14 +16,15 @@ use crate::{SvfFilterConfig, SvfFilterNode, SvfType, VbapError, VbapPannerConfig
 ///
 /// # Errors
 ///
-/// [`VbapError`] for a bed with no speakers to pan between ([`Bed::Mono`]).
+/// [`SpeakerGeometryError`] for a bed with no speakers to pan between ([`Bed::Mono`]).
 pub fn vbap_mix(
     g: &mut GraphBuilder,
     bed: Bed,
     sources: &[(NodeKey, Azimuth)],
-) -> Result<(), VbapError> {
+) -> Result<(), SpeakerGeometryError> {
+    let config = VbapPannerConfig::new(BedLayout::try_from(bed)?);
     for &(source, azimuth) in sources {
-        let panner = VbapPannerNode::try_from(VbapPannerConfig::new(bed.into()))?;
+        let panner = VbapPannerNode::from(config.clone());
         let (pan, params) = g.add_with_controls(panner);
         params.set(UnitParam::Azimuth, azimuth.get());
         g.connect(source, 0, pan, 0).connect(source, 1, pan, 1);

@@ -13,11 +13,13 @@ fn os::endpoint::endpoints
 fn os::endpoint::ensure_service_available
 fn os::session::Session::close
 fn os::session::Session::connect
+fn os::session::Session::connect_send_only
 fn os::session::Session::create
 fn os::virtual_device::Session::publish
 fn os::virtual_device::VirtualDevice::send
 fn os::watcher::Watcher::start
 struct checks::declared::Block
+struct checks::read::Declared
 struct os::connection::Connection
 struct os::endpoint::Endpoint
 struct os::session::Session

@@ -548,6 +548,7 @@ fn patch::NodeDecl::fade
 fn patch::NodeDecl::key
 fn patch::NodeDecl::new
 fn patch::NodeDecl::unfaded
+fn patch::Section::new
 fn peer::Presence::cause
 fn peer::Presence::is_live
 fn peer_state::OtherPeer::expected
@@ -998,6 +999,7 @@ struct modulation::state::ModState
 struct patch::Declarations
 struct patch::NodeDecl
 struct patch::Sealed
+struct patch::Section
 struct peer::PeerResourceId
 struct peer_state::OtherPeer
 struct peer_state::PeerState

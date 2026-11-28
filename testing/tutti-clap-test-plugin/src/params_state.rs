@@ -35,7 +35,8 @@ use clap_sys::events::{
 use clap_sys::ext::param_indication::clap_plugin_param_indication;
 use clap_sys::ext::params::{
     CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_MODULATABLE, CLAP_PARAM_IS_READONLY,
-    CLAP_PARAM_IS_STEPPED, CLAP_PARAM_RESCAN_VALUES, clap_param_info, clap_plugin_params,
+    CLAP_PARAM_IS_STEPPED, CLAP_PARAM_REQUIRES_PROCESS, CLAP_PARAM_RESCAN_VALUES, clap_param_info,
+    clap_plugin_params,
 };
 use clap_sys::ext::state::clap_plugin_state;
 use clap_sys::ext::state_context::{clap_plugin_state_context, clap_plugin_state_context_type};
@@ -168,17 +169,21 @@ static PARAMS: &[ProbeParam] = &[
         flags: CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_MODULATABLE,
     },
     // The one parameter the host must not tell about automation: it cannot be
-    // automated.
+    // automated. It also requires `process`: while the plugin is active a
+    // change reaches it in a block, never through `params.flush`.
     ProbeParam {
-        id: 31,
+        id: MANUAL_PARAM_ID,
         name: b"Manual",
         module: b"",
         min: 0.0,
         max: 1.0,
         default: 0.0,
-        flags: CLAP_PARAM_IS_STEPPED,
+        flags: CLAP_PARAM_IS_STEPPED | CLAP_PARAM_REQUIRES_PROCESS,
     },
 ];
+
+/// Parameter id of `Manual`, the probe's one `REQUIRES_PROCESS` parameter.
+pub const MANUAL_PARAM_ID: u32 = 31;
 
 /// Parameter id of the applied `Gain` control (see the private `PARAMS` table).
 ///

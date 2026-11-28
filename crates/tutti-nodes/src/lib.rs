@@ -265,8 +265,8 @@
 //! - Signal-driven modulation sources, feeding a
 //!   control lane's event input: [`EnvelopeFollowerNode`] and
 //!   [`NoteEnvelopeNode`].
-//! - Spatial: [`AmbisonicEncoderNode`], [`AmbisonicRotatorNode`] and
-//!   [`AmbisonicDecoderNode`] ([`AmbisonicError`]), [`VbapPannerNode`] ([`VbapError`]) and [`HrtfBinauralNode`],
+//! - Spatial: [`AmbisonicEncoderNode`], [`AmbisonicRotatorNode`],
+//!   [`AmbisonicDecoderNode`], [`VbapPannerNode`] and [`HrtfBinauralNode`],
 //!   steered by their params (bearing, height, and the VBAP spread and width
 //!   or the HRTF blend).
 //! - Mixing: [`BusStripNode`]. Summing is the graph's (a port or an output
@@ -330,7 +330,7 @@ pub use additive::{AdditiveConfig, AdditiveKernel, AdditiveNode, AdditiveSet};
 pub use fm::{FmConfig, FmKernel, FmNode, FmSet};
 
 mod granular;
-pub use granular::{GranularConfig, GranularError, GranularNode};
+pub use granular::{GranularConfig, GranularError, GranularNode, GranularSource};
 mod noise;
 pub use noise::{NoiseConfig, NoiseNode};
 
@@ -541,9 +541,9 @@ pub use tutti_dsp::{
 mod spatial;
 pub use spatial::{
     AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
-    AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
-    AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet,
-    HrtfBinauralConfig, HrtfBinauralNode, VbapError, VbapPannerConfig, VbapPannerNode,
+    AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicRotatorConfig,
+    AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet, HrtfBinauralConfig,
+    HrtfBinauralNode, VbapPannerConfig, VbapPannerNode,
 };
 
 mod modulation;
@@ -570,7 +570,8 @@ pub use signal::{
 
 mod convolution;
 pub use convolution::{
-    ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout,
+    ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, ImpulseResponses, IrLayout,
+    MatrixLayout,
 };
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a

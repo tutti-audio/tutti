@@ -76,6 +76,7 @@ enum format::PluginFormat
 enum format::PluginId
 enum format::PluginIdError
 enum format::serde_form::Raw
+enum host::Flushed
 enum invalidation::PluginInvalidation
 enum invalidation::PluginRefresh
 enum invalidation::ResyncClass
@@ -237,7 +238,6 @@ fn edit_slots::EditReader::drain_in_epoch
 fn edit_slots::EditReader::epoch
 fn edit_slots::EditReader::epoch_watch
 fn edit_slots::EditReader::publish_applied
-fn edit_slots::EditReader::publish_applied_through
 fn edit_slots::EditReader::swept
 fn edit_slots::EditWriter::has_applied
 fn edit_slots::EditWriter::pending

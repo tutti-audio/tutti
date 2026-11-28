@@ -5,7 +5,8 @@
 //! is a global allocator, which only a test binary of that crate may do.
 
 use crate::harness::Gate;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MaxBlock};
+use tutti_buffers::{AmbisonicOrder, Bed, MaxBlock};
+use tutti_dsp::{BedLayout, HarmonicNormalization};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
@@ -159,10 +160,11 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
         UnitParam::StereoWidth,
     ];
     for bed in Bed::ALL {
-        let Ok(node) = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed.into())) else {
+        let Ok(bed_layout) = BedLayout::try_from(bed) else {
             assert_eq!(bed, Bed::Mono);
             continue;
         };
+        let node = VbapPannerNode::<f32>::from(VbapPannerConfig::new(bed_layout));
         let lfe = bed.topology().index_of(Speaker::LowFrequency);
         let channels = bed.width().count() as usize;
         assert!(channels <= tutti_buffers::MAX_CHANNELS);
@@ -256,19 +258,6 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
     }
 }
 
-/// Minimal format-valid HRIR sphere (a tetrahedron with delta impulse
-/// responses) — enough for the crate to parse and convolve without a dataset.
-fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
-    let verts: [[f32; 3]; 4] = [
-        [1.0, 1.0, 1.0],
-        [-1.0, -1.0, 1.0],
-        [-1.0, 1.0, -1.0],
-        [1.0, -1.0, -1.0],
-    ];
-    let faces: [[u32; 3]; 4] = [[0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]];
-    sphere_bytes(sample_rate, ir_len, &verts, &faces)
-}
-
 /// A sphere in the HRIR byte format whose every response is a unit delta.
 fn sphere_bytes(
     sample_rate: u32,
@@ -302,7 +291,7 @@ fn sphere_bytes(
 
 #[test]
 fn hrtf_binaural_process_is_allocation_free() {
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     // Three blocks: past the first step's latency, so the gate sees signal.
@@ -316,7 +305,7 @@ fn hrtf_binaural_process_is_allocation_free() {
 /// after insertion.
 #[test]
 fn hrtf_binaural_moving_source_is_allocation_free() {
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
     for c in rig.inputs_mut().iter_mut() {
@@ -366,7 +355,7 @@ fn hrtf_binaural_nearest_vertex_fallback_is_allocation_free() {
 fn hrtf_binaural_same_rate_prepare_is_allocation_free() {
     use tutti_graph::Prepare;
 
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     let prepare = Prepare::new(
         SampleRate::SR_48K,
@@ -386,7 +375,7 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
 
     use tutti_units::{Samples, Tail};
 
-    let bytes = synthetic_hrir_sphere(48_000, 64);
+    let bytes = tutti_fixtures::hrir::synthetic_hrir_sphere(48_000, 64);
     let mut node = hrtf::<f32>(&bytes).expect("synthetic sphere parses");
     aim(&node.param_set(), Azimuth::new(30.0), Elevation::new(0.0));
     node.prepare(&Prepare::new(
@@ -417,8 +406,8 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed.into()))
-        .expect("a bed with speakers to pan between")
+    let bed = BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+    tutti_nodes::VbapPannerNode::from(tutti_nodes::VbapPannerConfig::new(bed))
 }
 
 /// A binaural node over the sphere in `bytes`, prepared at `rate`.
@@ -435,7 +424,7 @@ fn hrtf<F: tutti_dsp::FftFloat>(
 /// `node` alone in a graph at 48 kHz in 64-frame blocks, its direction moved before every
 /// block: 16 warm-up blocks, then 256 under `RtScope`. The inputs carry a
 /// non-trivial signal and the output is checked to sound.
-fn gate_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
+fn check_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
     Gate::new(|c, i| 0.1 * (c as f32 + 1.0) * (((i * 7 + c) % 13) as f32 - 6.0))
         .warm(16)
         .blocks(256)
@@ -455,16 +444,15 @@ fn gate_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
 
 #[test]
 fn ambisonic_encoder_process_is_allocation_free_with_the_direction_moving() {
-    gate_moving(AmbisonicEncoderNode::<f32>::from(
-        AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
+    check_moving(AmbisonicEncoderNode::<f32>::from(
+        AmbisonicEncoderConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d),
     ));
 }
 
 #[test]
 fn ambisonic_rotator_process_is_allocation_free_with_the_front_moving() {
-    gate_moving(AmbisonicRotatorNode::<f32>::from(
-        AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX))
-            .unwrap()
+    check_moving(AmbisonicRotatorNode::<f32>::from(
+        AmbisonicRotatorConfig::new(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d)
             .roll(ArcDegrees::new(30.0)),
     ));
 }
@@ -472,12 +460,11 @@ fn ambisonic_rotator_process_is_allocation_free_with_the_front_moving() {
 #[test]
 fn ambisonic_decoder_process_is_allocation_free() {
     for decoding in [Decoding::Sampling, Decoding::AllRad] {
-        let node = AmbisonicDecoderNode::<f32>::try_from(
-            AmbisonicDecoderConfig::new(Bed::Surround71)
-                .input(ambix(AmbisonicOrder::MAX))
+        let node = AmbisonicDecoderNode::<f32>::from(
+            AmbisonicDecoderConfig::new(BedLayout::try_from(Bed::Surround71).unwrap())
+                .input(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d)
                 .decoding(decoding),
-        )
-        .unwrap();
+        );
         let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
         for (c, plane) in rig.inputs_mut().iter_mut().enumerate() {
             plane.into_samples_mut().fill(0.05 * (c as f32 + 1.0));
@@ -494,9 +481,4 @@ fn ambisonic_decoder_process_is_allocation_free() {
             rig.block();
         }
     }
-}
-
-/// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> ChannelTopology {
-    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }

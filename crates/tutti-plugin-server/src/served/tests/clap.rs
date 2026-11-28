@@ -1,5 +1,5 @@
 use super::*;
-use crate::served::format::clap::{THREAD_POOL, flush_out_of_band, pool_participants};
+use crate::served::format::clap::{THREAD_POOL, pool_participants};
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_plugin_ipc::News;
@@ -1609,12 +1609,12 @@ fn test_clap_take_flags() {
     assert!(!loaded.take_state_dirty());
 }
 
-/// **A write to an active plugin reaches a state save and a readback
-/// without waiting for a block.** The server serves requests on the thread
-/// that renders, so a save or a fork right after a write must see it; the
-/// pending write is flushed when the state is asked for, not at every write.
+/// **A save states a write the plugin's control queued and no block has
+/// applied, and does not apply it.** The save is read-only for the Processor: it
+/// brings nothing home and flushes nothing, so the plugin still holds the old
+/// value and the write is stated beside the bytes for the host to replay.
 #[test]
-fn test_clap_param_write_is_settled_for_a_state_save() {
+fn a_save_states_a_queued_control_write_pending_and_does_not_apply_it() {
     let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let mut instance = ClapInstance::load_first(
         main_thread(),
@@ -1639,24 +1639,19 @@ fn test_clap_param_write_is_settled_for_a_state_save() {
         original,
         "queued, not applied out of band"
     );
-    instance
+    let saved = instance
         .save_state(main_thread(), StateUse::Project)
         .expect("state saves");
-    let readback = instance.normalized(main_thread(), param_id);
-    assert!(
-        (readback - new_value).abs() < 0.01,
-        "expected {new_value}, got {readback}"
+    assert_eq!(
+        saved.pending,
+        [(param_id, Normalized::clamped(new_value))],
+        "the write no block applied is stated beside the bytes"
     );
-}
-
-/// A parameter that requires `process` is never flushed out of band while
-/// the plugin is processing; any other is.
-#[test]
-fn a_requires_process_parameter_is_not_flushed_while_processing() {
-    assert!(!flush_out_of_band(true, true));
-    assert!(flush_out_of_band(true, false), "before the first block");
-    assert!(flush_out_of_band(false, true));
-    assert!(flush_out_of_band(false, false));
+    assert_eq!(
+        instance.normalized(main_thread(), param_id),
+        original,
+        "the save applied nothing"
+    );
 }
 
 /// **A load with no block is refused** at the activation stage, and the
@@ -1880,7 +1875,7 @@ fn test_clap_state_save_nonempty() {
     let state = instance
         .save_state(main_thread(), StateUse::Project)
         .expect("save_state should succeed");
-    assert!(!state.is_empty(), "Saved state should not be empty");
+    assert!(!state.bytes.is_empty(), "Saved state should not be empty");
 }
 
 #[test]
@@ -1915,7 +1910,7 @@ fn test_clap_state_save_load_roundtrip() {
 
     // Restore state
     instance
-        .load_state(main_thread(), &saved, StateUse::Project)
+        .load_state(main_thread(), &saved.bytes, StateUse::Project)
         .expect("restore should succeed");
 
     let restored_value = instance.normalized(main_thread(), param_id);
@@ -2166,7 +2161,7 @@ fn test_reference_state_save_load() {
         .save_state(main_thread(), StateUse::Project)
         .expect("save should succeed");
     assert!(
-        !saved.is_empty(),
+        !saved.bytes.is_empty(),
         "Reference plugin state should not be empty"
     );
 
@@ -2179,7 +2174,7 @@ fn test_reference_state_save_load() {
         .expect("a declared, writable parameter");
 
     instance
-        .load_state(main_thread(), &saved, StateUse::Project)
+        .load_state(main_thread(), &saved.bytes, StateUse::Project)
         .expect("restore should succeed");
 
     let restored = instance.normalized(main_thread(), param_id);

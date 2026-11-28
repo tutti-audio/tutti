@@ -1,19 +1,21 @@
-//! The HRIR sphere the panner tests build in memory, and the little-endian writers it and
-//! `hrtf_panner`'s own sphere share.
+//! An HRIR sphere (the `HRIR` byte format) built in memory, for a test that needs a sphere
+//! that parses without a dataset file, and the little-endian writers it shares with a
+//! test's own sphere.
 
-pub(crate) fn push_u32(b: &mut Vec<u8>, v: u32) {
+/// Appends `v` little-endian.
+pub fn push_u32(b: &mut Vec<u8>, v: u32) {
     b.extend_from_slice(&v.to_le_bytes());
 }
 
-pub(crate) fn push_f32(b: &mut Vec<u8>, v: f32) {
+/// Appends `v` little-endian.
+pub fn push_f32(b: &mut Vec<u8>, v: f32) {
     b.extend_from_slice(&v.to_le_bytes());
 }
 
 /// A minimal, format-valid HRIR sphere: a tetrahedron of 4 vertices with
 /// unit-delta HRIRs (left an identity delta, right scaled per vertex), at
-/// the contract's rate so nothing is resampled. The same construction as
-/// the node's unit tests in `src/hrtf/node.rs`, which are private to it.
-pub(crate) fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
+/// the rate given, so a test can pick the rate nothing is resampled at.
+pub fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
     let verts: [[f32; 3]; 4] = [
         [1.0, 1.0, 1.0],
         [-1.0, -1.0, 1.0],

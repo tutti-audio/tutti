@@ -45,10 +45,9 @@ fn soundfont_row() -> Row {
     Row::new(
         "SoundFontUnit",
         move || {
-            Box::new(
-                SoundFontUnit::try_from(SoundFontConfig::new(Arc::clone(&font)))
-                    .expect("the unit builds"),
-            )
+            Box::new(SoundFontUnit::from(
+                SoundFontConfig::new(Arc::clone(&font)).expect("a font with a playable preset"),
+            ))
         },
         Excite::Event {
             port: 0,

@@ -70,10 +70,13 @@ impl Default for FreeverbConfig {
     }
 }
 
+kernel_config!(FreeverbConfig => FreeverbNode<F> where [F: Float + Lerp],
+    set(_): FreeverbSet = FreeverbSet);
+
 impl<F: Float + Lerp> From<FreeverbConfig> for FreeverbNode<F> {
     /// Allocates: build it before the node goes live.
     fn from(config: FreeverbConfig) -> Self {
-        Self::with_kernel(FreeverbKernel::new(), FreeverbSet, config.controls)
+        Self::with_kernel(FreeverbKernel::new(), config.kernel_set(), config.controls)
     }
 }
 

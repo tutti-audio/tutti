@@ -22,12 +22,13 @@ use tutti_platform::Instant;
 use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{ModeOutcome, News};
 use tutti_plugin_types::{
-    AutomationMode, Control, Delivered, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle,
+    AutomationMode, Control, Delivered, Event, Features, Hand, HostOp, Layout, Lifecycle,
     LoadStage, MainThreadMarker, MainWorkHandle, MaxBlock, MidiAssignment, MidiMapApplied, Notice,
     OutOfProcess, ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo,
-    PluginLearnError, PluginPreset, PluginRef, PluginResult, PluginWiring, Prepare, PresetId,
-    ProcessWake, RateRefusal, RateRefusalCause, Recovery, RenderMode, RenderModeSupport, Request,
-    SampleRate, Samples, Seat, ServerLosses, Stage, State, StateError, StateUse, TrackInfo, Widths,
+    PluginLearnError, PluginPreset, PluginRef, PluginResult, PluginState, PluginWiring, Prepare,
+    PresetId, ProcessWake, RateRefusal, RateRefusalCause, Recovery, RenderMode, RenderModeSupport,
+    Request, SampleRate, Samples, Seat, ServerLosses, Stage, State, StateError, StateUse,
+    TrackInfo, Widths,
 };
 use tutti_rt::TallyWriter;
 use tutti_units::Normalized;
@@ -179,24 +180,18 @@ pub(crate) trait ServerPlugin {
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool;
     /// The preset the plugin is on.
     fn current_preset(&mut self, main: MainThreadMarker) -> Option<PresetId>;
-    /// The plugin's state, with the writes no block has taken delivered.
+    /// The plugin's state, and beside it the writes its control holds that no
+    /// block has applied (a preset load's, say), read before the bytes. Never
+    /// brings the Processor home and never waits for a block.
     ///
     /// # Errors
     ///
     /// The plugin cannot save, or is lost.
-    fn save_state(&mut self, main: MainThreadMarker, state_use: StateUse) -> PluginResult<Vec<u8>>;
-    /// The plugin's state as it is, with no Processor brought home: for a
-    /// caller that knows no write is waiting for a block (the session's
-    /// barrier, the `SaveState` handler), so a save never silences one.
-    ///
-    /// # Errors
-    ///
-    /// The plugin cannot save, or is lost.
-    fn save_state_live(
+    fn save_state(
         &mut self,
         main: MainThreadMarker,
         state_use: StateUse,
-    ) -> PluginResult<Vec<u8>>;
+    ) -> PluginResult<PluginState>;
     /// Restores a saved state.
     ///
     /// # Errors
@@ -468,39 +463,6 @@ impl<L: ServerSide> Server<L> {
             }
         }
         refusal
-    }
-
-    /// Brings the Processor home from the render thread without deactivating:
-    /// `true` once it is held here (also when it never left), `false` when the
-    /// render thread did not return it in time.
-    fn bring_home(&mut self, main: MainThreadMarker) -> bool {
-        if self.lifecycle.processor().is_some() {
-            return true;
-        }
-        if !matches!(
-            self.lifecycle,
-            Lifecycle::Active {
-                seat: Seat::Lent,
-                ..
-            }
-        ) {
-            return false;
-        }
-        self.lifecycle.apply(Effect::Recall, &mut self.hand, main);
-        self.ties.wake.ring();
-        let patience = Patience::new(Instant::now(), HOME_PATIENCE);
-        while self.lifecycle.processor().is_none() {
-            if patience.left(Instant::now()).is_none() {
-                return false;
-            }
-            let seen = self.ties.settle.seen();
-            // A tick collects what the render thread returned.
-            self.drive(main, Event::Tick);
-            if self.lifecycle.processor().is_none() {
-                self.ties.settle.wait_past(seen, patience);
-            }
-        }
-        true
     }
 
     /// Turns a notice into what the host hears, keeping the cached wiring in
@@ -989,39 +951,15 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         self.lifecycle.control()?.current_preset(main)
     }
 
-    fn save_state(&mut self, main: MainThreadMarker, state_use: StateUse) -> PluginResult<Vec<u8>> {
-        // A write waits in the Processor's ring until a block drains it, so a
-        // save right after one would read the old value. Only the Processor
-        // can deliver it, so it is brought home for the settle (the render
-        // thread hands it back at its next poll; a block meanwhile is silence)
-        // and lent again after the save. The session asks for this only when
-        // no block is draining the writes.
-        let home = self.bring_home(main);
-        if home {
-            let refused = L::settle_edits(&mut self.lifecycle, main);
-            self.edits_refused.add(refused);
-        }
-        let saved = self
-            .lifecycle
-            .control()
-            .ok_or_else(lost)?
-            .save_state(main, state_use);
-        if home {
-            // The tick lends the Processor again.
-            self.drive(main, Event::Tick);
-        }
-        saved
-    }
-
-    fn save_state_live(
+    fn save_state(
         &mut self,
         main: MainThreadMarker,
         state_use: StateUse,
-    ) -> PluginResult<Vec<u8>> {
-        self.lifecycle
-            .control()
-            .ok_or_else(lost)?
-            .save_state(main, state_use)
+    ) -> PluginResult<PluginState> {
+        let control = self.lifecycle.control().ok_or_else(lost)?;
+        let pending = control.pending();
+        let bytes = control.save_state(main, state_use)?;
+        Ok(PluginState { bytes, pending })
     }
 
     fn load_state(

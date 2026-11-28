@@ -1082,9 +1082,9 @@ pub(crate) struct Staged {
     pub(crate) commit: tutti_plugin_host::Commit,
     /// The staged node's controls, which the record follows from the move.
     pub(crate) controls: Option<NodeControls>,
-    /// The graph's commits sent when the node was staged: a later count means
-    /// a commit carried it.
-    pub(crate) commits: u64,
+    /// The plan sent last when the node was staged: another plan sent since
+    /// means a commit carried it.
+    pub(crate) sent: Option<std::sync::Arc<tutti_graph::Plan>>,
 }
 
 impl RebindState {

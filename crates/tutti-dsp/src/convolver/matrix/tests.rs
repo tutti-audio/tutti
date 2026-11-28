@@ -14,9 +14,10 @@ fn build<F: FftFloat, S: Sample>(
     irs: &[Mono<'_, S>],
     block: Samples,
 ) -> Result<MatrixConvolver<F>, MatrixConvolverError> {
-    MatrixConvolverConfig::new(inputs, outputs, irs)
+    let responses = MatrixResponses::new(inputs, outputs, irs)?;
+    Ok(MatrixConvolverConfig::new(&responses)
         .block_size(block)
-        .build()
+        .build())
 }
 
 /// A response of one tap: `gain` at `delay`.

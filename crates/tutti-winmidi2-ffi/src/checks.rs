@@ -2,4 +2,5 @@
 //! for their tests only, so what only `os` uses is unused there.
 
 pub(crate) mod declared;
+pub(crate) mod read;
 pub(crate) mod timestamp;

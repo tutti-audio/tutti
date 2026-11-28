@@ -45,6 +45,7 @@ use std::task::Poll;
 use tutti_plugin_types::fake::at_frame;
 use tutti_plugin_types::{EditReader, EditWriter, UnknownParam, edit_slots};
 use tutti_rt::AudioThreadCell;
+use tutti_rt::Generation;
 use tutti_rt::Mutex;
 use tutti_units::{Normalized, ParamId};
 
@@ -204,24 +205,28 @@ pub(super) struct EditPort(Arc<Shared>);
 
 impl EditPort {
     /// Hands `apply` each parameter written since the last drain, with its
-    /// latest value and the epoch the drain observed. A refused claim or a load
-    /// in progress hands nothing: the slots keep what they hold for the next
-    /// block.
-    pub(super) fn drain(&self, apply: impl FnMut(ParamId, Normalized, u32)) {
-        if let Some(mut reader) = self.0.reader.try_borrow_mut()
-            && !self.0.restoring.load(Ordering::Acquire)
-        {
-            reader.drain_in_epoch(apply);
+    /// latest value and the epoch the drain observed, and returns the
+    /// generation the drain swept: what [`publish_applied`](Self::publish_applied)
+    /// takes once the plugin's call returns. A refused claim or a load in
+    /// progress hands nothing and returns `None`: the slots keep what they hold
+    /// for the next block.
+    pub(super) fn drain(&self, apply: impl FnMut(ParamId, Normalized, u32)) -> Option<Generation> {
+        let mut reader = self.0.reader.try_borrow_mut()?;
+        if self.0.restoring.load(Ordering::Acquire) {
+            return None;
         }
+        reader.drain_in_epoch(apply);
+        Some(reader.swept())
     }
 
-    /// Publishes that the plugin's call that took the writes drained so far has
-    /// returned ([`EditReader::publish_applied`]): the writes are no longer
-    /// pending. Called by the node after its `process` ran, never at drain time;
-    /// a refused claim leaves it to the next block. Wait-free.
-    pub(super) fn publish_applied(&self) {
+    /// Publishes that the plugin's call that took the writes up to `through`
+    /// (the mark [`drain`](Self::drain) returned) has returned
+    /// ([`EditReader::publish_applied`]): they are no longer pending. Called by
+    /// the node after its `process` ran, never at drain time; a refused claim
+    /// leaves it to the next block. Wait-free.
+    pub(super) fn publish_applied(&self, through: Generation) {
         if let Some(mut reader) = self.0.reader.try_borrow_mut() {
-            reader.publish_applied();
+            reader.publish_applied(through);
         }
     }
 
@@ -303,9 +308,11 @@ mod tests {
             [(id(1), Normalized::of(0.5)), (id(2), Normalized::of(0.75))],
             "the newest of each"
         );
-        assert_eq!(drained(&port).len(), 2);
+        let mut taken = 0;
+        let mark = port.drain(|_, _, _| taken += 1).expect("free");
+        assert_eq!(taken, 2);
         assert_eq!(post.pending().len(), 2, "taken by a drain, not yet applied");
-        port.publish_applied();
+        port.publish_applied(mark);
         assert!(post.pending().is_empty(), "the call returned");
         post.write(id(2), Normalized::of(0.125)).unwrap();
         post.reset();

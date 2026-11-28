@@ -13,7 +13,9 @@ use tutti_units::SampleRate;
 fn a_session_refuses_a_rate_the_soundfont_unit_does_not_run_at() {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
     let font = Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
-    let unit = SoundFontUnit::<f32>::try_from(SoundFontConfig::new(font)).expect("builds");
+    let unit = SoundFontUnit::<f32>::from(
+        SoundFontConfig::new(font).expect("a font with a playable preset"),
+    );
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .build_detached(SampleRate::SR_48K)

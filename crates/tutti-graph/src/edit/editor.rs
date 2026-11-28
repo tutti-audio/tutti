@@ -239,8 +239,9 @@ pub struct Editor<F: Float = f32> {
     /// [`Committed::structure`](Committed::structure) is compared
     /// with, so a commit that finds the two equal has nothing to compile.
     /// Never moves on a value control. [`revision`](Self::revision) is
-    /// another fact: anything changed, values included.
-    structure: u64,
+    /// another fact: anything changed, values included. It also holds
+    /// [`edited`](Self::edited).
+    structure: Structure,
     /// Each key ever placed: its record ([`Entry`](entries)).
     entries: Entries<F>,
     /// The open taps: each reader's width and end latch.
@@ -351,7 +352,10 @@ impl<F: Float> Editor<F> {
             prepare,
             spec: Arc::default(),
             shapes: Arc::default(),
-            structure: 0,
+            structure: Structure {
+                moves: 0,
+                edited: true,
+            },
             entries: Entries::new(),
             taps: Outlets::new(),
             event_taps: Outlets::new(),
@@ -461,6 +465,14 @@ impl<F: Float> Editor<F> {
     /// ring (256 entries) had no room for. Control thread.
     pub fn take_unreported_event_losses(&mut self) -> u64 {
         self.link.take_unreported()
+    }
+
+    /// Whether an edit that needs a commit has been made since the last
+    /// commit: a write of the spec or the shapes, or a fade that ended. A value
+    /// control (a range, a base, a fade being set, a mode, a mix) is not one.
+    /// A commit that returns `Ok` clears it; one that fails keeps it.
+    pub fn edited(&self) -> bool {
+        self.structure.edited
     }
 
     /// The graph value.
@@ -785,9 +797,17 @@ impl<F: Float> Editor<F> {
 /// The one `&mut` path to the spec or the shapes: moves `structure`, and
 /// copies the value first when a [`Committed`] or a
 /// crossfade still shares it, so what they hold never changes.
-fn write<'a, T: Clone>(slot: &'a mut Arc<T>, structure: &mut u64) -> &'a mut T {
-    *structure += 1;
+fn write<'a, T: Clone>(slot: &'a mut Arc<T>, structure: &mut Structure) -> &'a mut T {
+    structure.moves += 1;
+    structure.edited = true;
     Arc::make_mut(slot)
+}
+
+/// How many times the spec or the shapes were written, and whether any write
+/// has happened since the last commit that returned `Ok`.
+struct Structure {
+    moves: u64,
+    edited: bool,
 }
 
 /// The weighted lanes a lowering made, by edge: the fold's weight and the fade

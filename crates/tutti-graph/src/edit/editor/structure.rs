@@ -74,7 +74,8 @@ fn a_value_control_leaves_the_structure_and_the_commit_sends_nothing() {
         node: NodeKey(2),
         param: tutti_units::UnitParam::Volume.into(),
     };
-    let structure = ed.structure;
+    let structure = ed.structure.moves;
+    assert!(!ed.edited(), "a sent commit clears the flag");
     ed.set_param_range(at, crate::ParamRange::UNBOUNDED)
         .expect("the node exists");
     ed.set_edge_gain(feed, tutti_units::Gain::new(0.5))
@@ -86,11 +87,13 @@ fn a_value_control_leaves_the_structure_and_the_commit_sends_nothing() {
     ed.set_mode(NodeKey(2), NodeMode::Bypassed)
         .expect("a gain bypasses");
     ed.set_mix(NodeKey(2), Mix::new(0.5)).expect("a gain mixes");
-    assert_eq!(ed.structure, structure);
+    assert_eq!(ed.structure.moves, structure);
+    assert!(!ed.edited(), "a value control needs no commit");
     assert!(!sends(&mut ed), "a value moved, and nothing compiled");
 }
 
-/// **Every structural write moves it, and the next commit compiles when the
+/// **Every structural write moves it and sets `edited`, and the next commit
+/// clears the flag and compiles when the
 /// write changed what the plan is made of**: the spec, a shape, a placed
 /// unit, a staged crossfade, a latency cut and a tap waiting for its commit.
 /// A leaving node writes the spec without changing it (its edges' fade is a
@@ -174,10 +177,12 @@ fn every_structural_write_moves_the_structure_and_the_commit_compiles() {
     ];
     for (name, compiles, write) in writes {
         let (mut ed, _exec, _) = committed();
-        let structure = ed.structure;
+        let structure = ed.structure.moves;
         write(&mut ed);
-        assert_ne!(ed.structure, structure, "{name} moves the structure");
+        assert_ne!(ed.structure.moves, structure, "{name} moves the structure");
+        assert!(ed.edited(), "{name} sets the flag");
         assert_eq!(sends(&mut ed), compiles, "{name}: the next commit");
+        assert!(!ed.edited(), "{name}: the commit clears it");
         assert!(!sends(&mut ed), "{name}: the one after has nothing to do");
     }
 }

@@ -40,7 +40,7 @@ fn render(session: &mut OfflineSession<&'static str, f64>, blocks: usize) -> Vec
 }
 
 fn sine_synth() -> PolySynth<f64> {
-    PolySynth::new(
+    PolySynth::from(
         SynthConfig::new()
             .polyphony(std::num::NonZeroUsize::new(4).unwrap())
             .oscillator(OscillatorType::Sine)
@@ -133,7 +133,9 @@ fn an_f64_instrument_gain_scales_a_held_sine_linearly() {
 fn an_f64_general_midi_rig_is_silent_then_renders_a_finite_note() {
     let path = tutti_fixtures::asset("soundfonts/TimGM6mb.sf2");
     let font = Arc::new(SoundFont::open(path.as_path()).expect("the test font parses"));
-    let unit = SoundFontUnit::<f64>::try_from(SoundFontConfig::new(font)).expect("builds");
+    let unit = SoundFontUnit::<f64>::from(
+        SoundFontConfig::new(font).expect("a font with a playable preset"),
+    );
 
     let mut session = session();
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");

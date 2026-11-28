@@ -8,7 +8,11 @@
 //! Layout: a 44-byte `PCMWAVEFORMAT` header for at most two channels of at most
 //! 16 bits, else a 68-byte `WAVE_FORMAT_EXTENSIBLE` one (which also names the
 //! speakers). The RIFF and `data` sizes are written as zero first and
-//! back-patched by [`finish`](FormatWriter::finish).
+//! back-patched by [`finish`](FormatWriter::finish) and, while the file is
+//! written, every 2 s of audio, so a process that dies without unwinding leaves a
+//! file that describes the frames up to the last refresh. A refresh flushes the
+//! sink to the OS and does not sync it: a power loss can still lose what the OS
+//! had not written.
 //!
 //! A WAV file's sizes are 32-bit, so a file holds at most [`max_data_frames`]
 //! frames (just under 4 GiB: about 62 minutes of 8-channel 24-bit audio at
@@ -21,7 +25,8 @@ mod mask;
 use crate::error::{EncodeError, Result};
 use crate::pcm::{IntDepth, Pcm};
 use crate::spec::Spec;
-use crate::writer::FormatWriter;
+use crate::wav_size::{MAX_DATA_BYTES, frame_bytes, max_data_frames};
+use crate::writer::{FormatWriter, Refresh};
 use mask::channel_mask;
 use std::io::{Seek, SeekFrom, Write};
 use tutti_buffers::ChannelLayout;
@@ -34,31 +39,10 @@ const KSDATAFORMAT_SUBTYPE_IEEE_FLOAT: [u8; 16] = [
     0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
 ];
 
-/// The largest header written before the data (the extensible one), less the 8
-/// bytes the RIFF size excludes: the RIFF size field is `data + this` and must
-/// also fit a `u32`.
-const RIFF_HEADER_BYTES: u64 = 60;
-
-/// The most data bytes a (non-RF64) WAV file can hold: both the `data` chunk
-/// size and the RIFF size, which adds the header, are `u32`.
-const MAX_DATA_BYTES: u64 = u32::MAX as u64 - RIFF_HEADER_BYTES;
-
-/// The most whole frames a WAV file of `layout` at `pcm` can hold under
-/// [`MAX_DATA_BYTES`]. A writer that stops here leaves a valid file ending on a
-/// frame boundary.
-pub(crate) fn max_data_frames(layout: ChannelLayout, pcm: Pcm) -> u64 {
-    MAX_DATA_BYTES / frame_bytes(layout, pcm)
-}
-
 /// Whether the header is the extensible one: past two channels or 16 bits, a
 /// plain `PCMWAVEFORMAT` cannot describe the file.
 fn extensible(layout: ChannelLayout, pcm: Pcm) -> bool {
     layout.count() > 2 || pcm.bits() > 16
-}
-
-/// Bytes per frame: every sample in a whole number of bytes.
-fn frame_bytes(layout: ChannelLayout, pcm: Pcm) -> u64 {
-    u64::from(pcm.bits().div_ceil(8)) * u64::from(layout.count().max(1))
 }
 
 /// The header of a file of `spec`'s shape, and the offset of its `data` size.
@@ -136,6 +120,8 @@ pub(crate) struct WavWriter<W: Write + Seek> {
     max_frames: u64,
     /// One block's samples as bytes, reused.
     bytes: Vec<u8>,
+    /// When the sizes are next back-patched.
+    refresh: Refresh,
 }
 
 impl<W: Write + Seek> std::fmt::Debug for WavWriter<W> {
@@ -163,6 +149,7 @@ impl<W: Write + Seek> WavWriter<W> {
             frames: 0,
             max_frames: max_data_frames(spec.layout(), pcm),
             bytes: Vec::new(),
+            refresh: Refresh::new(spec.rate()),
         })
     }
 
@@ -265,6 +252,9 @@ impl<W: Write + Seek> FormatWriter for WavWriter<W> {
             return Err(EncodeError::WavTooLarge {
                 limit_frames: self.max_frames,
             });
+        }
+        if self.refresh.add(block.frames()) {
+            self.patch_sizes()?;
         }
         Ok(())
     }

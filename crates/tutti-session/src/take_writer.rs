@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use tutti_buffers::{
     ChannelLayout, ChannelSet, Float, Fold, Interleaved, InterleavedMut, Placement, Sink,
-    SinkFailed,
+    SinkFailed, Wave,
 };
-use tutti_codec::{Chain, EncodeError, Kept, ToFile};
+use tutti_codec::{Chain, EncodeError, Kept, ToFile, Unfinished};
 use tutti_dsp::FftFloat;
-use tutti_export::{Rendered, Written};
+use tutti_export::Written;
 use tutti_units::SampleRate;
 
 use crate::{TakeError, ToMemory};
@@ -38,8 +38,8 @@ pub trait Writer<F: Float>: Send + 'static {
     fn close(self) -> Result<Self::Output, TakeError>;
 }
 
-/// A file: the frames go through the encoding's stages into a file beside its path, which the
-/// close puts in place.
+/// A file: the frames go through the encoding's stages into a file at its path, written in
+/// place from the start; the close finishes it.
 #[derive(Debug)]
 pub struct FileWriter<F: FftFloat> {
     chain: Chain<F>,
@@ -71,40 +71,48 @@ impl<F: FftFloat> Writer<F> for FileWriter<F> {
         self.chain.block(frames).map_err(|_| SinkFailed)
     }
 
-    /// A file that cannot be closed whole is kept unfinished beside its path
-    /// ([`TakeError::Sink`]), and one that cannot be put in place is kept whole
-    /// ([`TakeError::Commit`]): a take never deletes its recording.
+    /// A file that cannot be closed or synced is [`TakeError::Sink`], whose `unfinished`
+    /// names where the file is: a take never deletes its recording.
     fn close(self) -> Result<Written, TakeError> {
         let Self {
             chain,
             path,
             placement,
         } = self;
+        // A complete file kept somewhere: its header describes its frames.
+        let complete = |at: &std::path::Path, source: EncodeError| TakeError::Sink {
+            source: Arc::new(source),
+            unfinished: Some(Unfinished {
+                path: at.to_path_buf(),
+                header_describes_frames: true,
+            }),
+        };
         let closed = chain.finalize().map_err(|kept| match kept {
-            Kept::Commit(commit) => TakeError::Commit(commit),
+            Kept::Commit(commit) => {
+                let at = commit.kept().to_path_buf();
+                complete(&at, EncodeError::Commit(commit))
+            }
             Kept::Unfinished { source, unfinished } => TakeError::Sink {
                 source: Arc::new(source),
                 unfinished: Some(unfinished),
             },
         })?;
         let landed = closed.commit().map_err(|e| match e {
-            EncodeError::Commit(commit) => TakeError::Commit(commit),
-            other => TakeError::Sink {
-                source: Arc::new(other),
-                unfinished: None,
-            },
+            EncodeError::Commit(commit) => {
+                let at = commit.kept().to_path_buf();
+                complete(&at, EncodeError::Commit(commit))
+            }
+            other => complete(&path, other),
         })?;
         Ok(Written::new(path, landed, placement))
     }
 }
 
-/// Planes in memory: the frames, folded onto the planes' channels when they differ from the
-/// source's, are spread over one plane per channel.
+/// A [`Wave`] in memory: the frames, folded onto the wave's channels when they differ from the
+/// source's, are appended to it.
 #[derive(Debug)]
 pub struct MemoryWriter<F: Float> {
-    planes: Vec<Vec<F>>,
-    rate: SampleRate,
-    width: ChannelLayout,
+    wave: Wave<F>,
     /// Built when the take was armed.
     fold: Option<Fold<F>>,
     folded: Vec<F>,
@@ -116,11 +124,9 @@ impl<F: Float> MemoryWriter<F> {
         layout: ChannelLayout,
         rate: SampleRate,
     ) -> Result<Self, TakeError> {
-        let (width, fold) = to.fold(&ChannelSet::default_for(layout))?;
+        let (set, fold) = to.fold(&ChannelSet::default_for(layout))?;
         Ok(Self {
-            planes: vec![Vec::new(); usize::from(width.count())],
-            rate,
-            width,
+            wave: Wave::with_placement(set, to.placement(), rate),
             fold,
             folded: Vec::new(),
         })
@@ -128,34 +134,26 @@ impl<F: Float> MemoryWriter<F> {
 }
 
 impl<F: Float> Writer<F> for MemoryWriter<F> {
-    type Output = Rendered<F>;
+    type Output = Wave<F>;
 
     fn write(&mut self, frames: Interleaved<'_, F>) -> Result<(), SinkFailed> {
         let spread = match &self.fold {
             None => frames,
             Some(fold) => {
+                let width = self.wave.layout();
                 self.folded.clear();
                 self.folded
-                    .resize(self.width.interleaved_len(frames.frames()), F::ZERO);
-                let to =
-                    InterleavedMut::new(&mut self.folded, self.width).map_err(|_| SinkFailed)?;
+                    .resize(width.interleaved_len(frames.frames()), F::ZERO);
+                let to = InterleavedMut::new(&mut self.folded, width).map_err(|_| SinkFailed)?;
                 fold.fold(frames, to).map_err(|_| SinkFailed)?;
-                Interleaved::new(&self.folded, self.width).map_err(|_| SinkFailed)?
+                Interleaved::new(&self.folded, width).map_err(|_| SinkFailed)?
             }
         };
-        for frame in spread.iter() {
-            for (plane, sample) in self.planes.iter_mut().zip(frame) {
-                plane.push(*sample);
-            }
-        }
-        Ok(())
+        self.wave.append(spread).map_err(|_| SinkFailed)
     }
 
-    fn close(self) -> Result<Rendered<F>, TakeError> {
-        Rendered::new(self.planes, self.rate, 0).map_err(|e| TakeError::Sink {
-            source: Arc::new(e),
-            unfinished: None,
-        })
+    fn close(self) -> Result<Wave<F>, TakeError> {
+        Ok(self.wave)
     }
 }
 

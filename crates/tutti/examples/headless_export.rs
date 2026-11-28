@@ -96,7 +96,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .into_future(),
     );
     let rendered = session.apply(rendered)?.into_main_output();
-    let flat = rendered.interleaved();
+    let mut flat = vec![0.0f32; rendered.layout().interleaved_len(rendered.len())];
+    tutti_buffers::interleave(
+        rendered.planes(),
+        tutti::InterleavedMut::new(&mut flat, rendered.layout()).unwrap(),
+    )
+    .expect("the planes are as wide as the stereo layout");
     // `tutti` exports no path to `Bed`, so the placement is the default layout for
     // two channels, which is a stereo bed.
     let cfg = LoudnessConfig::new(tutti_buffers::Bed::Stereo.topology());

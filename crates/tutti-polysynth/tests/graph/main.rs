@@ -8,6 +8,7 @@ mod contract;
 mod cost_classes;
 mod graph_node;
 mod instrument_node;
+mod node_config;
 mod param_lanes;
 #[path = "../support/mod.rs"]
 mod support;

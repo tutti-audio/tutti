@@ -79,6 +79,9 @@ impl PitchShifterConfig {
 /// shifter is one bus.
 pub type PitchShifterNode<F> = KernelNode<PitchShifterKernel<F>>;
 
+kernel_config!(PitchShifterConfig => PitchShifterNode<F> where [F: FftFloat],
+    set(_): PitchShifterSet = PitchShifterSet);
+
 impl<F: FftFloat> From<PitchShifterConfig> for PitchShifterNode<F> {
     fn from(config: PitchShifterConfig) -> Self {
         Self::with_kernel(
@@ -88,7 +91,7 @@ impl<F: FftFloat> From<PitchShifterConfig> for PitchShifterNode<F> {
                 SampleRate::SR_48K,
                 config.controls,
             ),
-            PitchShifterSet,
+            config.kernel_set(),
             config.controls,
         )
     }

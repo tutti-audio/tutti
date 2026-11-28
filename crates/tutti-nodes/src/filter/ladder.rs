@@ -127,6 +127,13 @@ impl LadderFilterConfig {
         self
     }
 
+    /// The drive into the saturators at the start.
+    #[must_use]
+    pub fn drive(mut self, drive: Drive) -> Self {
+        self.controls.drive = drive;
+        self
+    }
+
     /// Where the saturators sit, [`PerStage`](LadderSaturation::PerStage) unless set: the
     /// cheap [`Input`](LadderSaturation::Input) model costs an order of magnitude less per
     /// sample. Not a live control: the model is fixed when the node is made.
@@ -137,11 +144,14 @@ impl LadderFilterConfig {
     }
 }
 
+kernel_config!(LadderFilterConfig => LadderFilterNode<F> where [F: Float + SimdLanes],
+    set(c): LadderSet = LadderSet(c.controls.ty));
+
 impl<F: Float + SimdLanes> From<LadderFilterConfig> for LadderFilterNode<F> {
     fn from(config: LadderFilterConfig) -> Self {
         Self::with_kernel(
             LadderKernel::new(filter_bus(config.width), config.saturation),
-            LadderSet(config.controls.ty),
+            config.kernel_set(),
             config.controls,
         )
     }

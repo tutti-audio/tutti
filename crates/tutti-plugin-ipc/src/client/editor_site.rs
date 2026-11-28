@@ -453,7 +453,10 @@ impl InProcessEditor {
         // remains the source of truth and nothing is written back. So the
         // open still succeeds (failing it would leave the user with no window
         // at all) and its result carries the failure.
-        let state_to_sync = self.audio.save_state(tutti_plugin_types::StateUse::Project);
+        let state_to_sync = self
+            .audio
+            .save_state(tutti_plugin_types::StateUse::Project)
+            .map(|state| state.bytes);
 
         tracing::info!("[bridge] open_editor: calling gui.open_editor(parent={parent:?})");
         let size = gui
@@ -513,7 +516,10 @@ impl InProcessEditor {
         // Read before the open, as the embedded path does: audio is the source
         // of truth for state, and some plugins refuse `set_state` until their
         // view exists. A failure is in the result, as there.
-        let state_to_sync = self.audio.save_state(tutti_plugin_types::StateUse::Project);
+        let state_to_sync = self
+            .audio
+            .save_state(tutti_plugin_types::StateUse::Project)
+            .map(|state| state.bytes);
 
         // The editor instance's own open mirrors nothing: its result is the
         // window alone.

@@ -181,21 +181,16 @@ impl EditReader {
         });
     }
 
-    /// Publishes that the target applied what the drains so far collected:
-    /// [`EditWriter::has_applied`] then holds for each write they covered.
-    /// Called by the holder after the target's own call that took the values
-    /// has returned, never at drain time; a call that never reached the
-    /// target leaves the values to the next one. Wait-free.
-    pub fn publish_applied(&mut self) {
-        self.publish_applied_through(self.slots.swept());
-    }
-
-    /// [`publish_applied`](Self::publish_applied) for the writes up to `through`
-    /// (a [`swept`](Self::swept) taken at an earlier drain), for a holder whose
-    /// target answers a drain's values after later drains have run: a request
-    /// carries the generation its drain swept, and its answer publishes that, not
-    /// the newest. Never moves the published generation back. Wait-free.
-    pub fn publish_applied_through(&mut self, through: Generation) {
+    /// Publishes that the target applied the writes up to `through`, a
+    /// [`swept`](Self::swept) the holder took at the drain that collected them:
+    /// [`EditWriter::has_applied`] then holds for each. Called by the holder
+    /// after the target's own call that took the values has returned, with the
+    /// mark of the drain it sent and never one read at publish time, so a
+    /// later drain's writes stay pending; a call that never reached the target
+    /// leaves the values to the next one. A holder whose target answers after
+    /// later drains have run (a served plugin) keeps the mark with the request.
+    /// Never moves the published generation back. Wait-free.
+    pub fn publish_applied(&mut self, through: Generation) {
         self.applied.publish(through);
     }
 
@@ -334,6 +329,7 @@ mod tests {
         assert!(!writer.has_applied(mark), "no block has run");
 
         assert_eq!(drained(&mut reader), [(id(1), 0.25)]);
+        let first_drain = reader.swept();
         assert!(
             !writer.has_applied(mark),
             "the drain took it; the target's call has not returned"
@@ -341,14 +337,35 @@ mod tests {
 
         writer.write(id(2), Normalized::of(0.5)).unwrap();
         let later = writer.written();
-        reader.publish_applied();
+        reader.publish_applied(first_drain);
         assert!(writer.has_applied(mark), "the call that took it returned");
         assert!(!writer.has_applied(later), "a write after the drain is not");
 
         assert_eq!(drained(&mut reader), [(id(2), 0.5)]);
         assert!(!writer.has_applied(later), "not until its own call returns");
-        reader.publish_applied();
+        reader.publish_applied(reader.swept());
         assert!(writer.has_applied(later));
+    }
+
+    /// **A holder publishes the mark of the drain it sent, not a later one**: a
+    /// drain, then a write and a second drain, then the first drain's mark
+    /// leaves the second write pending.
+    #[test]
+    fn a_publish_covers_the_drain_it_names_and_not_a_later_one() {
+        let (mut writer, mut reader) = edit_slots([id(1), id(2)]);
+        writer.write(id(1), Normalized::of(0.25)).unwrap();
+        assert_eq!(drained(&mut reader), [(id(1), 0.25)]);
+        let sent = reader.swept();
+        writer.write(id(2), Normalized::of(0.5)).unwrap();
+        assert_eq!(drained(&mut reader), [(id(2), 0.5)]);
+        reader.publish_applied(sent);
+        assert_eq!(
+            writer.pending(),
+            [(id(2), Normalized::of(0.5))],
+            "the second drain's write is not covered by the first's mark"
+        );
+        reader.publish_applied(reader.swept());
+        assert!(writer.pending().is_empty());
     }
 
     /// **A write is pending until its call returned, the newest of each
@@ -370,7 +387,7 @@ mod tests {
             2,
             "taken, the call has not returned"
         );
-        reader.publish_applied();
+        reader.publish_applied(reader.swept());
         assert!(writer.pending().is_empty());
         writer.write(id(2), Normalized::of(0.125)).unwrap();
         writer.reset();

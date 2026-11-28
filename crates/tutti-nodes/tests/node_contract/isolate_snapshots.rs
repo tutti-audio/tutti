@@ -16,9 +16,10 @@
 
 use std::sync::Arc;
 use tutti_buffers::Mono;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, ChannelLayout, ChannelTopology};
+use tutti_buffers::{AmbisonicOrder, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::CombDelay;
+use tutti_dsp::HarmonicNormalization;
 use tutti_dsp::Wavetable;
 use tutti_dsp::{
     Algorithm, FmPatch, Operator, OperatorCount, OperatorFrequency, OperatorSpec, Partial,
@@ -48,7 +49,7 @@ use tutti_nodes::{
     EnvelopeFilterConfig, EnvelopeFilterNode, LevellerConfig, LevellerNode, TransientShaperConfig,
     TransientShaperNode,
 };
-use tutti_nodes::{GranularConfig, GranularNode};
+use tutti_nodes::{GranularConfig, GranularNode, GranularSource};
 use tutti_nodes::{
     GraphicBands, GraphicEqConfig, GraphicEqNode, PlateReverbConfig, PlateReverbNode,
     SpringReverbConfig, SpringReverbNode, StereoWidthConfig, StereoWidthNode, TiltFilterConfig,
@@ -456,9 +457,10 @@ fn auto_pan() {
 
 fn ambisonic_encoder() {
     IsolateRow::new("AmbisonicEncoderNode", || {
-        AmbisonicEncoderNode::<f32>::from(
-            AmbisonicEncoderConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
-        )
+        AmbisonicEncoderNode::<f32>::from(AmbisonicEncoderConfig::new(
+            AmbisonicOrder::MAX,
+            HarmonicNormalization::Sn3d,
+        ))
     })
     .control("azimuth", |p| {
         assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
@@ -471,9 +473,10 @@ fn ambisonic_encoder() {
 
 fn ambisonic_rotator() {
     IsolateRow::new("AmbisonicRotatorNode", || {
-        AmbisonicRotatorNode::<f32>::from(
-            AmbisonicRotatorConfig::new(ambix(AmbisonicOrder::MAX)).unwrap(),
-        )
+        AmbisonicRotatorNode::<f32>::from(AmbisonicRotatorConfig::new(
+            AmbisonicOrder::MAX,
+            HarmonicNormalization::Sn3d,
+        ))
     })
     .control("azimuth", |p| {
         assert!(p.param_set().set(UnitParam::Azimuth, 70.0))
@@ -636,13 +639,14 @@ fn granular() {
         let frames: Vec<f32> = (0..2 * 4_800).map(|i| (i as f32 * 0.05).sin()).collect();
         wave.append(Interleaved::new(&frames, ChannelLayout::STEREO).unwrap())
             .unwrap();
-        GranularNode::<f32>::try_from(
-            GranularConfig::new(ChannelLayout::STEREO, Arc::new(wave))
-                .density(Hz::new(80.0))
-                .jitter([Normalized::of(0.2), Normalized::of(0.3)])
-                .seed(5),
+        GranularNode::<f32>::from(
+            GranularConfig::new(
+                GranularSource::new(ChannelLayout::STEREO, Arc::new(wave)).unwrap(),
+            )
+            .density(Hz::new(80.0))
+            .jitter([Normalized::of(0.2), Normalized::of(0.3)])
+            .seed(5),
         )
-        .unwrap()
     })
     .control("density", |r| {
         assert!(r.param_set().set(UnitParam::Rate, 300.0))
@@ -859,11 +863,14 @@ fn fir_convolver() {
         .design(SampleRate::SR_48K, &[tilt])
         .unwrap();
     IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
-        ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &fir)
-                .block_size(Samples::new(64)),
+        ConvolverNode::<f32>::from(
+            FirConvolverConfig::new(
+                tutti_buffers::ChannelTopology::MONO,
+                std::sync::Arc::new(fir.clone()),
+            )
+            .unwrap()
+            .block_size(Samples::new(64)),
         )
-        .unwrap()
     })
     .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
     .check();
@@ -889,16 +896,15 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     ir: tutti_buffers::Mono<'_, S>,
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
-    tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
-            .block_size(block_size),
+    tutti_nodes::ConvolverNode::from(
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::MONO,
+            tutti_nodes::IrLayout::PerChannel,
+            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ir])),
+        )
+        .expect("one response on a mono bus")
+        .block_size(block_size),
     )
-    .expect("one response on a mono bus")
-}
-
-/// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> ChannelTopology {
-    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
 fn tube_stage() {

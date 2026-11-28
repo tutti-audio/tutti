@@ -20,9 +20,8 @@ use crate::FftFloat;
 /// Frames a call is cut into: the size of the scratch, fixed at construction.
 const CHUNK: usize = 64;
 
-/// Why a [`MatrixConvolver`] could not be built.
+/// Why [`MatrixResponses`] could not be made: the two ways a shape and its responses disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
 pub enum MatrixConvolverError {
     /// No input or no output channel: a matrix has at least one of each.
     #[error("a matrix convolver needs at least one input and one output channel")]
@@ -43,31 +42,81 @@ pub enum MatrixConvolverError {
     },
 }
 
-/// What a [`MatrixConvolver`] is made from: its shape, one impulse response per path, and
-/// optionally the head partition; [`build`](Self::build) makes the matrix.
+/// The impulse responses of a matrix of `inputs` by `outputs` channels, owned: one per
+/// (input, output) path, input-major.
 ///
-/// The responses are input-major: the response of the path from input `i` to output `o` is
-/// `irs[i * outputs + o]`. For a 2 by 2 matrix that is `[LL, LR, RL, RR]`, with
-/// `out_L = in_L * LL + in_R * RL`. The shape and the response count depend on each other,
-/// which no type holds, so [`build`](Self::build) is fallible.
-#[derive(Clone, Copy, Debug)]
-pub struct MatrixConvolverConfig<'a, S: Sample> {
+/// The response of the path from input `i` to output `o` is `irs[i * outputs + o]`. For a 2 by
+/// 2 matrix that is `[LL, LR, RL, RR]`, with `out_L = in_L * LL + in_R * RL`. The shape and
+/// the response count depend on each other, which no type of one holds, so
+/// [`new`](Self::new) checks them and a set that exists has the right count: the matrix a
+/// [`MatrixConvolverConfig`] builds from it cannot fail.
+#[derive(Clone, Debug)]
+pub struct MatrixResponses<S: Sample> {
     inputs: ChannelLayout,
     outputs: ChannelLayout,
-    irs: &'a [Mono<'a, S>],
+    irs: Vec<Vec<S>>,
+}
+
+impl<S: Sample> MatrixResponses<S> {
+    /// The responses `irs`, copied, for a matrix of `inputs` by `outputs` channels.
+    ///
+    /// # Errors
+    ///
+    /// [`MatrixConvolverError::NoChannels`] for a width of none, and
+    /// [`MatrixConvolverError::IrCount`] when the responses are not `inputs * outputs` many.
+    pub fn new(
+        inputs: ChannelLayout,
+        outputs: ChannelLayout,
+        irs: &[Mono<'_, S>],
+    ) -> Result<Self, MatrixConvolverError> {
+        let (rows, cols) = (usize::from(inputs.count()), usize::from(outputs.count()));
+        if rows == 0 || cols == 0 {
+            return Err(MatrixConvolverError::NoChannels);
+        }
+        let want = rows * cols;
+        if irs.len() != want {
+            return Err(MatrixConvolverError::IrCount {
+                inputs: rows,
+                outputs: cols,
+                want,
+                got: irs.len(),
+            });
+        }
+        Ok(Self {
+            inputs,
+            outputs,
+            irs: irs.iter().map(|ir| ir.samples().to_vec()).collect(),
+        })
+    }
+
+    /// The input channels of the matrix these responses are for.
+    #[must_use]
+    pub fn inputs(&self) -> ChannelLayout {
+        self.inputs
+    }
+
+    /// The output channels of the matrix these responses are for.
+    #[must_use]
+    pub fn outputs(&self) -> ChannelLayout {
+        self.outputs
+    }
+}
+
+/// What a [`MatrixConvolver`] is made from: its checked responses ([`MatrixResponses`]) and
+/// optionally the head partition; [`build`](Self::build) makes the matrix.
+#[derive(Clone, Copy, Debug)]
+pub struct MatrixConvolverConfig<'a, S: Sample> {
+    responses: &'a MatrixResponses<S>,
     block_size: Samples,
     zero_latency: bool,
 }
 
 impl<'a, S: Sample> MatrixConvolverConfig<'a, S> {
-    /// A matrix of `inputs` by `outputs` channels over `irs`, with a head partition of 512
-    /// frames.
+    /// A matrix over `responses`, with a head partition of 512 frames.
     #[must_use]
-    pub fn new(inputs: ChannelLayout, outputs: ChannelLayout, irs: &'a [Mono<'a, S>]) -> Self {
+    pub fn new(responses: &'a MatrixResponses<S>) -> Self {
         Self {
-            inputs,
-            outputs,
-            irs,
+            responses,
             block_size: DEFAULT_BLOCK_SIZE,
             zero_latency: false,
         }
@@ -90,42 +139,27 @@ impl<'a, S: Sample> MatrixConvolverConfig<'a, S> {
     }
 
     /// The matrix, in the float `F`.
-    ///
-    /// # Errors
-    ///
-    /// [`MatrixConvolverError::NoChannels`] for a width of none, and
-    /// [`MatrixConvolverError::IrCount`] when the responses are not `inputs * outputs` many.
-    pub fn build<F: FftFloat>(self) -> Result<MatrixConvolver<F>, MatrixConvolverError> {
-        let (rows, cols) = (
-            usize::from(self.inputs.count()),
-            usize::from(self.outputs.count()),
-        );
-        if rows == 0 || cols == 0 {
-            return Err(MatrixConvolverError::NoChannels);
-        }
-        let want = rows * cols;
-        if self.irs.len() != want {
-            return Err(MatrixConvolverError::IrCount {
-                inputs: rows,
-                outputs: cols,
-                want,
-                got: self.irs.len(),
-            });
-        }
-        Ok(MatrixConvolver::assemble(
-            self.inputs,
-            self.outputs,
-            self.irs
-                .iter()
+    #[must_use]
+    pub fn build<F: FftFloat>(self) -> MatrixConvolver<F> {
+        let MatrixResponses {
+            inputs,
+            outputs,
+            irs,
+        } = self.responses;
+        MatrixConvolver::assemble(
+            *inputs,
+            *outputs,
+            irs.iter()
                 .map(|ir| {
+                    let ir = Mono::new(ir);
                     if self.zero_latency {
-                        Convolver::zero_latency(*ir, self.block_size)
+                        Convolver::zero_latency(ir, self.block_size)
                     } else {
-                        Convolver::new(*ir, self.block_size)
+                        Convolver::new(ir, self.block_size)
                     }
                 })
                 .collect(),
-        ))
+        )
     }
 }
 
@@ -150,7 +184,7 @@ pub struct MatrixConvolver<F: FftFloat> {
 }
 
 impl<F: FftFloat> MatrixConvolver<F> {
-    /// A 2 by 2 matrix from `[LL, LR, RL, RR]` ([`MatrixConvolverConfig`]'s order), which
+    /// A 2 by 2 matrix from `[LL, LR, RL, RR]` ([`MatrixResponses`]' order), which
     /// cannot be the wrong shape.
     #[must_use]
     pub fn two_by_two<S: Sample>(irs: [Mono<'_, S>; 4], block_size: Samples) -> Self {

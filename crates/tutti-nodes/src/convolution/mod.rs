@@ -14,11 +14,13 @@
 
 mod layout;
 mod node;
+mod responses;
 
 #[cfg(test)]
 mod fir_convolver_tests;
 #[cfg(test)]
 mod test_nodes;
 
-pub use layout::IrLayout;
+pub use layout::{IrLayout, MatrixLayout};
 pub use node::{ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig};
+pub use responses::ImpulseResponses;

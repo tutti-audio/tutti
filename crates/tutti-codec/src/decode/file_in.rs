@@ -33,7 +33,7 @@ use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
 use symphonia::core::units::Timestamp;
 use tutti_buffers::{ChannelLayout, ChannelSet};
-use tutti_buffers::{Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave};
+use tutti_buffers::{Interleaved, InterleavedMut, Pull, Sample, Source, interleave};
 use tutti_units::{SampleRate, Samples};
 
 use super::error::convert;
@@ -288,19 +288,21 @@ impl<S: Sample> FileIn<S> {
             // A packet whose channel count disagrees with `open`'s is refused:
             // the read's stride is the file's width.
             let layout = self.channels.width();
-            let packet_width = self.decoder.planes().len();
+            let packet_width = self.decoder.width();
             if packet_width != usize::from(layout.count()) {
                 return Err(DecodeError::ChannelsChanged {
                     file: usize::from(layout.count()),
                     packet: packet_width,
                 });
             }
-            let planes = self.decoder.planes();
             self.leftover.clear();
             self.leftover_pos = 0;
             self.leftover
                 .resize(layout.interleaved_len(Samples::new(frames)), S::SILENCE);
-            let planes = Planes::from_vecs(planes).expect("every plane holds the packet's frames");
+            let planes = self
+                .decoder
+                .view()
+                .expect("every plane holds the packet's frames");
             let out = InterleavedMut::new(&mut self.leftover, layout)
                 .expect("the buffer holds whole frames");
             interleave(planes, out).expect("both are the file's width and the packet's frames");

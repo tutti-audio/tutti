@@ -24,7 +24,8 @@ pub(crate) const UI_HINT_RECEIVER: i32 = 1;
 pub(crate) const UI_HINT_SENDER: i32 = 2;
 pub(crate) const UI_HINT_BOTH: i32 = 3;
 
-/// One Function Block a virtual device declares: its fields and its name.
+/// One Function Block an endpoint declares, whether a virtual device publishes it or the
+/// service reports it: its fields and its name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block {
     /// The block's fields, its number included.

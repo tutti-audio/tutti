@@ -41,9 +41,11 @@ mod main_output_topology;
 #[path = "../support/offline.rs"]
 mod offline;
 mod output_policy;
+mod patch_kernel_config;
 mod patch_nodes;
 #[cfg(feature = "midi")]
 mod patch_published;
+mod patch_sections;
 mod patch_wires;
 mod replace_seeding;
 mod rewired;

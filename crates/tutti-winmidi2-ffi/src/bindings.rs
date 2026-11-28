@@ -2064,6 +2064,77 @@ pub mod Windows {
                         -> windows_core::HRESULT,
                 }
                 windows_core::imp::define_interface!(
+                    IMidiDeclaredStreamConfiguration,
+                    IMidiDeclaredStreamConfiguration_Vtbl,
+                    0x8087b303_0519_c0de_31d1_dd0040013000
+                );
+                impl windows_core::RuntimeType for IMidiDeclaredStreamConfiguration {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiDeclaredStreamConfiguration_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub IsReadOnly: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub Protocol: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut MidiProtocol,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetProtocol: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        MidiProtocol,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ReceiveJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub SetReceiveJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        ) -> windows_core::HRESULT,
+                    pub SendJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        ) -> windows_core::HRESULT,
+                    pub SetSendJitterReductionTimestamps:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        ) -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IMidiDeclaredStreamConfigurationFactory,
+                    IMidiDeclaredStreamConfigurationFactory_Vtbl,
+                    0x8087b303_0519_c0de_31d1_ff0040013000
+                );
+                impl windows_core::RuntimeType for IMidiDeclaredStreamConfigurationFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IMidiDeclaredStreamConfigurationFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        MidiProtocol,
+                        bool,
+                        bool,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
                     IMidiEndpointDeviceInformation,
                     IMidiEndpointDeviceInformation_Vtbl,
                     0x8087b303_0519_c0de_31d1_dd004000a000
@@ -2109,7 +2180,11 @@ pub mod Windows {
                             *mut *mut core::ffi::c_void,
                         ) -> windows_core::HRESULT,
                     DeclaredDeviceIdentityLastUpdateTime: usize,
-                    GetDeclaredStreamConfiguration: usize,
+                    pub GetDeclaredStreamConfiguration:
+                        unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT,
                     DeclaredStreamConfigurationLastUpdateTime: usize,
                     pub GetDeclaredFunctionBlocks:
                         unsafe extern "system" fn(
@@ -2781,6 +2856,79 @@ pub mod Windows {
                 unsafe impl Sync for MidiDeclaredEndpointInfo {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct MidiDeclaredStreamConfiguration(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    MidiDeclaredStreamConfiguration,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl MidiDeclaredStreamConfiguration {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiDeclaredStreamConfiguration,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn CreateInstance(
+                        protocol: MidiProtocol,
+                        receivejitterreductiontimestamps: bool,
+                        sendjitterreductiontimestamps: bool,
+                    ) -> windows_core::Result<MidiDeclaredStreamConfiguration> {
+                        Self::IMidiDeclaredStreamConfigurationFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                protocol,
+                                receivejitterreductiontimestamps,
+                                sendjitterreductiontimestamps,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IMidiDeclaredStreamConfigurationFactory<
+                        R,
+                        F: FnOnce(&IMidiDeclaredStreamConfigurationFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            MidiDeclaredStreamConfiguration,
+                            IMidiDeclaredStreamConfigurationFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for MidiDeclaredStreamConfiguration {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            IMidiDeclaredStreamConfiguration,
+                        >();
+                }
+                unsafe impl windows_core::Interface for MidiDeclaredStreamConfiguration {
+                    type Vtable =
+                        <IMidiDeclaredStreamConfiguration as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IMidiDeclaredStreamConfiguration as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for MidiDeclaredStreamConfiguration {
+                    const NAME: &'static str =
+                        "Windows.Devices.Midi2.Enumeration.MidiDeclaredStreamConfiguration";
+                }
+                unsafe impl Send for MidiDeclaredStreamConfiguration {}
+                unsafe impl Sync for MidiDeclaredStreamConfiguration {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct MidiEndpointDeviceInformation(windows_core::IUnknown);
                 windows_core::imp::interface_hierarchy!(
                     MidiEndpointDeviceInformation,
@@ -3289,6 +3437,23 @@ pub mod Windows {
                     const SIGNATURE: windows_core::imp::ConstBuffer =
                         windows_core::imp::ConstBuffer::from_slice(
                             b"enum(Windows.Devices.Midi2.Enumeration.MidiFunctionBlockUIHint;i4)",
+                        );
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct MidiProtocol(pub i32);
+                impl MidiProtocol {
+                    pub const Default: Self = Self(0i32);
+                    pub const Midi1: Self = Self(1i32);
+                    pub const Midi2: Self = Self(2i32);
+                }
+                impl windows_core::TypeKind for MidiProtocol {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for MidiProtocol {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Windows.Devices.Midi2.Enumeration.MidiProtocol;i4)",
                         );
                 }
             }

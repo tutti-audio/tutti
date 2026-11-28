@@ -132,6 +132,6 @@ fn the_gains_are_non_negative_and_unit_power_and_never_feed_the_lfe() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed.into()))
-        .expect("a bed with speakers to pan between")
+    let bed = tutti_dsp::BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+    tutti_nodes::VbapPannerNode::from(tutti_nodes::VbapPannerConfig::new(bed))
 }

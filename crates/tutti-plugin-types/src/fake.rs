@@ -1160,7 +1160,8 @@ impl Processor for FakeProcessor {
         .fetch_add(1, Ordering::Relaxed);
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
-        self.drain.publish_applied();
+        let drained = self.drain.swept();
+        self.drain.publish_applied(drained);
         if self.shared.process_fails.load(Ordering::Relaxed) {
             return Err(PluginError::Block("the fake fails its blocks"));
         }
@@ -1213,13 +1214,17 @@ impl Processor for FakeProcessor {
         Ok(())
     }
 
-    fn flush_parameters(&mut self, changes: &crate::ParameterChanges) -> PluginResult<()> {
+    fn flush_parameters(
+        &mut self,
+        changes: &crate::ParameterChanges,
+    ) -> PluginResult<crate::Flushed> {
         let log = &self.shared.log;
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
-        self.drain.publish_applied();
+        let drained = self.drain.swept();
+        self.drain.publish_applied(drained);
         log.push(Call::FlushParameters(changes.queues.len()));
-        Ok(())
+        Ok(crate::Flushed::Applied)
     }
 
     fn stop(&mut self) {

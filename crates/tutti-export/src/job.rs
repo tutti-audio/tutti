@@ -20,7 +20,7 @@ pub enum EventLossPolicy {
     #[default]
     Fail,
     /// The render succeeds and says how many events were dropped
-    /// ([`Rendered::dropped_events`](crate::Rendered::dropped_events),
+    /// ([`Done::dropped_events`](crate::Done::dropped_events),
     /// [`Written::dropped_events`](crate::Written::dropped_events)): for a caller that
     /// checks the figure itself.
     Allow,

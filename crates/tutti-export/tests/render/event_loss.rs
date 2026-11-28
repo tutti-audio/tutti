@@ -9,10 +9,11 @@
 use crate::support;
 use crate::support::{ExportConfig, RenderConfig};
 
-use support::{render_buffers_under, render_file_under, render_to_buffers, render_to_file};
+use support::{render_buffers_under, render_file_under, render_to_file};
 use tutti_buffers::ChannelLayout;
 use tutti_export::{
-    CancelToken, Control, EventLossPolicy, Progress, RenderError, RenderGraph, Setup,
+    CancelToken, Control, EventLossPolicy, Output, Outputs, Progress, RenderError, RenderGraph,
+    Setup, render,
 };
 use tutti_graph::{Cx, Event, GraphBuilder, Io, Node, OutEvents, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
@@ -115,17 +116,31 @@ fn a_render_that_dropped_events_stops_at_the_first_block_that_did() {
     );
 }
 
+/// The events one allowed render of `g` into memory lost, as its `Done` reports them.
+fn dropped_into_buffers(g: &mut RenderGraph) -> u64 {
+    let config = config(EventLossPolicy::Allow);
+    let mut outputs = Outputs::new();
+    outputs.buffers(Output::main_output(config.buffer_target()));
+    let done = render(
+        g,
+        &config.buffers_job().expect("a job"),
+        &FrozenClock,
+        outputs,
+        &mut Control::none(),
+    )
+    .expect("allowed")
+    .into_finished()
+    .expect("nothing cancels it");
+    done.dropped_events()
+}
+
 /// Allowed, it succeeds and carries the figure; a graph rendered a second
 /// time reports that render's drops, not the total.
 #[test]
 fn an_allowed_loss_is_reported() {
     let mut g = graph();
-    let first =
-        render_to_buffers(&mut g, &config(EventLossPolicy::Allow), &FrozenClock).expect("allowed");
-    assert_eq!(first.dropped_events(), 12);
-    let second =
-        render_to_buffers(&mut g, &config(EventLossPolicy::Allow), &FrozenClock).expect("allowed");
-    assert_eq!(second.dropped_events(), 12);
+    assert_eq!(dropped_into_buffers(&mut g), 12);
+    assert_eq!(dropped_into_buffers(&mut g), 12);
 }
 
 /// A render that lost events puts nothing in place: the file already at the

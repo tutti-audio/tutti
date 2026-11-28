@@ -93,7 +93,7 @@ impl Session {
             self.clock,
             &endpoint,
             Some(&plugin),
-            on_message,
+            Some(on_message),
         )?;
         Ok(VirtualDevice {
             connection,

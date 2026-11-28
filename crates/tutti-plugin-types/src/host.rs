@@ -46,6 +46,21 @@ use tutti_plugin_ipc_ffi::{FdId, Ready};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
+/// What became of the writes a [`Processor::flush_parameters`] was given.
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Flushed {
+    /// The plugin has them.
+    Applied,
+    /// The Processor keeps writes for the next block's `process` (a CLAP
+    /// parameter flagged `REQUIRES_PROCESS`, which the format takes there, in
+    /// event order, while the plugin is active): the plugin does not have them
+    /// yet, so the caller publishes no applied mark for what it handed. Also
+    /// the answer to a flush that hands nothing while the Processor still
+    /// keeps some.
+    Held,
+}
+
 /// Writes the plugin's bypass parameter, if it lists one: the default of
 /// [`Control::set_bypassed`] and what a wrapped plugin's write goes through, so
 /// an active plugin's reaches its Processor.
@@ -575,9 +590,10 @@ pub trait Processor: Send {
     /// `changes`, as at the head of a block, so a later write is the last word.
     ///
     /// Per format: CLAP `params.flush` (an audio-thread entry, never beside
-    /// `process`); VST3 `process` with `numSamples = 0`, which the SDK
-    /// allows for flushing parameters; VST2 and AU a direct set of each
-    /// parameter's last value.
+    /// `process`), except that a `REQUIRES_PROCESS` parameter's value waits for
+    /// the next block ([`Flushed::Held`]); VST3
+    /// `process` with `numSamples = 0`, which the SDK allows for flushing
+    /// parameters; VST2 and AU a direct set of each parameter's last value.
     ///
     /// The default refuses: a Processor takes parameters in a block only.
     ///
@@ -585,7 +601,7 @@ pub trait Processor: Send {
     ///
     /// [`PluginError::Block`] when the Processor has no such route, or the
     /// plugin refused the call.
-    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<Flushed> {
         let _ = changes;
         Err(PluginError::Block(
             "this Processor takes parameters in a block only",

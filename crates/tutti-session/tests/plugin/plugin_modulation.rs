@@ -14,6 +14,7 @@ use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_fixtures::WavePlanes;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
 use tutti_session::{PluginChange, PluginEvent, Replacement};
@@ -709,7 +710,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     let export = bounced(&mut s, request)
         .expect("the export renders")
         .into_main_output();
-    for (c, (l, e)) in live.iter().zip(export.planes()).enumerate() {
+    for (c, (l, e)) in live.iter().zip(export.to_planes()).enumerate() {
         assert!(e.len() >= total, "channel {c}: {} frames", e.len());
         let moving = l.iter().filter(|&&v| v != 0.0).collect::<Vec<_>>();
         assert!(

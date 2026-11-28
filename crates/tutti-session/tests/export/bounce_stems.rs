@@ -13,6 +13,7 @@ use crate::bounced::bounced;
 use std::collections::HashMap;
 use std::path::Path;
 use tutti_codec::Encoding;
+use tutti_fixtures::WavePlanes;
 use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
@@ -60,9 +61,9 @@ fn bounce(seconds: f64) -> Bounce<NodeKey, ToMemory> {
 /// The planes of every target a finished bounce produced, main output first.
 fn planes(out: Result<Bounced<ToMemory>, BounceError>) -> Vec<Vec<Vec<f32>>> {
     let (main_output, mut done, keys) = out.expect("the bounce renders").into_parts();
-    std::iter::once(main_output.into_planes())
+    std::iter::once(main_output.to_planes())
         .chain(keys.iter().map(|key| match key {
-            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").into_planes(),
+            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").to_planes(),
             other => panic!("expected planes, got {other:?}"),
         }))
         .collect()
@@ -376,6 +377,36 @@ fn every_target_has_the_same_length_and_a_stem_its_own_format() {
     // The resampler's edges ring; its middle is the node's constant.
     let middle = &planes[0][frames / 4..3 * frames / 4];
     assert!(middle.iter().all(|&s| (s - 0.5).abs() < 1e-3));
+}
+
+/// **A quick stem follows the main output's resample and `replace`**: with a
+/// main output resampled to 44.1 kHz that replaces its path, `stem(node, path)`
+/// is written at 44.1 kHz and the same bounce runs twice over the same paths.
+#[test]
+fn a_quick_stem_follows_the_main_outputs_resample_and_replace() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = session();
+    let node = session.graph().add(ForkByClone(Const::mono(0.5)));
+    session.graph().connect(node, MainOutput).unwrap();
+    let main_output = dir.path().join("main_output.wav");
+    let stem = dir.path().join("stem.wav");
+    for _ in 0..2 {
+        bounced(
+            &mut session,
+            base(0.25)
+                .main_output(
+                    tutti_codec::ToFile::new(
+                        &main_output,
+                        Encoding::new(float_wav()).resample(Resample::to(SampleRate::SR_44K1)),
+                    )
+                    .replace(),
+                )
+                .stem(node.erase(), &stem),
+        )
+        .expect("a replacing bounce runs again over its own files");
+    }
+    let spec = hound::WavReader::open(&stem).unwrap().spec();
+    assert_eq!(spec.sample_rate, 44_100, "the main output's resample");
 }
 
 /// **Shared gain keeps the balance; each measures its own.** Two constants

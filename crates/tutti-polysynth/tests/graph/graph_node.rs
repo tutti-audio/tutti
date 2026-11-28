@@ -22,7 +22,7 @@ const RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
 
 fn saw() -> PolySynth<f32> {
-    PolySynth::<f32>::new(
+    PolySynth::<f32>::from(
         SynthConfig::new()
             .oscillator(OscillatorType::Saw)
             .envelope(Adsr {

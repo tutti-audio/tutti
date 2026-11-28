@@ -84,12 +84,15 @@ impl DiodeClipperConfig {
 /// `F` is the float of the graph it runs in, and of the solve.
 pub type DiodeClipperNode<F> = KernelNode<DiodeClipperKernel<F>>;
 
+kernel_config!(DiodeClipperConfig => DiodeClipperNode<F> where [F: Float + Lerp],
+    set(_): DiodeClipperSet = DiodeClipperSet);
+
 impl<F: Float + Lerp> From<DiodeClipperConfig> for DiodeClipperNode<F> {
     fn from(config: DiodeClipperConfig) -> Self {
         let input = unassigned_bus(config.width, "a diode clipper");
         Self::with_kernel(
             DiodeClipperKernel::<F>::new(&config, input),
-            DiodeClipperSet,
+            config.kernel_set(),
             config.controls,
         )
     }

@@ -13,7 +13,8 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
-use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono};
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Mono, Wave};
+use tutti_fixtures::WavePlanes;
 
 use crate::support::{render_to_buffers, render_to_file};
 use tutti_buffers::FloatWidth;
@@ -176,7 +177,7 @@ fn the_clock_advances_by_exactly_the_frames_rendered() {
     )
     .unwrap();
 
-    let frames = out.frames().get();
+    let frames = out.len().get();
     assert_eq!(frames, 8820, "0.2 s at 44.1 kHz");
     assert_eq!(
         clock.0.load(Ordering::Relaxed),
@@ -199,8 +200,8 @@ fn a_latency_trim_preserves_the_output_length() {
     let trimmed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     assert_eq!(
-        untrimmed.frames(),
-        trimmed.frames(),
+        untrimmed.len(),
+        trimmed.len(),
         "trimming must not shorten the output"
     );
 }
@@ -225,8 +226,8 @@ fn a_tail_lengthens_the_output_by_exactly_the_tail() {
     let tailed = render_to_buffers(dc(RATE), &s, &FrozenClock).unwrap();
 
     assert_eq!(
-        tailed.frames().get(),
-        untailed.frames().get() + tail.get(),
+        tailed.len().get(),
+        untailed.len().get() + tail.get(),
         "the rendered tail must reach the output, not be capped away"
     );
 }
@@ -451,7 +452,18 @@ fn buffers_report_their_own_shape() {
     .unwrap();
     assert_eq!(out.channels(), 4, "a quad request yields four planes");
     assert_eq!(out.sample_rate().get(), 44100.0);
-    assert!(out.planes().iter().all(|p| p.len() == out.frames().get()));
+    assert!((0..out.channels()).all(|c| out.channel(c).frames() == out.len()));
+}
+
+/// `wave`'s frames, interleaved.
+fn interleaved(wave: &Wave) -> Vec<f32> {
+    let mut flat = vec![0.0; wave.layout().interleaved_len(wave.len())];
+    tutti_buffers::interleave(
+        wave.planes(),
+        tutti_buffers::InterleavedMut::new(&mut flat, wave.layout()).unwrap(),
+    )
+    .unwrap();
+    flat
 }
 
 /// Normalization composes: measure with tutti-measure, apply the gain it
@@ -473,7 +485,7 @@ fn a_caller_can_compose_normalization() {
 
     let cfg = LoudnessConfig::new(Bed::Stereo.topology());
     let rate = out.sample_rate();
-    let flat = out.interleaved();
+    let flat = interleaved(&out);
     let before = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),
@@ -482,7 +494,7 @@ fn a_caller_can_compose_normalization() {
     .unwrap();
     let gain = before.gain_to(Db::new(-14.0), Db::new(-1.0));
     out.apply_gain(gain);
-    let flat = out.interleaved();
+    let flat = interleaved(&out);
     let after = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),
@@ -571,7 +583,7 @@ fn normalized_audio_can_be_written_to_every_format() {
     ] {
         s.encode.format = format;
         let p = d.path().join(format!("n.{ext}"));
-        support::write_rendered(&audio, &s, &p).expect("write");
+        support::write_wave(&audio, &s, &p).expect("write");
         let bytes = std::fs::metadata(&p).unwrap().len();
         assert!(bytes > 100, "{ext} wrote {bytes} bytes");
     }
@@ -1134,7 +1146,7 @@ fn an_unnamed_main_output_width_exports_at_that_width() {
 /// `tutti_codec::write`: a buffer render of an odd width writes and reads back.
 #[test]
 fn an_odd_width_round_trips_through_buffers() {
-    use support::write_rendered;
+    use support::write_wave;
 
     let d = tempfile::tempdir().unwrap();
     for width in [3u16, 5] {
@@ -1152,7 +1164,7 @@ fn an_odd_width_round_trips_through_buffers() {
         assert_eq!(rendered.layout(), layout);
 
         let p = d.path().join(format!("buf{width}.wav"));
-        write_rendered(&rendered, &cfg, &p)
+        write_wave(&rendered, &cfg, &p)
             .unwrap_or_else(|e| panic!("width {width}: write failed: {e}"));
         assert_eq!(hound::WavReader::open(&p).unwrap().spec().channels, width);
     }
@@ -1289,7 +1301,7 @@ fn first_frame(graph: &mut RenderGraph, width: u16) -> Result<Vec<f32>, tutti_ex
         ChannelLayout::from(width),
     );
     let out = render_to_buffers(graph, &cfg, &FrozenClock)?;
-    Ok(out.planes().iter().map(|p| p[0]).collect())
+    Ok((0..out.channels()).map(|c| out.at(c, 0)).collect())
 }
 
 /// A placement given to the setup is what the file is placed from: four `Unassigned` buses into
@@ -1373,8 +1385,8 @@ fn silence_planes_carry_no_dither() {
         ChannelLayout::STEREO,
     );
     let out = render_to_buffers(built(g, RATE), &cfg, &FrozenClock).unwrap();
-    assert!(out.frames().get() > 0);
-    assert!(out.planes().iter().flatten().all(|s| s.to_bits() == 0));
+    assert!(out.len().get() > 0);
+    assert!(out.to_planes().iter().flatten().all(|s| s.to_bits() == 0));
 }
 
 /// Rings `ceiling` frames at most, and reports `report` each block (nothing
@@ -1490,7 +1502,7 @@ fn tailed_frames(graph: RenderGraph, tail: TailPolicy) -> usize {
     cfg.render.tail = tail;
     render_to_buffers(graph, &cfg, &FrozenClock)
         .unwrap()
-        .frames()
+        .len()
         .get()
 }
 
@@ -1646,7 +1658,7 @@ fn a_ring_out_reaches_the_output_through_the_latency_after_it() {
     cfg.render.latency = graph.reported_latency();
     cfg.render.tail = reported(9_000);
     let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
-    let plane = &out.planes()[0];
+    let plane = out.channel(0).samples();
     assert_eq!(plane.len(), PROGRAMME + RING);
     assert_eq!(plane[PROGRAMME + RING - 1], 0.25, "the last ring frame");
     assert_eq!(plane[PROGRAMME - 1], 0.5, "the last frame of the programme");
@@ -1823,9 +1835,12 @@ fn the_passes_of_a_normalized_export_agree_on_the_reported_length() {
 
 /// A one-channel convolver over `ir`, with the default head partition.
 fn convolver(ir: &[f32]) -> tutti_nodes::ConvolverNode<f32> {
-    tutti_nodes::ConvolverNode::try_from(tutti_nodes::ConvolverConfig::new(
-        tutti_buffers::ChannelTopology::MONO,
-        &[Mono::new(ir)],
-    ))
-    .expect("one response on a mono bus")
+    tutti_nodes::ConvolverNode::from(
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::MONO,
+            tutti_nodes::IrLayout::PerChannel,
+            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[Mono::new(ir)])),
+        )
+        .expect("one response on a mono bus"),
+    )
 }

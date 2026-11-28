@@ -9,13 +9,20 @@
 //!   interface path, which survives a replug. An [`EndpointId`] is a 64-bit FNV-1a digest
 //!   of that path, never a list position, and a listing is read afresh to resolve one:
 //!   opening an endpoint that has left fails with
-//!   [`NotFound::Endpoint`](crate::NotFound::Endpoint). Each endpoint is described as MIDI 1.0,
-//!   the conservative reading of an endpoint whose properties are not read.
+//!   [`NotFound::Endpoint`](crate::NotFound::Endpoint). Each endpoint is described by what the
+//!   service declares of it: its Endpoint Info, its Function Blocks and the protocol the
+//!   service and the endpoint agreed on (`described`). The protocol in use is the agreed one,
+//!   MIDI 1.0 while none is agreed, whatever the endpoint supports; an endpoint whose
+//!   properties the service could not read is described as MIDI 1.0 with no blocks.
 //! - **Input** is a message-received callback on the service's own thread, behind a
 //!   [`Guard`](crate::guard::Guard). A message the service delivered that cannot be read is
 //!   counted in the port's losses.
-//! - **Output** sends each packet through the connection, each at its time: the service
-//!   holds a message with a time ahead of its clock until then.
+//! - **Output** sends each packet through a connection that registers no handler, each at
+//!   its time: the service holds a message with a time ahead of its clock until then. It
+//!   refuses a time more than 20 s ahead, which the session's output plan never sends (it
+//!   schedules at most [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead), so
+//!   a refusal is a clock fault: the packet is refused and counted in the port's losses,
+//!   never offered again.
 //! - **The device watch** is the service's endpoint watcher: an endpoint added, removed or
 //!   updated reaches the list from the notification, with no re-list. A watcher that
 //!   stops, or a change it cannot read, ends the watch with the cause.
@@ -36,7 +43,7 @@ mod watch;
 use std::sync::Arc;
 
 use crate::InputProducerHandle;
-use crate::capability::{OsEndpoint, legacy};
+use crate::capability::{Described, OsEndpoint, from_os};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -44,7 +51,8 @@ use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::start::Started;
 use tutti_midi_device::{EndpointId, OsDevice, OsEndpointIdentity};
 use tutti_rt::Mutex;
-use tutti_winmidi2_ffi::{Endpoint, Error, Session, endpoints, ensure_service_available};
+use tutti_ump::Protocol;
+use tutti_winmidi2_ffi::{Declared, Endpoint, Error, Session, endpoints, ensure_service_available};
 
 /// The name of the engine's session with the service.
 const SESSION: &str = "tutti";
@@ -79,14 +87,34 @@ fn endpoint_id(id: &str) -> EndpointId {
     ))
 }
 
+/// What the service declares of an endpoint, as the endpoint it describes: the protocols it
+/// supports, the protocol the service and the endpoint agreed on, and the Function Blocks it
+/// declares. The protocol in use is the agreed one, and MIDI 1.0 while none is agreed: what an
+/// endpoint supports does not choose it. An endpoint the service could not describe (`None`) is
+/// a legacy MIDI 1.0 endpoint.
+fn described(declared: Option<&Declared>) -> Described {
+    let Some(declared) = declared else {
+        return from_os(Protocol::Midi1, None, std::iter::empty());
+    };
+    from_os(
+        declared.protocol.unwrap_or(Protocol::Midi1),
+        Some(&declared.info),
+        declared
+            .blocks
+            .iter()
+            .map(|block| (block.info, block.name.as_deref())),
+    )
+}
+
 /// An endpoint the service lists, as the endpoint it describes.
 fn os_endpoint(endpoint: &Endpoint) -> OsEndpoint {
+    let described = described(endpoint.declared.as_ref());
     OsEndpoint {
         id: endpoint_id(&endpoint.id),
         identity: OsEndpointIdentity::MidiServices(endpoint.id.clone()),
         name: endpoint.name.clone(),
-        capability: legacy(),
-        blocks_left_out: 0,
+        capability: described.endpoint,
+        blocks_left_out: described.blocks_left_out,
     }
 }
 
