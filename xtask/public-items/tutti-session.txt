@@ -124,7 +124,7 @@ enum value::slot::DepthKey
 enum value::slot::ShapeKey
 enum value::slot::SlotId
 enum value::target::TargetId
-enum value::target::sealed::Held
+enum value::target::sealed::GestureStep
 enum value::watcher::ChangedBy
 enum watch::FollowEvent
 fn analyze::Session::analyze
