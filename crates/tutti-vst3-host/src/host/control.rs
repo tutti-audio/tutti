@@ -8,8 +8,8 @@ use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
     KeyEvent, KeyUse, ModifierConvention, OwnBypass, ParamAccess, ParamEdit, ParamMapping,
     ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginPreset,
-    PluginResult, PluginTail, PluginWiring, PresetId, RenderModeSupport, Request, RescanScope,
-    Samples, StateUse, Vst3SubCategories, Widths, WindowHandle, bypass_parameter,
+    PluginResult, PluginTail, PluginWiring, PresetError, PresetId, RenderModeSupport, Request,
+    RescanScope, Samples, StateUse, Vst3SubCategories, Widths, WindowHandle, bypass_parameter,
 };
 use tutti_plugin_types::{Delivered, MainThreadMarker, PluginLearnError, TrackInfo};
 use tutti_units::Normalized;
@@ -177,26 +177,30 @@ impl Vst3Loaded {
         main: MainThreadMarker,
         param: ParamId,
         value: Normalized,
-    ) -> bool {
+    ) -> Result<(), PresetError> {
         // A program replaces the plugin's other parameters too.
         self.carried.clear();
         if self.set_parameter(main, param, value).is_err() {
-            return false;
+            return Err(PresetError::Refused);
         }
         if self.active.is_active() {
             // The Controller of this activation queues it to the Processor.
             self.carried.push((param, value));
         }
-        true
+        Ok(())
     }
 
     /// The parameter write that selects the program `id` names: VST3 has no
     /// load-preset call, so this *is* the load, routed through the parameter
     /// flagged `kIsProgramChange` that owns the list.
     ///
-    /// `None` when `id` names no VST3 program, when no parameter claims that
-    /// list, or when the list has fewer than two entries (nothing to select
-    /// between, and the normalization would divide by zero).
+    /// # Errors
+    ///
+    /// [`PresetError::Unsupported`] when `id` is no `Program`, or the list is
+    /// there but the host has no route to select in it (no parameter selects in
+    /// it, or it has fewer than two entries: nothing to select between, and the
+    /// normalization would divide by zero); [`PresetError::Unlisted`] when no
+    /// list has that id or `index` is past the list's last program.
     ///
     /// `IUnitInfo::setUnitProgramData` is *not* this call: it takes an
     /// `IBStream` of preset bytes and writes them into a slot, the inverse
@@ -205,20 +209,33 @@ impl Vst3Loaded {
         &self,
         main: MainThreadMarker,
         id: &PresetId,
-    ) -> Option<(ParamId, Normalized)> {
+    ) -> Result<(ParamId, Normalized), PresetError> {
         let PresetId::Program { list_id, index } = id else {
-            return None;
+            return Err(PresetError::Unsupported);
         };
-        let (param_id, step_count) = self.program_change_parameter(main, *list_id)?;
+        let Some((param_id, step_count)) = self.program_change_parameter(main, *list_id) else {
+            let listed = self
+                .program_lists(main)
+                .iter()
+                .any(|list| list.id == *list_id);
+            return Err(if listed {
+                PresetError::Unsupported
+            } else {
+                PresetError::Unlisted
+            });
+        };
         // `StringListParameter::toNormalized` is `value / stepCount`
         // (`futils.h:87-90`), and `appendString` increments `stepCount` per
         // entry from zero, so a list of N programs has `stepCount == N - 1` and
         // index `i` normalizes to `i / (N - 1)`, not `i / N`. The off-by-one is
         // silent and lands on a neighbouring program.
-        if step_count <= 0 || *index > step_count as u32 {
-            return None;
+        if i64::from(*index) > i64::from(step_count.max(0)) {
+            return Err(PresetError::Unlisted);
         }
-        Some((
+        if step_count <= 0 {
+            return Err(PresetError::Unsupported);
+        }
+        Ok((
             param_id,
             Normalized::clamped(f64::from(*index) / f64::from(step_count)),
         ))
@@ -503,14 +520,12 @@ impl Control for Vst3Loaded {
             .collect()
     }
 
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-        match self.program_write(main, id) {
-            // A refused write leaves what is carried as it was.
-            Some((param, value)) if self.parameter_writable(main, param).is_ok() => {
-                self.select_program(main, param, value)
-            }
-            _ => false,
-        }
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
+        let (param, value) = self.program_write(main, id)?;
+        // A program parameter the host may not write is no route; the plugin is not asked.
+        self.parameter_writable(main, param)
+            .map_err(|_| PresetError::Unsupported)?;
+        self.select_program(main, param, value)
     }
 
     /// The program the plugin currently has selected, read back off the same

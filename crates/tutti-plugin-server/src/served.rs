@@ -26,9 +26,9 @@ use tutti_plugin_types::{
     LoadStage, MainThreadMarker, MainWorkHandle, MaxBlock, MidiAssignment, MidiMapApplied, Notice,
     OutOfProcess, ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo,
     PluginLearnError, PluginPreset, PluginRef, PluginResult, PluginState, PluginWiring, Prepare,
-    PresetId, ProcessWake, RateRefusal, RateRefusalCause, Recovery, RenderMode, RenderModeSupport,
-    Request, SampleRate, Samples, Seat, ServerLosses, Stage, State, StateError, StateUse,
-    TrackInfo, Widths,
+    PresetError, PresetId, ProcessWake, RateRefusal, RateRefusalCause, Recovery, RenderMode,
+    RenderModeSupport, Request, SampleRate, Samples, Seat, ServerLosses, Stage, State, StateError,
+    StateUse, TrackInfo, Widths,
 };
 use tutti_rt::TallyWriter;
 use tutti_units::Normalized;
@@ -176,8 +176,8 @@ pub(crate) trait ServerPlugin {
     ) -> Option<Normalized>;
     /// The plugin's presets.
     fn presets(&mut self, main: MainThreadMarker) -> Vec<PluginPreset>;
-    /// Loads a preset; whether the plugin took it.
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool;
+    /// Loads a preset: what the plugin's control answered, `Lost` when it has none.
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError>;
     /// The preset the plugin is on.
     fn current_preset(&mut self, main: MainThreadMarker) -> Option<PresetId>;
     /// The plugin's state, and beside it the writes its control holds that no
@@ -941,10 +941,11 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
             .unwrap_or_default()
     }
 
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         self.lifecycle
             .control()
-            .is_some_and(|control| control.load_preset(main, id))
+            .ok_or(PresetError::Lost)?
+            .load_preset(main, id)
     }
 
     fn current_preset(&mut self, main: MainThreadMarker) -> Option<PresetId> {

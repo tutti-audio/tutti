@@ -406,8 +406,9 @@ pub fn presets_listed_in_order<F: Format>() {
         F::NAME
     );
     for preset in listed.iter().rev() {
-        assert!(
+        assert_eq!(
             loaded.load_preset(main, &preset.id),
+            Ok(()),
             "{}: the plugin takes the listed preset {}",
             F::NAME,
             preset.name
@@ -420,6 +421,35 @@ pub fn presets_listed_in_order<F: Format>() {
             preset.name
         );
     }
+}
+
+/// A load of an id the plugin does not list answers the variant the spec gives
+/// the format ([`spec::Surface::unlisted_preset`]) and never `Refused`, and the
+/// plugin's current preset stays where it was.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+///
+/// Spec: vst3.IUnitInfo.getProgramListInfo, vst2.eff.SetProgram, au.prop.FactoryPresets, clap.ext.preset_load.from_location
+pub fn an_unlisted_preset_is_answered_as_the_format_defines<F: Format>() {
+    let main = main_thread();
+    let mut loaded = F::load();
+    let before = loaded.current_preset(main);
+    for id in spec::unlisted_ids(F::SURFACE.preset_ids) {
+        assert_eq!(
+            loaded.load_preset(main, &id),
+            Err(F::SURFACE.unlisted_preset),
+            "{}: the answer to the unlisted {id:?}",
+            F::NAME
+        );
+    }
+    assert_eq!(
+        loaded.current_preset(main),
+        before,
+        "{}: an unlisted preset moves nothing",
+        F::NAME
+    );
 }
 
 /// A plugin with a bypass of its own says so in its wiring, and the host's

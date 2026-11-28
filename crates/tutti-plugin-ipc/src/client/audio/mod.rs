@@ -1078,12 +1078,12 @@ impl AudioBridge {
         list.ok().map(|list| list.presets)
     }
 
-    /// Ask the plugin to load a preset. `false` when it refused, the format has
-    /// no load path, or the subprocess is gone — all three mean the preset did
-    /// not load, and a caller must leave its selection where it was.
-    pub(crate) fn load_preset(&self, id: PresetId) -> bool {
+    /// Ask the plugin to load a preset: what its control answered, or why the
+    /// bridge has no answer ([`PresetError::Lost`], `Busy`, `Stalled`). On an
+    /// error a caller must leave its selection where it was.
+    pub(crate) fn load_preset(&self, id: PresetId) -> std::result::Result<(), PresetError> {
         self.reset_host_edits();
-        preset_loaded(self.call(LoadPreset { id }, Deadline::Query, Object::None)).is_ok()
+        preset_loaded(self.call(LoadPreset { id }, Deadline::Query, Object::None))
     }
 
     // --- Requests answered into a future ---
@@ -1694,18 +1694,22 @@ fn editor_lost(lost: Lost, crashed: bool) -> EditorError {
     }
 }
 
-/// A [`LoadPreset`]'s answer: the preset loaded, or why it did not. No answer
-/// within the window is not a refusal: the plugin was asked and may have loaded
-/// it.
+/// A [`LoadPreset`]'s answer: what the plugin's control answered, as it
+/// answered it, or why the bridge has none. No answer within the window is not a
+/// refusal: the plugin was asked and may have loaded it. A server error is the
+/// server's failure and another kind of reply is a broken peer; neither is the
+/// plugin declining.
 fn preset_loaded(
     answer: std::result::Result<PresetLoaded, Lost>,
 ) -> std::result::Result<(), PresetError> {
     match answer {
-        Ok(PresetLoaded { ok: true }) => Ok(()),
+        Ok(PresetLoaded { result }) => result,
         Err(Lost::Busy) => Err(PresetError::Busy),
         Err(Lost::Crashed) => Err(PresetError::Lost),
         Err(Lost::NoAnswer { after }) => Err(PresetError::Stalled { after }),
-        Ok(_) | Err(_) => Err(PresetError::Refused),
+        Err(Lost::Server(error)) => Err(PresetError::Server(error)),
+        // A `LoadPreset` carries no object, so `Object` is a reply of the wrong kind.
+        Err(Lost::Wrong | Lost::Object(_)) => Err(PresetError::UnexpectedReply),
     }
 }
 
@@ -1734,5 +1738,50 @@ mod delivery_tests {
             delivery(true, || panic!("a dead plugin's queue is not tried")),
             Delivered::PluginDead
         );
+    }
+}
+
+#[cfg(test)]
+mod preset_loaded_tests {
+    use super::*;
+    use std::time::Duration;
+    use tutti_plugin_types::ServerError;
+
+    /// **Only the plugin's own answer can read as `Refused`.** Each way the
+    /// bridge has no answer maps to its own cause: a full queue is `Busy`, a dead
+    /// bridge `Lost`, a missed window `Stalled`, a server error `Server` with the
+    /// server's text, and a reply of the wrong kind (or an object a `LoadPreset`
+    /// never carries) `UnexpectedReply`.
+    #[test]
+    fn a_preset_answer_is_refused_only_when_the_plugin_declined() {
+        let after = Duration::from_millis(250);
+        let server = ServerError::StateWithoutObject;
+        let cases = [
+            (
+                Ok(PresetLoaded {
+                    result: Err(PresetError::Refused),
+                }),
+                Err(PresetError::Refused),
+            ),
+            (Ok(PresetLoaded { result: Ok(()) }), Ok(())),
+            (Err(Lost::Busy), Err(PresetError::Busy)),
+            (Err(Lost::Crashed), Err(PresetError::Lost)),
+            (
+                Err(Lost::NoAnswer { after }),
+                Err(PresetError::Stalled { after }),
+            ),
+            (
+                Err(Lost::Server(server.clone())),
+                Err(PresetError::Server(server)),
+            ),
+            (Err(Lost::Wrong), Err(PresetError::UnexpectedReply)),
+            (
+                Err(Lost::Object(StateError::UnexpectedReply)),
+                Err(PresetError::UnexpectedReply),
+            ),
+        ];
+        for (answer, expected) in cases {
+            assert_eq!(preset_loaded(answer), expected);
+        }
     }
 }

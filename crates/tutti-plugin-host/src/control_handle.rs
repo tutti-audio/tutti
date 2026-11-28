@@ -732,9 +732,10 @@ impl PluginHandle {
     ///
     /// # Errors
     ///
+    /// What the plugin's [`Control::load_preset`] answered, or
     /// [`PresetError::Unsupported`] when this handle carries no route to
-    /// presets, [`PresetError::Refused`] when the plugin declined (leave the
-    /// UI selection where it was), [`PresetError::Lost`] when it is gone.
+    /// presets and [`PresetError::Lost`] when the plugin is gone. On any error
+    /// leave the UI selection where it was.
     pub fn load_preset(
         &self,
         main: MainThreadMarker,
@@ -744,11 +745,8 @@ impl PluginHandle {
         let Some(control) = self.control.as_deref() else {
             return Poll::Ready(Err(PresetError::Unsupported));
         };
-        lent_restoring(control, |c| c.load_preset(main, id)).map(|loaded| match loaded {
-            Some(true) => Ok(()),
-            Some(false) => Err(PresetError::Refused),
-            None => Err(PresetError::Lost),
-        })
+        lent_restoring(control, |c| c.load_preset(main, id))
+            .map(|loaded| loaded.unwrap_or(Err(PresetError::Lost)))
     }
 
     /// The preset the plugin considers current, when it will say. `None` means
@@ -1123,7 +1121,7 @@ mod tests {
     #[derive(Clone)]
     struct FakePresets {
         listed: Vec<PluginPreset>,
-        accepts: bool,
+        load: Result<(), PresetError>,
         /// What `set_track_info` answers.
         track: Delivered,
     }
@@ -1246,8 +1244,12 @@ mod tests {
         fn presets(&mut self, _main: MainThreadMarker) -> Vec<PluginPreset> {
             self.listed.clone()
         }
-        fn load_preset(&mut self, _main: MainThreadMarker, _id: &PresetId) -> bool {
-            self.accepts
+        fn load_preset(
+            &mut self,
+            _main: MainThreadMarker,
+            _id: &PresetId,
+        ) -> Result<(), PresetError> {
+            self.load.clone()
         }
         fn dropped_reported_edits(&self) -> u64 {
             0
@@ -1397,7 +1399,7 @@ mod tests {
         let wired = handle_with_loaded(
             Some(FakePresets {
                 listed: Vec::new(),
-                accepts: true,
+                load: Ok(()),
                 track: Delivered::Yes,
             }),
             loaded,
@@ -1422,7 +1424,7 @@ mod tests {
 
         let empty = handle_with(Some(FakePresets {
             listed: Vec::new(),
-            accepts: false,
+            load: Err(PresetError::Refused),
             track: Delivered::Yes,
         }));
         assert_eq!(
@@ -1432,41 +1434,39 @@ mod tests {
         );
     }
 
-    /// A load has three typed outcomes: no route, a refusal, and loaded.
+    /// A load answers what the plugin's control answered, and no route stays
+    /// distinct from every answer of the plugin.
     ///
     /// A UI reporting "this plugin cannot load presets" must tell the absent
-    /// route from the plugin saying no, and both from success.
+    /// route from the plugin's own `Unsupported`, `Unlisted` and `Refused`, and
+    /// all from success.
     #[test]
-    fn a_load_is_unsupported_refused_or_done() {
+    fn a_load_answers_what_the_plugins_control_answered() {
         let id = PresetId::Number(0);
 
         assert_eq!(
             handle_with(None).load_preset(tutti_fixtures::main_thread(), &id),
             std::task::Poll::Ready(Err(PresetError::Unsupported)),
-            "no route must stay distinct from a refusal"
+            "no route answers Unsupported"
         );
 
-        let refusing = handle_with(Some(FakePresets {
-            listed: Vec::new(),
-            accepts: false,
-            track: Delivered::Yes,
-        }));
-        assert_eq!(
-            refusing.load_preset(tutti_fixtures::main_thread(), &id),
-            std::task::Poll::Ready(Err(PresetError::Refused)),
-            "a refusal must report a present route that said no"
-        );
-
-        let accepting = handle_with(Some(FakePresets {
-            listed: Vec::new(),
-            accepts: true,
-            track: Delivered::Yes,
-        }));
-        assert_eq!(
-            accepting.load_preset(tutti_fixtures::main_thread(), &id),
-            std::task::Poll::Ready(Ok(())),
-            "an accepted load must be Ok"
-        );
+        for answer in [
+            Ok(()),
+            Err(PresetError::Unsupported),
+            Err(PresetError::Unlisted),
+            Err(PresetError::Refused),
+        ] {
+            let handle = handle_with(Some(FakePresets {
+                listed: Vec::new(),
+                load: answer.clone(),
+                track: Delivered::Yes,
+            }));
+            assert_eq!(
+                handle.load_preset(tutti_fixtures::main_thread(), &id),
+                std::task::Poll::Ready(answer.clone()),
+                "the control's {answer:?} reaches the caller unchanged"
+            );
+        }
     }
 
     /// The listed presets reach the caller unchanged.
@@ -1483,7 +1483,7 @@ mod tests {
         ];
         let handle = handle_with(Some(FakePresets {
             listed: listed.clone(),
-            accepts: true,
+            load: Ok(()),
             track: Delivered::Yes,
         }));
         assert_eq!(
@@ -1512,7 +1512,7 @@ mod tests {
         let with = |track| {
             handle_with(Some(FakePresets {
                 listed: Vec::new(),
-                accepts: true,
+                load: Ok(()),
                 track,
             }))
         };

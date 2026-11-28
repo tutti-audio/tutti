@@ -8,8 +8,8 @@ use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
     KeyUse, ModeTold, ModifierConvention, NoteName, ParamAccess, ParamEdit, ParamWriteError,
     ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError,
-    PluginPreset, PluginResult, PluginWiring, PresetId, RenderMode, RenderModeSupport, Request,
-    StateUse, Widths, WindowHandle,
+    PluginPreset, PluginResult, PluginWiring, PresetError, PresetId, RenderMode, RenderModeSupport,
+    Request, StateUse, Widths, WindowHandle,
 };
 use tutti_ump::NoteNumber;
 use tutti_units::Normalized;
@@ -303,12 +303,12 @@ impl Control for Vst2Loaded {
     }
 
     /// Switch program, bracketed by `effBeginSetProgram`/`effEndSetProgram`.
-    /// `false` for an id this format cannot address.
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-        match id.number() {
-            Some(index) => self.set_program(main, index),
-            None => false,
-        }
+    /// [`PresetError::Unsupported`] for an id that is no `Number`,
+    /// [`PresetError::Unlisted`] for an index outside `[0, numPrograms)`:
+    /// `effProgramChange` answers nothing, so a dispatched change is `Ok`.
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
+        let index = id.number().ok_or(PresetError::Unsupported)?;
+        self.set_program(main, index)
     }
 
     fn current_preset(&mut self, main: MainThreadMarker) -> Option<PresetId> {

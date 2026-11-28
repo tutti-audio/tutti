@@ -614,7 +614,7 @@ mod tests {
                 &mut seen,
                 |seen, id| {
                     seen.0 = Some(id.clone());
-                    true
+                    Ok(())
                 },
                 |seen, state| {
                     seen.1 = state.to_vec();

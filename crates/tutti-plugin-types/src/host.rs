@@ -32,8 +32,8 @@ use tutti_buffers::{Float, InputOutput};
 use crate::{
     AutomationMode, BypassWrite, ChannelTable, ContentScale, EditorCapabilities, EditorOpened,
     EditorWindow, KeyEvent, KeyUse, ParamWriteError, ParameterInfo, PluginDescriptor, PluginError,
-    PluginPreset, PluginResult, PluginTail, PluginWiring, PresetId, ProcessContext, ProcessOutput,
-    ProcessWake, SampleRate, Samples, WindowHandle,
+    PluginPreset, PluginResult, PluginTail, PluginWiring, PresetError, PresetId, ProcessContext,
+    ProcessOutput, ProcessWake, SampleRate, Samples, WindowHandle,
 };
 use crate::{
     Delivered, HostEdits, MidiAssignment, MidiMapApplied, ParamEdit, ParameterChanges,
@@ -292,10 +292,17 @@ pub trait Control: EditorWindow {
         Vec::new()
     }
 
-    /// Loads a preset; `false` when the format or the plugin cannot.
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+    /// Loads a preset.
+    ///
+    /// # Errors
+    ///
+    /// [`PresetError::Unsupported`] when the format cannot address the id (the
+    /// default, for a format with no preset load), [`PresetError::Unlisted`]
+    /// when it can and no listed preset has it, [`PresetError::Refused`] when
+    /// the plugin was asked and declined.
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         let _ = (main, id);
-        false
+        Err(PresetError::Unsupported)
     }
 
     /// The preset the plugin is on, if it says.
@@ -798,17 +805,26 @@ pub trait Wraps {
     /// A refusal that never reaches the plugin voids no write. A preset that
     /// reaches the plugin and then fails still voids the pending writes, since
     /// the plugin may be half-applied.
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// What the plugin's [`Control::load_preset`] answers, or a format's own
+    /// refusal ([`PresetError`]).
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         self.restore_preset(main, id)
     }
 
     /// The generic preset load: [`before_restore`](Self::before_restore), the
     /// plugin's own load, then [`after_restore`](Self::after_restore) if it
     /// loaded.
-    fn restore_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// What the plugin's [`Control::load_preset`] answers.
+    fn restore_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         self.before_restore(main);
         let loaded = self.plugin_mut().load_preset(main, id);
-        if loaded {
+        if loaded.is_ok() {
             self.after_restore(main);
         }
         loaded
@@ -979,7 +995,7 @@ impl<W: Wraps> Control for W {
         self.plugin_mut().presets(main)
     }
 
-    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
+    fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         Wraps::load_preset(self, main, id)
     }
 
@@ -1291,8 +1307,16 @@ mod tests {
             self.hooks.push(("after", loads));
         }
 
-        fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> bool {
-            self.reaches && self.restore_preset(main, id)
+        fn load_preset(
+            &mut self,
+            main: MainThreadMarker,
+            id: &PresetId,
+        ) -> Result<(), PresetError> {
+            if self.reaches {
+                self.restore_preset(main, id)
+            } else {
+                Err(PresetError::Refused)
+            }
         }
     }
 
@@ -1313,7 +1337,10 @@ mod tests {
     fn a_refused_preset_runs_no_restore_hook() {
         let main = tutti_fixtures::main_thread();
         let mut rig = Rig::new(false);
-        assert!(!Control::load_preset(&mut rig, main, &PresetId::Number(1)));
+        assert_eq!(
+            Control::load_preset(&mut rig, main, &PresetId::Number(1)),
+            Err(PresetError::Refused)
+        );
         assert!(rig.hooks.is_empty());
     }
 }

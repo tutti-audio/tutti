@@ -363,7 +363,11 @@ macro_rules! served_control {
                 self.link.bridge.audio().presets().unwrap_or_default()
             }
 
-            fn load_preset(&mut self, _main: MainThreadMarker, id: &PresetId) -> bool {
+            fn load_preset(
+                &mut self,
+                _main: MainThreadMarker,
+                id: &PresetId,
+            ) -> Result<(), tutti_plugin_types::PresetError> {
                 self.link.bridge.audio().load_preset(id.clone())
             }
 
