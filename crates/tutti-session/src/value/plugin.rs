@@ -11,8 +11,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
-    AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamMapping,
-    ParamUnit, ParamWriteError, ParameterInfo, PlainMap, PlainUnit, TrackInfo, effective_midi_map,
+    AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamEdit,
+    ParamMapping, ParamUnit, ParamWriteError, ParameterInfo, PlainMap, PlainUnit, TrackInfo,
+    effective_midi_map,
 };
 use tutti_rt::Mutex;
 use tutti_units::{
@@ -89,6 +90,14 @@ impl<U> std::hash::Hash for PluginParamTarget<U> {
 }
 
 impl<U> PluginParamTarget<U> {
+    /// Tells the plugin `edit` of a gesture over the parameter, through its
+    /// handle; nothing when the plugin is gone or not read yet.
+    fn hold(self, params: &Params, edit: ParamEdit) {
+        if let Some(entry) = params.plugin(self.node) {
+            let _ = entry.handle.edit(edit);
+        }
+    }
+
     /// Parameter `id` of the plugin at `node`, read in `U`.
     pub(crate) const fn new(node: NodeKey, id: ParamId) -> Self {
         Self {
@@ -144,7 +153,17 @@ pub struct PluginCell {
 impl sealed::Store for PluginParamTarget {
     type Cell = PluginCell;
 
-    crate::value::no_host_gesture!();
+    fn begin(self, params: &Params) {
+        self.hold(params, ParamEdit::Begin(self.id));
+    }
+
+    fn end(self, params: &Params) {
+        self.hold(params, ParamEdit::End(self.id));
+    }
+
+    fn wrote(self, params: &Params, value: &Normalized) {
+        self.hold(params, ParamEdit::change(self.id, *value));
+    }
 
     fn resolve(self, params: &Params) -> Option<(PluginCell, Normalized)> {
         let entry = params.plugin(self.node)?;
@@ -310,7 +329,23 @@ macro_rules! unit_targets {
         impl sealed::Store for PluginParamTarget<$ty> {
             type Cell = UnitCell;
 
-            crate::value::no_host_gesture!();
+            fn begin(self, params: &Params) {
+                self.hold(params, ParamEdit::Begin(self.id));
+            }
+
+            fn end(self, params: &Params) {
+                self.hold(params, ParamEdit::End(self.id));
+            }
+
+            fn wrote(self, params: &Params, value: &$ty) {
+                let position = params
+                    .plugin(self.node)
+                    .and_then(|entry| entry.conversion::<$ty>(self.id)?.ok())
+                    .and_then(|conversion| conversion.position(*value).ok());
+                if let Some(position) = position {
+                    self.hold(params, ParamEdit::change(self.id, position));
+                }
+            }
 
             fn resolve(self, params: &Params) -> Option<(UnitCell, $ty)> {
                 self.resolve_unit(params)

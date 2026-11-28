@@ -634,9 +634,9 @@ pub mod session {
     };
     #[cfg(feature = "plugin")]
     pub use tutti_session::{
-        Editor, EditorCallError, GiveUp, HangPolicy, ParamGesture, PluginCause, PluginParam,
-        PluginPorts, PortsRefusal, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure,
-        RecoveryPolicy, ReloadCause, StateRestore, StateView,
+        Editor, EditorCallError, GiveUp, HangPolicy, PluginCause, PluginParam, PluginPorts,
+        PortsRefusal, Recovery, RecoveryAction, RecoveryEvent, RecoveryFailure, RecoveryPolicy,
+        ReloadCause, StateRestore, StateView,
     };
     #[cfg(feature = "record")]
     pub use tutti_session::{FinalizeError, PumpLoop, PumpLoopError, PumpPass};

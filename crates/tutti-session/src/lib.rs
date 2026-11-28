@@ -333,7 +333,7 @@ pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchTarget, Sectio
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
 #[cfg(feature = "plugin")]
-pub use plugin_params::{ParamGesture, PluginParam, PluginParams};
+pub use plugin_params::{PluginParam, PluginParams};
 #[cfg(feature = "plugin")]
 pub use plugin_presets::{ListedPreset, PluginPresets};
 pub use policy::{OutputPolicy, OutputPolicyError, Policy};

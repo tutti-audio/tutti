@@ -429,7 +429,7 @@ mod seal {
 
         /// What a gesture writes: one absolute value per target, in the
         /// argument's shape.
-        type Values;
+        type Values: Clone;
 
         /// Stages `values`, one per target.
         fn stage(&self, values: Self::Values, batch: &mut Batch<'_>) -> Result<(), Failure>;

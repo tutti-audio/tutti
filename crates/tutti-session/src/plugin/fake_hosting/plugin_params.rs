@@ -1,5 +1,5 @@
 //! A hosted plugin's parameters through the session's views:
-//! `Plugin::params`, `PluginParam`, `PluginParam::unit` and `ParamGesture`, over a fake
+//! `Plugin::params`, `PluginParam`, `PluginParam::unit` and the host gesture over a parameter, over a fake
 //! backend that declares its parameters and records what the host sets (no
 //! `plugin-server`), hosted at a node over `host`.
 
@@ -332,71 +332,6 @@ fn a_listed_parameter_carries_its_short_name_and_group() {
     assert_eq!((level.short_name(), level.group()), ("", ""));
 }
 
-/// **A gesture guard that is dropped in the middle of a drag ends the
-/// gesture.** The hand lets go after two moves of four planned (the loop is cut
-/// short by an early return): the session reports the begin, the two changes
-/// and the end, in that order, and the plugin took the two values.
-#[test]
-fn a_gesture_guard_dropped_mid_drag_ends_the_gesture() {
-    let (mut s, node, fake, _) = ready();
-    let drag = |s: &DetachedSession| -> Result<(), &'static str> {
-        let gesture = cutoff(s, node).edit().unwrap();
-        for (i, v) in [0.1, 0.2, 0.3, 0.4].into_iter().enumerate() {
-            if i == 2 {
-                return Err("the hand was lifted");
-            }
-            gesture.set(Normalized::of(v)).unwrap();
-        }
-        Ok(())
-    };
-    assert_eq!(drag(&s), Err("the hand was lifted"));
-
-    let heard = changes(update(&mut s));
-    let [
-        PluginChange::GestureBegan { id: began },
-        PluginChange::ParamChanged {
-            id: first_id,
-            value: first,
-            recorded: first_recorded,
-        },
-        PluginChange::ParamChanged {
-            value: second,
-            recorded: second_recorded,
-            ..
-        },
-        PluginChange::GestureEnded { id: ended },
-    ] = heard.as_slice()
-    else {
-        panic!("begin, the two changes and the end, in order: {heard:?}");
-    };
-    assert_eq!((*began, *first_id, *ended), (CUTOFF, CUTOFF, CUTOFF));
-    assert_eq!((first.get(), second.get()), (0.1, 0.2));
-    assert!(
-        *first_recorded && *second_recorded,
-        "a host's edit is recorded"
-    );
-    assert_eq!(
-        fake.sets(),
-        [(CUTOFF, 0.1), (CUTOFF, 0.2)],
-        "the plugin took the two values"
-    );
-    assert_eq!(cutoff(&s, node).normalized(), Normalized::of(0.2));
-}
-
-/// **A gesture on a read-only parameter is refused before it begins**, so the
-/// guard's own `set` has nothing to refuse and the stream shows no gesture.
-#[test]
-fn a_gesture_on_a_read_only_parameter_never_begins() {
-    let (mut s, node, fake, _) = ready();
-    let locked = s.plugin_view(node).unwrap().params().get(LOCKED).unwrap();
-    assert!(matches!(
-        locked.edit(),
-        Err(PluginParamRefusal::ReadOnly(id)) if id == LOCKED
-    ));
-    assert!(changes(update(&mut s)).is_empty());
-    assert!(fake.sets().is_empty());
-}
-
 /// **`unit::<Db>` on a parameter that measures hertz is `UnitMismatch`**,
 /// once, when the target is made; `unit::<Hz>` on it is accepted.
 #[test]
@@ -709,80 +644,6 @@ fn a_hosted_plugin_key_wires_like_a_native_key() {
     assert_eq!(sources, [key.output(0)]);
 }
 
-/// **A gesture outlives frames**: begun, then `update` runs (and a rescan lands),
-/// then the hand moves, `update` runs again, then lets go. The stream holds
-/// exactly one begin, the changes and one end, and `set` after the plugin is
-/// removed is refused and sends nothing.
-#[test]
-fn a_gesture_spans_updates_and_refuses_once_the_plugin_is_gone() {
-    let (mut s, node, fake, refresh) = ready();
-    let gesture = cutoff(&s, node).edit().unwrap();
-    let mut heard = changes(update(&mut s));
-    // A rescan lands in between; the parameter is still declared.
-    refresh.fire(PluginRefresh::ParamTitles);
-    heard.extend(changes(update(&mut s)));
-    gesture.set(Normalized::of(0.3)).unwrap();
-    heard.extend(changes(update(&mut s)));
-    gesture.set(Normalized::of(0.6)).unwrap();
-    heard.extend(changes(update(&mut s)));
-    drop(gesture);
-    heard.extend(changes(update(&mut s)));
-
-    let began = heard
-        .iter()
-        .filter(|c| matches!(c, PluginChange::GestureBegan { .. }))
-        .count();
-    let ended = heard
-        .iter()
-        .filter(|c| matches!(c, PluginChange::GestureEnded { .. }))
-        .count();
-    let moved: Vec<f64> = heard
-        .iter()
-        .filter_map(|c| match c {
-            PluginChange::ParamChanged {
-                value,
-                recorded: true,
-                ..
-            } => Some(value.get()),
-            _ => None,
-        })
-        .collect();
-    assert_eq!((began, ended), (1, 1), "{heard:?}");
-    assert_eq!(moved, [0.3, 0.6]);
-    assert_eq!(fake.sets(), [(CUTOFF, 0.3), (CUTOFF, 0.6)]);
-
-    // Gone: removed.
-    let gesture = cutoff(&s, node).edit().unwrap();
-    let _ = update(&mut s);
-    s.remove(node).unwrap();
-    assert_eq!(
-        gesture.set(Normalized::of(0.9)),
-        Err(PluginParamRefusal::UnknownParam(CUTOFF))
-    );
-    drop(gesture);
-    assert_eq!(fake.sets().len(), 2, "nothing was sent blind");
-    assert!(
-        !changes(update(&mut s))
-            .iter()
-            .any(|c| matches!(c, PluginChange::GestureEnded { .. })),
-        "a gone plugin hears no end"
-    );
-}
-
-/// **A rescan that drops the parameter ends the hold**: `set` is refused.
-#[test]
-fn a_gesture_on_a_parameter_the_rescan_dropped_is_refused() {
-    let (mut s, node, fake, refresh) = ready();
-    let gesture = cutoff(&s, node).edit().unwrap();
-    *fake.infos.lock() = vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
-    refresh.fire(PluginRefresh::ParamTitles);
-    let _ = update(&mut s);
-    assert_eq!(
-        gesture.set(Normalized::of(0.5)),
-        Err(PluginParamRefusal::UnknownParam(CUTOFF))
-    );
-}
-
 /// **A value write to a lost plugin is counted as a refused write** in the
 /// plugin's losses, once: the recovery that follows replaces the mirror with
 /// the replacement's read, so the write is not kept anywhere.
@@ -797,43 +658,6 @@ fn a_value_write_to_a_lost_plugin_is_counted_refused() {
         s.plugin_view(key.erase()).expect("hosted").losses(),
         tutti_units::Losses::refused(1)
     );
-}
-
-/// Whether `events` carry a change of `CUTOFF`'s value.
-fn reports_cutoff(events: Vec<PluginEvent>) -> bool {
-    changes(events)
-        .iter()
-        .any(|c| matches!(c, PluginChange::ParamChanged { id, .. } if *id == CUTOFF))
-}
-
-/// **A gesture's write to a lost plugin is refused as `Lost`**, naming the
-/// parameter, and is not reported as a change.
-#[test]
-fn a_gesture_on_a_lost_plugin_is_refused_as_lost() {
-    let (mut s, node, fake, _refresh) = ready();
-    let gesture = cutoff(&s, node).edit().unwrap();
-    fake.lost.store(true, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(
-        gesture.set(Normalized::of(0.5)),
-        Err(PluginParamRefusal::Lost(CUTOFF))
-    );
-    assert!(!reports_cutoff(update(&mut s)));
-}
-
-/// **A gesture's write to a live plugin that did not answer in time is refused
-/// as `Unanswered`**, not `Lost`: a retry can succeed. Nothing is reported as a
-/// change.
-#[test]
-fn a_gesture_on_a_plugin_that_did_not_answer_is_refused_as_unanswered() {
-    let (mut s, node, fake, _refresh) = ready();
-    let gesture = cutoff(&s, node).edit().unwrap();
-    fake.unanswered
-        .store(true, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(
-        gesture.set(Normalized::of(0.5)),
-        Err(PluginParamRefusal::Unanswered(CUTOFF))
-    );
-    assert!(!reports_cutoff(update(&mut s)));
 }
 
 /// Whether `result` failed as `NoSuchTarget`, naming the target.
@@ -1200,4 +1024,74 @@ fn a_rescan_to_another_range_converts_a_target_made_before_it_with_the_new_map()
     s.set(cutoff.to(Hz::new(150.0))).unwrap();
     assert_eq!(fake.sets(), [(CUTOFF, 0.5)]);
     assert_eq!(s.get(cutoff).unwrap(), Hz::new(150.0));
+}
+
+/// **A host gesture over a plugin parameter tells the plugin the hold, the values
+/// and the release, in order, and the session's feed stays empty**: begin at
+/// open, each value as it is written, end at drop. A plugin parameter is not
+/// watchable, so nothing lands for a watcher.
+#[test]
+fn a_gesture_over_a_plugin_parameter_tells_the_plugin_begin_values_end() {
+    use tutti_plugin_types::ParamEdit;
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    {
+        let mut drag = s.gesture(key.param(CUTOFF)).unwrap();
+        assert_eq!(fake.edits(), [ParamEdit::Begin(CUTOFF)], "begin at open");
+        drag.set(Normalized::of(0.25)).unwrap();
+        drag.set(Normalized::of(0.75)).unwrap();
+    }
+    assert_eq!(
+        fake.edits(),
+        [
+            ParamEdit::Begin(CUTOFF),
+            ParamEdit::change(CUTOFF, Normalized::of(0.25)),
+            ParamEdit::change(CUTOFF, Normalized::of(0.75)),
+            ParamEdit::End(CUTOFF),
+        ]
+    );
+    assert_eq!(fake.sets(), [(CUTOFF, 0.25), (CUTOFF, 0.75)]);
+    assert!(
+        changes(update(&mut s)).is_empty(),
+        "the host's own gesture is not the plugin's: no gesture notice, no change"
+    );
+}
+
+/// **A click (a gesture that moved nothing) still reaches the plugin as begin
+/// and end**, and the session reports nothing.
+#[test]
+fn a_click_on_a_plugin_parameter_reaches_the_plugin_as_begin_and_end() {
+    use tutti_plugin_types::ParamEdit;
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    drop(s.gesture(key.param(CUTOFF)).unwrap());
+    assert_eq!(
+        fake.edits(),
+        [ParamEdit::Begin(CUTOFF), ParamEdit::End(CUTOFF)]
+    );
+    assert!(fake.sets().is_empty());
+    assert!(changes(update(&mut s)).is_empty());
+}
+
+/// **A plugin removed mid-gesture hears no end**: the hold dies with the entry.
+#[test]
+fn a_gesture_over_a_removed_plugin_sends_no_end() {
+    use tutti_plugin_types::ParamEdit;
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let drag = s.gesture(key.param(CUTOFF)).unwrap();
+    s.remove(key.erase()).unwrap();
+    drop(drag);
+    assert_eq!(fake.edits(), [ParamEdit::Begin(CUTOFF)]);
+}
+
+/// **A gesture on a parameter the plugin does not declare is refused at open**,
+/// by name, and tells the plugin nothing.
+#[test]
+fn a_gesture_on_an_undeclared_parameter_is_refused_at_open() {
+    let (mut s, key, fake, _) = session_keyed();
+    let _ = update(&mut s);
+    let refused = s.gesture(key.param(ParamId::new(999)));
+    assert!(matches!(refused, Err(ref e) if e.kind == ValueErrorKind::NoSuchTarget));
+    assert!(fake.edits().is_empty());
 }

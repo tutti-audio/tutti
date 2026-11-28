@@ -4,6 +4,10 @@
 //! what landed, under one [`GestureId`]; it adds no write path of its own. While it
 //! is open its changes are not ended. Dropping it lands the end of every target it
 //! moved as one landing, so a watcher's read sees all the ends or none.
+//!
+//! The gesture also tells each target it is held (`Store::begin` at open,
+//! `Store::end` at drop, moved or not): a plugin's parameter tells the plugin
+//! (`PluginHandle::edit`), every other target has no one to tell.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -53,6 +57,10 @@ impl Deferred {
 ///
 /// The gesture reads the value lock like any call: dropping it inside a `modify`
 /// is fine, and its end lands with that call's batch.
+///
+/// A plugin's parameter hears the hold: begin at open, each value, end at drop,
+/// even for a click that moved nothing. An end dropped off the main thread
+/// reaches a VST3 plugin at the next main-thread update.
 ///
 /// ```
 /// fn send<T: Send>() {}
@@ -122,11 +130,14 @@ impl<K: AppKey, W: IntoTargets> Drop for Gesture<K, W> {
         let Some(targets) = self.targets.take() else {
             return;
         };
-        if self.moved.is_empty() {
-            return;
-        }
         let (id, mut moved) = (self.id, std::mem::take(&mut self.moved));
         state.finish(Box::new(move |params, feed| {
+            // The hold ends whether or not the gesture moved, and before the
+            // feed lands the end: an end never overtakes a later begin.
+            targets.end(params);
+            if moved.is_empty() {
+                return;
+            }
             let mut out = Vec::new();
             targets.ended(params, &mut moved, &mut out);
             feed.land(params, Stored::new(out, ChangedBy::App), Grouping::End(id));
@@ -154,6 +165,7 @@ impl<K: AppKey> ValueState<K> {
             .register(held.params(), &mut at, &mut ids)
             .map_err(super::state::error)?;
         let id = self.feed().open();
+        targets.begin(held.params());
         Ok(Gesture::new(self, id, targets))
     }
 
@@ -167,11 +179,13 @@ impl<K: AppKey> ValueState<K> {
     ) -> Result<Vec<(TargetId, Erased)>, ValueError<K>> {
         let held = self.enter()?;
         let mut batch = super::batch::Batch::new(held.params());
+        let wrote = values.clone();
         targets
             .stage(values, &mut batch)
             .map_err(super::state::error)?;
         let before = self.feed().capture_before(held.params(), id);
         let stored = batch.store();
+        targets.wrote(held.params(), &wrote);
         let bases = stored.bases().collect();
         self.feed()
             .land(held.params(), stored, Grouping::Open(id, before));
