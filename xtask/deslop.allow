@@ -351,7 +351,6 @@ field-leak tutti_sampler::voice::stretched::Cursor::at
 field-leak tutti_sampler::voice::stretched::Cursor::owed
 field-leak tutti_sampler::voice::stretched::Cursor::preroll
 field-leak tutti_sampler::voice::stretched::Cursor::taken
-field-leak tutti_session::background::Background::bells
 field-leak tutti_session::background::Background::executor
 field-leak tutti_session::bounce::BounceHandle::cancel
 field-leak tutti_session::bounce::BounceState::token
@@ -395,7 +394,6 @@ field-leak tutti_session::session::parts::midi::MidiPart::state
 field-leak tutti_session::session::parts::output::OutputPart::main_output_refusal
 field-leak tutti_session::session::parts::output::OutputPart::main_output_request
 field-leak tutti_session::session::parts::output::OutputPart::policy
-field-leak tutti_session::session::parts::output::OutputPart::readings
 field-leak tutti_session::session::parts::output::OutputPart::taps
 field-leak tutti_session::transport_handle::TransportHandle::clock
 field-leak tutti_session::value::state::ValueTable::deferred
