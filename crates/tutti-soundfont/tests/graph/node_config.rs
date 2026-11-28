@@ -3,34 +3,31 @@
 
 use std::sync::Arc;
 
-use tutti_graph::{HostValues, Initials, NodeConfig};
+use tutti_graph::{Initials, IntoNode, NodeConfig};
 use tutti_midi_protocol::SysexDeviceId;
-use tutti_soundfont::{Polyphony, SoundFontConfig, SoundFontUnit};
+use tutti_soundfont::{Polyphony, SoundFontConfig};
 use tutti_ump::MidiGroup;
 
 use crate::support::font::one_preset;
 
 /// One config's row: `base`, and the variants that each change one structure field.
 ///
-/// Checks (a) the initials are none, as the built unit has no param to start at;
-/// (b) a clone is the same structure both ways; (c) each structure variant is not.
-fn check(name: &str, base: &SoundFontConfig, structures: &[SoundFontConfig]) {
-    assert_eq!(
-        NodeConfig::<f32>::initials(base),
-        Initials::new(),
-        "{name}: no param"
-    );
-    let _unit: SoundFontUnit<f32> = base.build(&HostValues::new());
+/// Checks (a) the initials are none, which the bound pairs with a node whose controls are
+/// `()`; (b) a clone is the same structure both ways; (c) each structure variant is not.
+fn check<C>(name: &str, base: &C, structures: &[C])
+where
+    C: NodeConfig<f32> + Clone,
+    C::Node: IntoNode<f32, Controls = ()>,
+{
+    assert_eq!(base.initials(), Initials::new(), "{name}: no param");
     let same = base.clone();
     assert!(
-        NodeConfig::<f32>::same_structure(base, &same)
-            && NodeConfig::<f32>::same_structure(&same, base),
+        C::same_structure(base, &same) && C::same_structure(&same, base),
         "{name}: a clone is the same structure"
     );
     for (k, other) in structures.iter().enumerate() {
         assert!(
-            !NodeConfig::<f32>::same_structure(base, other)
-                && !NodeConfig::<f32>::same_structure(other, base),
+            !C::same_structure(base, other) && !C::same_structure(other, base),
             "{name}: structure variant {k} is a new node"
         );
     }
