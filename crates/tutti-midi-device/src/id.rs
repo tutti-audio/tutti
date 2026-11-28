@@ -30,8 +30,8 @@ impl EndpointId {
 }
 
 /// What an OS endpoint is known by across restarts: the UMP Product Instance Id,
-/// CoreMIDI's unique id, ALSA client and port names, or a WinMM port with its
-/// direction. [`EndpointId`] is the OS's live handle to the same endpoint.
+/// CoreMIDI's unique id, ALSA client and port names, a WinMM port with its
+/// direction, or a Web MIDI port's id. [`EndpointId`] is the OS's live handle to the same endpoint.
 ///
 /// With the `serde` feature the document names the variant, so renaming one
 /// breaks saved files.
@@ -62,6 +62,10 @@ pub enum OsEndpointIdentity {
     /// A Windows MIDI Services endpoint, by the service's endpoint device id: the device
     /// interface path, which survives a replug. One id names both directions of the endpoint.
     MidiServices(String),
+    /// A Web MIDI port, by its `MIDIPort.id`: the browser's own identifier of the port, kept
+    /// across sessions where the browser can (W3C Web MIDI API, `MIDIPort`, `id`). An input
+    /// and an output have different ids.
+    WebMidi(String),
 }
 
 impl OsEndpointIdentity {
@@ -178,6 +182,7 @@ impl fmt::Display for MidiDeviceId {
             OsEndpointIdentity::WinMmInput(device) => write!(f, "winmm-in:{device}")?,
             OsEndpointIdentity::WinMmOutput(device) => write!(f, "winmm-out:{device}")?,
             OsEndpointIdentity::MidiServices(id) => write!(f, "midi-services:{id}")?,
+            OsEndpointIdentity::WebMidi(id) => write!(f, "web-midi:{id}")?,
         }
         write!(f, "#{}", self.ordinal)
     }

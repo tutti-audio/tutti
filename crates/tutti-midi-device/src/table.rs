@@ -211,8 +211,8 @@ impl DeviceTable {
     ///   port is told by its name and direction: `Exact` for the one present
     ///   port with both, `Ambiguous` (the unit's ports) when none or several
     ///   have.
-    /// - A WinMM identity with a device interface path names the device across a
-    ///   replug: `Exact` for the lone present device at ordinal 0 that still
+    /// - A WinMM identity with a device interface path, a MIDI Services endpoint id or a
+    ///   Web MIDI port id names the device across a replug: `Exact` for the lone present device at ordinal 0 that still
     ///   goes the saved way.
     /// - An ALSA identity, or a WinMM one with no path, is names alone (the
     ///   client and port name, or the driver's product name and ids): `SameName` for the lone
@@ -248,7 +248,8 @@ impl DeviceTable {
             (
                 OsEndpointIdentity::WinMmInput(WinMmDevice::Interface(_))
                 | OsEndpointIdentity::WinMmOutput(WinMmDevice::Interface(_))
-                | OsEndpointIdentity::MidiServices(_),
+                | OsEndpointIdentity::MidiServices(_)
+                | OsEndpointIdentity::WebMidi(_),
                 [only],
             ) if saved.id.ordinal() == 0 && serves(only.direction, saved.direction) => {
                 Resolved::Exact((*only).clone())

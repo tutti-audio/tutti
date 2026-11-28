@@ -408,6 +408,24 @@ fn a_midi_services_endpoint_resolves_exactly_by_its_device_id() {
     assert_ne!(one.id, other.id);
 }
 
+/// A Web MIDI port is named by its `MIDIPort.id`, which the spec asks the browser to keep
+/// across sessions, so a saved id resolves exactly to the port that has it.
+#[test]
+fn a_web_midi_port_resolves_exactly_by_its_port_id() {
+    let mut table = DeviceTable::default();
+    let on = |n, id: &str, direction| OsDevice {
+        handle: handle(n),
+        identity: OsEndpointIdentity::WebMidi(id.into()),
+        name: "Keystep".into(),
+        direction,
+    };
+    let input = added(table.apply(OsChange::Present(on(1, "in-a", PortDirection::Input))));
+    let output = added(table.apply(OsChange::Present(on(2, "out-a", PortDirection::Output))));
+    assert_eq!(table.resolve(&input), Resolved::Exact(input.clone()));
+    assert_eq!(table.resolve(&output), Resolved::Exact(output.clone()));
+    assert_eq!(input.id.to_string(), "web-midi:in-a#0");
+}
+
 /// An input and an output of one WinMM unit share a name and driver ids, so
 /// each is told by its direction: neither takes the other's ordinal.
 #[test]

@@ -303,7 +303,8 @@ mod backend_choice;
     any(
         midi_backend = "none",
         midi_backend = "winmm",
-        midi_backend = "midi_services"
+        midi_backend = "midi_services",
+        midi_backend = "web"
     ),
     allow(dead_code, reason = "only a UMP backend converts OS blocks")
 )]
@@ -316,7 +317,7 @@ mod fault;
 // Only the ALSA, Windows Multimedia and Windows MIDI Services callbacks run through it: the
 // stub has none, and CoreMIDI's port catches a panic in its own.
 #[cfg_attr(
-    any(midi_backend = "none", midi_backend = "coremidi"),
+    any(midi_backend = "none", midi_backend = "coremidi", midi_backend = "web"),
     allow(
         dead_code,
         reason = "only the ALSA, Windows Multimedia and Windows MIDI Services backends use it"
@@ -336,7 +337,8 @@ mod start;
     any(
         midi_backend = "none",
         midi_backend = "winmm",
-        midi_backend = "midi_services"
+        midi_backend = "midi_services",
+        midi_backend = "web"
     ),
     allow(
         dead_code,
