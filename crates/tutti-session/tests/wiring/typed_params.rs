@@ -169,7 +169,6 @@ tutti_graph::declare_params!([] Mine, n { Cutoff => Hz = &n.cutoff });
 /// no `IntoNode` of its own. Its params are addressed
 /// (`set_param` reaches it), its key has the typed method its declaration
 /// gives, and a fork of it starts from the value set.
-#[cfg(feature = "export")]
 #[test]
 fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     let mut s = session();
@@ -188,12 +187,15 @@ fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
     s.render(&mut InterleavedMut::one_frame(&mut live).unwrap());
     assert_eq!(live, [440.0], "the live node reads it");
 
-    let fork = s.bounce(first_frames(1)).expect("a Params node forks");
-    s.set(mine.cutoff().to(Hz::new(880.0))).unwrap();
-    let forked = s
-        .apply(tutti_fixtures::block_on(fork))
-        .unwrap()
-        .into_main_output()
-        .to_planes();
-    assert_eq!(forked, [[440.0]], "the fork has the value set at the fork");
+    #[cfg(feature = "export")]
+    {
+        let fork = s.bounce(first_frames(1)).expect("a Params node forks");
+        s.set(mine.cutoff().to(Hz::new(880.0))).unwrap();
+        let forked = s
+            .apply(tutti_fixtures::block_on(fork))
+            .unwrap()
+            .into_main_output()
+            .to_planes();
+        assert_eq!(forked, [[440.0]], "the fork has the value set at the fork");
+    }
 }

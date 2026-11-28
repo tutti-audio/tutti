@@ -35,14 +35,15 @@ use tutti_session::{
     NoSuchModRoute, NoSuchModSource, OutputPort, ParamRef, ParamTarget, PolarityTarget, Problem,
     Replacement, RouteSpec, Scale, ScaleError, Session, SessionEvent, SourceName, TargetName,
 };
-use tutti_units::{
-    Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
-};
+use tutti_units::{Amplitude, Beat, Bipolar, Frame, Hz, SampleRate, Samples, Seconds, UnitParam};
+#[cfg(feature = "export")]
+use tutti_units::{Bpm, Drive};
 
 use common::probe::{ProbeUnit, Pulse};
 use tutti_ump::{Message, Voice1};
 
 const RATE: f64 = 48_000.0;
+#[cfg(feature = "export")]
 const TEMPO: Bpm = Bpm::of(120.0);
 /// A lane's control step (`tutti_modulation::CONTROL_GRID`).
 const STEP: usize = 32;
