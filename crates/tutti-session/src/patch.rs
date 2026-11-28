@@ -282,6 +282,35 @@ pub(crate) struct PendingSection<K, G: PatchTarget> {
 pub trait PatchTarget {
     /// Why a swap was refused.
     type Refused;
+
+    /// What a plugin node is declared as on this target: the held plugin where
+    /// the graph hosts plugins, and an empty type where it cannot.
+    #[doc(hidden)]
+    #[cfg(feature = "plugin")]
+    type Plugin: HoldsPlugin + Send;
+}
+
+/// A plugin as a declaration holds it. An empty type implements it for a graph
+/// that hosts no plugin, so a plugin arm over that graph is never entered.
+#[doc(hidden)]
+#[cfg(feature = "plugin")]
+pub trait HoldsPlugin {
+    /// The held plugin.
+    fn held(&self) -> &PluginHeld;
+}
+
+#[cfg(feature = "plugin")]
+impl HoldsPlugin for PluginHeld {
+    fn held(&self) -> &PluginHeld {
+        self
+    }
+}
+
+#[cfg(feature = "plugin")]
+impl HoldsPlugin for std::convert::Infallible {
+    fn held(&self) -> &PluginHeld {
+        match *self {}
+    }
 }
 
 /// A node built from a declaration and not yet placed: the target's own node
@@ -435,7 +464,7 @@ pub(crate) enum Body<G: PatchTarget> {
     /// A node bound over a loaded plugin: checked at the plan, installed at the
     /// commit, once.
     #[cfg(feature = "plugin")]
-    Plugin(PluginHeld),
+    Plugin(G::Plugin),
 }
 
 impl<G: PatchTarget> Body<G> {
@@ -453,7 +482,7 @@ impl<G: PatchTarget> Body<G> {
     pub(crate) fn plugin(&self) -> Option<&PluginHeld> {
         match self {
             Self::Node(_) => None,
-            Self::Plugin(held) => Some(held),
+            Self::Plugin(held) => Some(held.held()),
         }
     }
 }
@@ -461,7 +490,9 @@ impl<G: PatchTarget> Body<G> {
 /// A loaded plugin as declared: the plugin, which is identified by its
 /// instance, and the values its parameters are declared at.
 #[cfg(feature = "plugin")]
-pub(crate) struct PluginHeld {
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct PluginHeld {
     pub(crate) loaded: crate::LoadedPlugin,
     pub(crate) initials: Vec<(ParamId, Normalized)>,
 }
@@ -519,7 +550,7 @@ impl<K> PluginDecl<K> {
     }
 
     /// The declaration this makes.
-    pub(crate) fn declaration<G: PatchTarget>(self) -> (K, Declaration<G>) {
+    pub(crate) fn declaration(self) -> (K, Declaration<crate::Graph<f32>>) {
         let held = PluginHeld {
             loaded: self.loaded,
             initials: self.initials,

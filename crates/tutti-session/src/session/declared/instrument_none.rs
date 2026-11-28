@@ -4,12 +4,12 @@
 
 use std::convert::Infallible;
 
-use tutti_buffers::Float;
 use tutti_graph::{NodeKey, Shape};
 use tutti_units::Amplitude;
 
 use super::Kept;
 use super::wire::Resolved;
+use crate::SessionFloat;
 use crate::patch::Fading;
 use crate::{AnyAssign, AppKey, Clock, Session};
 
@@ -38,7 +38,7 @@ impl NewParts {
         clippy::extra_unused_type_parameters,
         reason = "the call names the graph's float, as the `midi` twin's does"
     )]
-    pub(super) fn new<F: Float>(_: Amplitude) -> Self {
+    pub(super) fn new<F: SessionFloat>(_: Amplitude) -> Self {
         unreachable!("a declaration is an instrument only with the `midi` feature")
     }
 

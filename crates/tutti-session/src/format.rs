@@ -8,6 +8,12 @@ use crate::{AppKey, Clock, PhaseCx, Session, SessionEvent};
 /// The steps of an update that depend on the session's float format: the
 /// ones that serve and land the hosted plugins, which are `f32` at their FFI.
 pub trait Sealed: tutti_rt::RingFloat {
+    /// What a plugin node is declared as in a patch over a graph of this
+    /// float: the held plugin for `f32`, an empty type for `f64`.
+    #[doc(hidden)]
+    #[cfg(feature = "plugin")]
+    type DeclaredPlugin: crate::patch::HoldsPlugin + Send;
+
     /// Serves the hosted plugins in `Phase::Plugins`: only an `f32` session
     /// hosts plugins, so an `f64` one has nobody to serve.
     #[doc(hidden)]
@@ -22,17 +28,17 @@ pub trait Sealed: tutti_rt::RingFloat {
     #[doc(hidden)]
     fn announce_render_mode<K: AppKey, C: Clock<Float = Self>>(session: &mut Session<K, C>);
 
-    /// Puts the plugin `loaded` in the session's graph as a node, taken from its
-    /// load: only an `f32` session hosts plugins, and a `PluginDecl` is part of
-    /// an `f32` patch alone, so an `f64` session has nothing to install.
+    /// Puts the declared plugin in the session's graph as a node, taken from its
+    /// load: an `f64` session's declared plugin is an empty type.
     #[doc(hidden)]
     #[cfg(feature = "plugin")]
     fn install_declared<K: AppKey, C: Clock<Float = Self>>(
         session: &mut Session<K, C>,
-        loaded: &crate::LoadedPlugin,
+        declared: &Self::DeclaredPlugin,
     ) -> crate::Key<crate::AnyPlugin>;
 
-    /// Swaps the plugin at `node` for `loaded`'s, as `install_declared` takes it.
+    /// Swaps the plugin at `node` for the declared one, as `install_declared`
+    /// takes it.
     ///
     /// # Errors
     ///
@@ -42,7 +48,7 @@ pub trait Sealed: tutti_rt::RingFloat {
     fn swap_declared<K: AppKey, C: Clock<Float = Self>>(
         session: &mut Session<K, C>,
         node: tutti_graph::NodeKey,
-        loaded: &crate::LoadedPlugin,
+        declared: &Self::DeclaredPlugin,
     ) -> Result<(), crate::ReplaceRefused>;
 
     /// A builder's opener, which serves both floats, as the opener of this one.
@@ -52,6 +58,9 @@ pub trait Sealed: tutti_rt::RingFloat {
 }
 
 impl Sealed for f32 {
+    #[cfg(feature = "plugin")]
+    type DeclaredPlugin = crate::patch::PluginHeld;
+
     #[cfg(feature = "capture")]
     fn upcast_opener(opener: Box<dyn crate::input::Openers>) -> Box<dyn crate::InputOpener<f32>> {
         opener
@@ -78,10 +87,10 @@ impl Sealed for f32 {
     #[cfg(feature = "plugin")]
     fn install_declared<K: AppKey, C: Clock<Float = f32>>(
         session: &mut Session<K, C>,
-        loaded: &crate::LoadedPlugin,
+        declared: &crate::patch::PluginHeld,
     ) -> crate::Key<crate::AnyPlugin> {
         session
-            .add_loaded(loaded)
+            .add_loaded(&declared.loaded)
             .expect("a plugin is installed only while it is in its slot: the plan checked")
     }
 
@@ -89,13 +98,16 @@ impl Sealed for f32 {
     fn swap_declared<K: AppKey, C: Clock<Float = f32>>(
         session: &mut Session<K, C>,
         node: tutti_graph::NodeKey,
-        loaded: &crate::LoadedPlugin,
+        declared: &crate::patch::PluginHeld,
     ) -> Result<(), crate::ReplaceRefused> {
-        session.swap_loaded(node, loaded)
+        session.swap_loaded(node, &declared.loaded)
     }
 }
 
 impl Sealed for f64 {
+    #[cfg(feature = "plugin")]
+    type DeclaredPlugin = std::convert::Infallible;
+
     #[cfg(feature = "capture")]
     fn upcast_opener(opener: Box<dyn crate::input::Openers>) -> Box<dyn crate::InputOpener<f64>> {
         opener
@@ -113,17 +125,17 @@ impl Sealed for f64 {
     #[cfg(feature = "plugin")]
     fn install_declared<K: AppKey, C: Clock<Float = f64>>(
         _: &mut Session<K, C>,
-        _: &crate::LoadedPlugin,
+        declared: &std::convert::Infallible,
     ) -> crate::Key<crate::AnyPlugin> {
-        unreachable!("a plugin is declared in an f32 patch, and an f64 session patches f64")
+        match *declared {}
     }
 
     #[cfg(feature = "plugin")]
     fn swap_declared<K: AppKey, C: Clock<Float = f64>>(
         _: &mut Session<K, C>,
         _: tutti_graph::NodeKey,
-        _: &crate::LoadedPlugin,
+        declared: &std::convert::Infallible,
     ) -> Result<(), crate::ReplaceRefused> {
-        unreachable!("a plugin is declared in an f32 patch, and an f64 session patches f64")
+        match *declared {}
     }
 }

@@ -2,13 +2,13 @@
 //! patch's ends become nodes, and the ports they name become the ports
 //! [`Graph::connect`] takes.
 
-use tutti_buffers::Float;
 use tutti_graph::{
     BusOutputPort, CycleEdge, EdgeId, EventInputPort, EventOutputPort, GraphSpec, NodeBus, NodeKey,
     PortSink,
 };
 use tutti_units::{Gain, Samples};
 
+use crate::SessionFloat;
 use crate::graph::Pending;
 use crate::key::{BusEnd, Inlet, MainSink, Outlet};
 use crate::patch::{WireDecl, WireEnds, WireId};
@@ -43,7 +43,7 @@ pub(crate) enum Ports {
 
 impl Ports {
     /// The pairs of ports `wire`'s edges join: none for a bus wire.
-    pub(crate) fn of<F: Float>(
+    pub(crate) fn of<F: SessionFloat>(
         wire: Resolved,
         graph: &Graph<F>,
         pending: Pending<'_>,
@@ -61,7 +61,7 @@ impl Ports {
 
     /// The delay of the edge the graph holds on these ports: `None` for no
     /// edge, `Some(None)` for a direct one.
-    pub(crate) fn held_delay<F: Float>(self, graph: &Graph<F>) -> Option<Option<Samples>> {
+    pub(crate) fn held_delay<F: SessionFloat>(self, graph: &Graph<F>) -> Option<Option<Samples>> {
         match self {
             Self::Audio(edge) => graph.held_delay(edge),
             Self::Event(edge) => graph.held_event_delay(edge.source(), edge.sink()),
@@ -122,7 +122,7 @@ impl Resolved {
     }
 
     /// Whether the graph would take the wire, with nothing changed.
-    pub(crate) fn check<F: Float>(
+    pub(crate) fn check<F: SessionFloat>(
         self,
         graph: &Graph<F>,
         pending: Pending<'_>,
@@ -137,7 +137,7 @@ impl Resolved {
 
     /// The audio edges the wire is: one channel, one per channel of a main
     /// bus, none for a bus or an event wire.
-    pub(crate) fn edges<F: Float>(
+    pub(crate) fn edges<F: SessionFloat>(
         self,
         graph: &Graph<F>,
         pending: Pending<'_>,
@@ -167,7 +167,7 @@ impl Resolved {
 
     /// Writes the wire into `spec` (or takes it out), and names the edges it
     /// is there: what `GraphSpec::cycle` reports a cycle by.
-    pub(crate) fn in_spec<F: Float>(
+    pub(crate) fn in_spec<F: SessionFloat>(
         self,
         spec: &mut GraphSpec,
         graph: &Graph<F>,
@@ -230,7 +230,7 @@ impl Resolved {
 
     /// Whether the graph holds the wire: every edge of it, of its delay, or
     /// for a bus wire the edge itself.
-    pub(crate) fn held<F: Float>(self, graph: &Graph<F>) -> bool {
+    pub(crate) fn held<F: SessionFloat>(self, graph: &Graph<F>) -> bool {
         match self {
             Self::Channel(..) | Self::Main(..) | Self::Event(..) => {
                 let ports = Ports::of(self, graph, None);
@@ -245,7 +245,7 @@ impl Resolved {
 
     /// Connects the wire, with no fade when `unfaded`, and a gain lane at
     /// `initial` on each of its edges.
-    pub(crate) fn connect<F: Float>(
+    pub(crate) fn connect<F: SessionFloat>(
         self,
         graph: &mut Graph<F>,
         unfaded: bool,
@@ -283,7 +283,7 @@ impl Resolved {
     }
 
     /// Takes the wire out, with no fade when `unfaded`.
-    pub(crate) fn disconnect<F: Float>(
+    pub(crate) fn disconnect<F: SessionFloat>(
         self,
         graph: &mut Graph<F>,
         unfaded: bool,
@@ -299,7 +299,7 @@ impl Resolved {
 }
 
 /// The edges of `connection`, hardened when `unfaded`.
-fn finished<F: Float, W: Wire>(
+fn finished<F: SessionFloat, W: Wire>(
     connection: Connection<'_, W, F>,
     unfaded: bool,
 ) -> Vec<ChannelEdge> {
@@ -311,7 +311,7 @@ fn finished<F: Float, W: Wire>(
     connection.edges()
 }
 
-fn cut<F: Float, O: Outlet, T: Inlet<O::Wire>>(
+fn cut<F: SessionFloat, O: Outlet, T: Inlet<O::Wire>>(
     graph: &mut Graph<F>,
     from: O,
     to: T,

@@ -17,7 +17,9 @@ use super::section::Kind;
 use super::{Fate, Kept, PatchError, Patched, PlannedNode, Stored};
 use crate::apply::Cut;
 use crate::format::Sealed;
-use crate::patch::{Body, Declaration, Declarations, IntoPatch, PluginHeld, Sealed as PatchSealed};
+use crate::patch::{
+    Body, Declaration, Declarations, HoldsPlugin, IntoPatch, PluginHeld, Sealed as PatchSealed,
+};
 use crate::{AnyAssign, AppKey, Clock, Graph, Session};
 
 /// Why a [`PluginDecl`](crate::PluginDecl) refuses a patch. Nothing is changed,
@@ -146,6 +148,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             let Body::Plugin(held) = &declaration.body else {
                 continue;
             };
+            let held = held.held();
             if let Some((_, first)) = seen.iter().find(|(known, _)| known.is_plugin_of(held)) {
                 return Err(PatchError::Plugin(PluginPatchError::DeclaredTwice {
                     first: (*first).clone(),
@@ -203,13 +206,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             plan: fate,
             ..
         } = planned;
-        let held = declaration
-            .body
-            .plugin()
-            .expect("a plugin is declared by a plugin declaration");
+        let Body::Plugin(declared) = &declaration.body else {
+            unreachable!("a plugin plan is made of a plugin declaration")
+        };
+        let held = declared.held();
         match fate {
             Fate::Add(_) => {
-                let node = <C::Float as Sealed>::install_declared(self, &held.loaded).erase();
+                let node = <C::Float as Sealed>::install_declared(self, declared).erase();
                 self.write_initials(node, &held.initials, writes);
                 kept.nodes.insert(key, Stored { node, declaration });
             }
@@ -221,14 +224,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                     }
                     self.take_out(old);
                 }
-                let node = <C::Float as Sealed>::install_declared(self, &held.loaded).erase();
+                let node = <C::Float as Sealed>::install_declared(self, declared).erase();
                 self.write_initials(node, &held.initials, writes);
                 patched.readded.push(key.clone());
                 kept.nodes.insert(key, Stored { node, declaration });
             }
             Fate::Swap(_) => {
                 let old = kept.nodes.get_mut(&key).expect("a swap has its old node");
-                match <C::Float as Sealed>::swap_declared(self, old.node, &held.loaded) {
+                match <C::Float as Sealed>::swap_declared(self, old.node, declared) {
                     Ok(()) => {
                         self.write_initials(old.node, &held.initials, writes);
                         patched.rebuilt.push(key);
