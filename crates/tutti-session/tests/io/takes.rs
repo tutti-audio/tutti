@@ -18,6 +18,7 @@ use tutti_buffers::{Interleaved, Sink, SinkFailed};
 use tutti_codec::{Encoding, Format, IntDepth, IntPcm, Pcm, Resample, ToFile};
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
+use tutti_fixtures::WavePlanes;
 use tutti_graph::{InletRing, TapWriter};
 use tutti_nodes::MetronomeMode;
 use tutti_session::{
@@ -1123,14 +1124,14 @@ fn a_take_into_memory_holds_the_frames_and_folds_onto_its_channels() {
 
     let planes = whole.output();
     assert_eq!(planes.sample_rate(), SampleRate::of(RATE));
-    assert_eq!(planes.frames(), Samples::new(300));
+    assert_eq!(planes.len(), Samples::new(300));
     let ramp: Vec<f32> = (3_000..3_300).map(|i| i as f32).collect();
     let negated: Vec<f32> = ramp.iter().map(|x| -x).collect();
-    assert_eq!(planes.planes(), [ramp, negated]);
+    assert_eq!(planes.to_planes(), [ramp, negated]);
 
     let planes = folded.output();
     assert_eq!(planes.channels(), 1);
-    assert_eq!(planes.planes(), [vec![0.0f32; 300]]);
+    assert_eq!(planes.to_planes(), [vec![0.0f32; 300]]);
 }
 
 /// **A dither seed an encoding states is used as given.** Two takes of one input over the same

@@ -126,8 +126,8 @@ use tutti_rt::{AudioThreadCell, Counter, Gauge, Reader, RtScope};
 #[cfg(doc)]
 use tutti_timeline::MotionFsm;
 use tutti_timeline::{
-    AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionCommand, SCHEDULE_CAPACITY, Scheduled,
-    TransportAudio, TransportCommand,
+    AudioTaken, FadeOut, IMMEDIATE_RESERVE, MotionCommand, SCHEDULE_CAPACITY, TransportAudio,
+    TransportCommand,
 };
 use tutti_units::{At, Frame};
 use tutti_units::{SampleRate, Samples, Seconds};
@@ -1006,7 +1006,7 @@ impl<F: Float> Engine<F> {
             };
             // The next declicked command ahead, within one fade of the end of
             // this block: the fade-out that ends on its frame may start here.
-            let next = lead_target(transport.pending(), &env, fade);
+            let next = lead_target(transport, &env, fade);
             if next != aim {
                 walk.gain.push(cursor, Gain::Aim(next));
                 aim = next;
@@ -1015,21 +1015,12 @@ impl<F: Float> Engine<F> {
             ph.observe(&env);
             // The earliest command due from the cursor on; send order breaks
             // ties.
-            let mut best: Option<(usize, usize, bool)> = None;
-            for (i, cmd) in transport.pending().iter().enumerate() {
-                let (k, late) = match (cmd.at(), env.due(cmd.at())) {
-                    (_, Due::In(k)) => (k.index(), false),
-                    (At::Frame(_), Due::Late) => (0, true),
-                    (At::Beat(b), _) if ph.crossed(b.get()) => (0, true),
-                    _ => continue,
-                };
-                let earlier = best.is_none_or(|(bk, bi, _)| {
-                    k < bk || (k == bk && cmd.seq() < transport.pending()[bi].seq())
-                });
-                if earlier {
-                    best = Some((k, i, late));
-                }
-            }
+            let best = transport.earliest_due(|cmd| match (cmd.at(), env.due(cmd.at())) {
+                (_, Due::In(k)) => Some((k.index(), false)),
+                (At::Frame(_), Due::Late) => Some((0, true)),
+                (At::Beat(b), _) if ph.crossed(b.get()) => Some((0, true)),
+                _ => None,
+            });
             // A tempo step comes first when it is before every command (one on
             // its frame is taken by the command's own transport).
             let step = ahead.changes.as_slice().first().map(|c| c.at.index());
@@ -1179,7 +1170,7 @@ fn declicks(command: &TransportCommand) -> bool {
 /// if playback reaches it within `env`'s block plus one fade: where a
 /// fade-out has to end. Timed commands only (`At::Frame`, `At::Beat`); one
 /// due on the first frame itself has no lead left.
-fn lead_target(pending: &[Scheduled], env: &Env, fade: usize) -> Option<Frame> {
+fn lead_target(transport: &TransportAudio, env: &Env, fade: usize) -> Option<Frame> {
     if !env.transport.playing {
         return None;
     }
@@ -1187,14 +1178,15 @@ fn lead_target(pending: &[Scheduled], env: &Env, fade: usize) -> Option<Frame> {
         block_len: env.block_len + Samples::new(fade),
         ..*env
     };
-    pending
-        .iter()
-        .filter(|c| declicks(&c.command()) && !matches!(c.at(), At::NextBlock))
-        .filter_map(|c| match look.due(c.at()) {
+    transport.least_pending(|c| {
+        if !declicks(&c.command()) || matches!(c.at(), At::NextBlock) {
+            return None;
+        }
+        match look.due(c.at()) {
             Due::In(k) if k.index() > 0 => Some(look.frame_at(k)),
             _ => None,
-        })
-        .min()
+        }
+    })
 }
 
 /// One change to the declick gain, at an offset of the block.

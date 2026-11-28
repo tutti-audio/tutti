@@ -51,6 +51,8 @@ fn frame_clock::LoopRange::len
 fn frame_clock::LoopRange::new
 fn frame_clock::LoopRange::start
 fn frame_clock::LoopRange::wrap
+fn meter::BarPosition::beat_length
+fn meter::BarPosition::beat_onset
 fn meter::BarPosition::is_downbeat
 fn meter::BeatsPerBar::clamped
 fn meter::BeatsPerBar::get
@@ -58,6 +60,7 @@ fn meter::BeatsPerBar::new
 fn meter::BeatsPerBar::of
 fn meter::MeterChange::new
 fn meter::MeterMap::bar_numbers
+fn meter::MeterMap::change_after
 fn meter::MeterMap::changes
 fn meter::MeterMap::new
 fn meter::MeterMap::next_bar_line

@@ -5,8 +5,8 @@
 //! is a global allocator, which only a test binary of that crate may do.
 
 use crate::harness::Gate;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MaxBlock};
-use tutti_dsp::HarmonicNormalization;
+use tutti_buffers::{AmbisonicOrder, Bed, MaxBlock};
+use tutti_dsp::{BedLayout, HarmonicNormalization};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
@@ -160,10 +160,11 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
         UnitParam::StereoWidth,
     ];
     for bed in Bed::ALL {
-        let Ok(node) = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed)) else {
+        let Ok(bed_layout) = BedLayout::try_from(bed) else {
             assert_eq!(bed, Bed::Mono);
             continue;
         };
+        let node = VbapPannerNode::<f32>::from(VbapPannerConfig::new(bed_layout));
         let lfe = bed.topology().index_of(Speaker::LowFrequency);
         let channels = bed.width().count() as usize;
         assert!(channels <= tutti_buffers::MAX_CHANNELS);
@@ -405,8 +406,8 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
-        .expect("a bed with speakers to pan between")
+    let bed = BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+    tutti_nodes::VbapPannerNode::from(tutti_nodes::VbapPannerConfig::new(bed))
 }
 
 /// A binaural node over the sphere in `bytes`, prepared at `rate`.
@@ -459,12 +460,11 @@ fn ambisonic_rotator_process_is_allocation_free_with_the_front_moving() {
 #[test]
 fn ambisonic_decoder_process_is_allocation_free() {
     for decoding in [Decoding::Sampling, Decoding::AllRad] {
-        let node = AmbisonicDecoderNode::<f32>::try_from(
-            AmbisonicDecoderConfig::new(Bed::Surround71)
-                .input(ambix(AmbisonicOrder::MAX))
+        let node = AmbisonicDecoderNode::<f32>::from(
+            AmbisonicDecoderConfig::new(BedLayout::try_from(Bed::Surround71).unwrap())
+                .input(AmbisonicOrder::MAX, HarmonicNormalization::Sn3d)
                 .decoding(decoding),
-        )
-        .unwrap();
+        );
         let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
         for (c, plane) in rig.inputs_mut().iter_mut().enumerate() {
             plane.into_samples_mut().fill(0.05 * (c as f32 + 1.0));
@@ -481,9 +481,4 @@ fn ambisonic_decoder_process_is_allocation_free() {
             rig.block();
         }
     }
-}
-
-/// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> ChannelTopology {
-    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }

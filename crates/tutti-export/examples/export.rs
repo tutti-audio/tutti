@@ -10,16 +10,16 @@
 //!
 //! Run: `cargo run --example export -- <outdir>`
 
-use tutti_buffers::ChannelSet;
-use tutti_buffers::Interleaved;
 use tutti_buffers::{Bed, ChannelLayout};
+use tutti_buffers::{ChannelSet, Wave};
+use tutti_buffers::{Interleaved, InterleavedMut, interleave};
 use tutti_codec::Encoding;
 use tutti_codec::IntPcm;
 use tutti_codec::ToFile;
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
-    BufferTarget, Control, FileTarget, Gain, Job, Normalize, Output, Outputs, RenderGraph,
-    Rendered, Setup, TailPolicy, Written, render,
+    BufferTarget, Control, FileTarget, Gain, Job, Normalize, Output, Outputs, RenderGraph, Setup,
+    TailPolicy, Written, render,
 };
 use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
@@ -78,7 +78,7 @@ fn one_buffer(
     graph: &mut RenderGraph,
     job: &Job,
     target: BufferTarget,
-) -> tutti_export::Result<Rendered> {
+) -> tutti_export::Result<Wave> {
     let mut outputs = Outputs::new();
     let planes = outputs.buffers(Output::main_output(target));
     let done = render(graph, job, &FrozenClock, outputs, &mut Control::none())?
@@ -168,7 +168,7 @@ fn main() -> tutti_export::Result<()> {
 
     // ---- 3. a graph into memory -----------------------------------------
     //
-    // `Rendered` is one plane per channel, so a surround render survives it. A
+    // A `Wave` is one plane per channel, so a surround render survives it. A
     // mono graph asked for as quad is placed by the engine's order: the front
     // pair carries the signal and the rears are silent — not four copies of the
     // same thing.
@@ -177,11 +177,11 @@ fn main() -> tutti_export::Result<()> {
         &job,
         BufferTarget::new(ChannelLayout::QUAD),
     )?;
-    let frames = quad.frames().get();
+    let frames = quad.len().get();
     let peaks: Vec<f32> = quad
-        .into_planes()
+        .planes()
         .iter()
-        .map(|p| p.iter().fold(0.0f32, |a, &b| a.max(b.abs())))
+        .map(|p| p.samples().iter().fold(0.0f32, |a, &b| a.max(b.abs())))
         .collect();
     println!(
         "mono -> quad: {} frames, per-channel peaks {peaks:?}",
@@ -218,7 +218,12 @@ fn main() -> tutti_export::Result<()> {
     // wants to hold the audio and decide for itself.
     let audio = one_buffer(&mut tone(), &job, BufferTarget::new(ChannelLayout::STEREO))?;
     let cfg = LoudnessConfig::new(Bed::Stereo.topology());
-    let flat = audio.interleaved();
+    let mut flat = vec![0.0f32; audio.layout().interleaved_len(audio.len())];
+    interleave(
+        audio.planes(),
+        InterleavedMut::new(&mut flat, audio.layout()).unwrap(),
+    )
+    .expect("the planes are as wide as the stereo layout");
     let before = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),

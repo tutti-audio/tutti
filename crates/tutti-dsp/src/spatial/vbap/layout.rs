@@ -103,6 +103,54 @@ impl TryFrom<Bed> for SpeakerLayout {
     }
 }
 
+/// A [`Bed`] whose speakers can be panned over, with its [`SpeakerLayout`].
+///
+/// The check is [`SpeakerLayout`]'s of the bed (`TryFrom<Bed>`), made once on the control
+/// side; a holder reads the bed and its layout with no second check that can fail. Two are
+/// equal when their beds are, since the layout is a function of the bed.
+#[derive(Debug, Clone)]
+pub struct BedLayout {
+    bed: Bed,
+    layout: SpeakerLayout,
+}
+
+impl BedLayout {
+    /// The bed.
+    #[must_use]
+    pub const fn bed(&self) -> Bed {
+        self.bed
+    }
+
+    /// The layout of the bed's placed speakers, in the bed's channel order.
+    #[must_use]
+    pub const fn layout(&self) -> &SpeakerLayout {
+        &self.layout
+    }
+}
+
+impl TryFrom<Bed> for BedLayout {
+    type Error = SpeakerGeometryError;
+
+    /// # Errors
+    ///
+    /// [`SpeakerGeometryError`] when the bed's speakers cannot be panned over:
+    /// [`Bed::Mono`] has one.
+    fn try_from(bed: Bed) -> Result<Self, SpeakerGeometryError> {
+        Ok(Self {
+            bed,
+            layout: SpeakerLayout::try_from(bed)?,
+        })
+    }
+}
+
+impl PartialEq for BedLayout {
+    fn eq(&self, other: &Self) -> bool {
+        self.bed == other.bed
+    }
+}
+
+impl Eq for BedLayout {}
+
 impl TryFrom<&[Direction]> for SpeakerLayout {
     type Error = SpeakerGeometryError;
 

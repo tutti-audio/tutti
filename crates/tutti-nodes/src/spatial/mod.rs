@@ -1,7 +1,6 @@
 //! Spatial panners.
 //!
 //! - [`VbapPannerNode`]: a stereo-in loudspeaker panner over a `Bed`.
-//! - [`VbapError`]: what building a VBAP panner can fail with.
 //! - [`HrtfBinauralNode`]: the binaural renderer.
 //!   Its error, `tutti_dsp::HrtfBinauralError`, and the sphere rates
 //!   (`MIN_SPHERE_RATE`, `MAX_SPHERE_RATE`, `MAX_PREPARED_RATE`) are
@@ -20,8 +19,8 @@ mod vbap;
 
 pub use ambisonic::{
     AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
-    AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
-    AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet,
+    AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicRotatorConfig,
+    AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet,
 };
 pub use hrtf::{HrtfBinauralConfig, HrtfBinauralNode};
-pub use vbap::{VbapError, VbapPannerConfig, VbapPannerNode};
+pub use vbap::{VbapPannerConfig, VbapPannerNode};

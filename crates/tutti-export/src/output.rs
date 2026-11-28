@@ -120,7 +120,7 @@ impl FileTarget {
 
 /// Planes in memory: an output rendered at the render's rate, not resampled
 /// and not dithered (they are not an output a listener hears), returned as a
-/// [`Rendered`](crate::Rendered).
+/// [`Wave`](tutti_buffers::Wave) with the target's channels and placement.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BufferTarget {
     pub(crate) width: Width,

@@ -19,7 +19,7 @@ use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Wave};
 use tutti_codec::{Encoding, Format, Landed, Pcm, Resample, ToFile};
 use tutti_export::{
     BufferTarget, Control, EventLossPolicy, FileTarget, Gain, Job, Normalize, Outcome, Output,
-    Outputs, RenderGraph, Rendered, Result, Setup, TailPolicy, Written, render,
+    Outputs, RenderGraph, Result, Setup, TailPolicy, Written, render,
 };
 use tutti_graph::{Editor, ForkTarget};
 use tutti_timeline::RenderClock;
@@ -134,15 +134,14 @@ impl ExportConfig {
     }
 }
 
-/// `rendered`, written by [`tutti_codec::write`] as the file `config` describes at `path`.
-pub(crate) fn write_rendered(
-    rendered: &Rendered,
+/// `wave`, written by [`tutti_codec::write`] as the file `config` describes at `path`.
+pub(crate) fn write_wave(
+    wave: &Wave,
     config: &ExportConfig,
     path: impl AsRef<Path>,
 ) -> tutti_codec::Result<Landed> {
-    let wave = Wave::from(rendered.clone());
     tutti_codec::write(
-        &wave,
+        wave,
         &ToFile::new(path.as_ref(), config.encoding()).replace(),
     )
 }
@@ -186,7 +185,7 @@ fn render_planes(
     clock: &dyn RenderClock,
     target: BufferTarget,
     control: &mut Control<'_>,
-) -> Result<Outcome<Rendered>> {
+) -> Result<Outcome<Wave>> {
     let mut outputs = Outputs::new();
     let key = outputs.buffers(Output::main_output(target));
     render(graph.borrow_mut(), job, clock, outputs, control).map(|outcome| {
@@ -221,7 +220,7 @@ pub(crate) fn render_to_buffers(
     graph: impl BorrowMut<RenderGraph>,
     config: &ExportConfig,
     clock: &dyn RenderClock,
-) -> Result<Rendered> {
+) -> Result<Wave> {
     let job = config.buffers_job()?;
     render_planes(
         graph,
@@ -279,7 +278,7 @@ pub(crate) fn render_buffers_under(
     config: &ExportConfig,
     clock: &dyn RenderClock,
     control: &mut Control<'_>,
-) -> Result<Outcome<Rendered>> {
+) -> Result<Outcome<Wave>> {
     let job = config.buffers_job()?;
     render_planes(graph, &job, clock, config.buffer_target(), control)
 }
