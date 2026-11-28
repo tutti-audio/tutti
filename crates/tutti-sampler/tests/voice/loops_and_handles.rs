@@ -13,11 +13,11 @@ use tutti_buffers::Interleaved;
 
 use tutti_buffers::Wave;
 use tutti_sampler::testing::{
-    MockTransport, free_source, loop_frames, placed_source, play, wait_for_open,
+    MockTransport, controlled, free_source, loop_frames, placed_source, play, wait_for_open,
 };
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, Manual, PlayDirection, Playback,
-    SlotId, StreamHandle, StreamStart, VoiceNode, VoiceNodeHandle, VoicePool, VoiceWindow,
+    SlotId, StreamHandle, StreamStart, VoiceNode, VoiceNodeControls, VoicePool, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, PlaybackRate, SampleRate, Samples};
 
@@ -86,15 +86,16 @@ fn window() -> VoiceWindow {
 }
 
 /// A memory voice node over the ramp, and its handle.
-fn memory_node() -> (VoiceNode<f32>, VoiceNodeHandle<f32>) {
+fn memory_node() -> (VoiceNode<f32>, VoiceNodeControls<f32>) {
     let source = placed_source(ramp(), window());
-    VoiceNode::with_channels(
-        source,
-        Playback::default(),
-        tutti_buffers::ChannelLayout::MONO,
+    controlled(
+        VoiceNode::with_channels(
+            source,
+            Playback::default(),
+            tutti_buffers::ChannelLayout::MONO,
+        )
+        .expect("a finite gain and a nonempty width"),
     )
-    .expect("a finite gain and a nonempty width")
-    .with_handle()
 }
 
 fn assert_frames(what: &str, got: &[f32], want: impl Fn(usize) -> usize) {
@@ -162,9 +163,10 @@ fn a_looped_disk_voice_repeats_the_span() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let (mut streamer, stream, reader) = streaming(dir.path());
     let voice = DiskVoice::from_reader(reader, window());
-    let (mut node, handle) = VoiceNode::streaming(voice, stream, Playback::default())
-        .expect("a finite gain and a nonempty width")
-        .with_handle();
+    let (mut node, handle) = controlled(
+        VoiceNode::streaming(voice, stream, Playback::default())
+            .expect("a finite gain and a nonempty width"),
+    );
     handle
         .looping_cell()
         .publish(Some(loop_frames(300, 700, 0)));
@@ -259,40 +261,44 @@ fn play_pool_calling(
     out
 }
 
-/// **The handle's speed cell sets a memory voice's speed, and stops and resumes a
+/// **The controls' speed cell sets a memory voice's speed, and stop and resume a
 /// free-running one.** At speed 2 the voice reads every second file frame; a
-/// placed voice refuses `stop` and `play`; a free-running one, stopped, is
-/// silent and reads nothing, and resumes where its cursor stopped.
+/// placed voice has no steering to stop or play; a free-running one, stopped,
+/// is silent and reads nothing, and resumes where its cursor stopped.
 #[test]
-fn a_node_handle_sets_speed_and_stops_and_resumes_a_free_running_voice() {
+fn a_nodes_controls_set_speed_and_stop_and_resume_a_free_running_voice() {
     let (mut node, handle) = memory_node();
     handle.speed_cell().publish(PlaybackRate::of(2.0));
     let got = render_with(&mut node, 400);
     assert_frames("speed 2", &got, |n| 2 * n);
-    assert_eq!(handle.stop(), Err(tutti_sampler::PlayError::Placed));
-    assert_eq!(handle.play(), Err(tutti_sampler::PlayError::Placed));
+    assert!(
+        handle.steering().is_none(),
+        "a placed voice has no steering"
+    );
 
     let source = free_source(ramp());
-    let (mut node, handle) = VoiceNode::with_channels(
-        source,
-        Playback::default(),
-        tutti_buffers::ChannelLayout::MONO,
-    )
-    .expect("a finite gain and a nonempty width")
-    .with_handle();
+    let (mut node, handle) = controlled(
+        VoiceNode::with_channels(
+            source,
+            Playback::default(),
+            tutti_buffers::ChannelLayout::MONO,
+        )
+        .expect("a finite gain and a nonempty width"),
+    );
     node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
     let t = rolling();
+    let steering = handle.steering().expect("a free-running voice");
     let mut heard = Vec::new();
     for block in 0..6 {
         match block {
-            2 => handle.stop().expect("a free-running voice"),
-            4 => handle.play().expect("a free-running voice"),
+            2 => steering.stop(),
+            4 => steering.play(),
             _ => {}
         }
         heard.extend(tutti_sampler::testing::block(&mut node, &t, RATE, BLOCK).swap_remove(0));
         t.advance(BLOCK as i64, RATE);
     }
-    assert!(handle.is_playing());
+    assert!(steering.is_playing());
     for (n, &g) in heard.iter().enumerate() {
         let stopped = (2 * BLOCK..4 * BLOCK).contains(&n);
         let cursor = if n >= 4 * BLOCK { n - 2 * BLOCK } else { n };
@@ -378,7 +384,7 @@ fn a_free_running_voice_refuses_stretch_until_it_is_placed() {
 #[test]
 fn play_restarts_a_free_running_voice_after_a_reset() {
     use tutti_graph::Node;
-    let (node, handle) = free_node(Playback::default()).with_handle();
+    let (node, handle) = controlled(free_node(Playback::default()));
     let mut node = tutti_sampler::testing::prepared(node, RATE, BLOCK);
     let t = rolling();
     let block = |node: &mut VoiceNode<f32>| {
@@ -392,7 +398,7 @@ fn play_restarts_a_free_running_voice_after_a_reset() {
         block(&mut node).iter().all(|&g| g == 0.0),
         "stopped by the reset"
     );
-    handle.play().expect("a free-running voice");
+    handle.steering().expect("a free-running voice").play();
     assert_frames("after play", &block(&mut node), |n| n);
 }
 

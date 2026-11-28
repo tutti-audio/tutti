@@ -1,11 +1,11 @@
-//! The control plane of the voice nodes: the handles a host steers them
-//! through, and the commands a pool's handle queues for its audio thread.
+//! The control plane of the voice pool: the handle a host steers it
+//! through, and the commands it queues for its audio thread.
 //!
 //! A [`VoicePoolHandle`] queues a command per call, drained inside the audio
 //! callback, so every command is built control-side, allocation included: the
 //! handle is where the vocoder gets constructed for a voice that needs
-//! one, precisely so the callback never has to. A [`VoiceNodeHandle`] steers
-//! its one voice and owns the disk [`StreamHandle`] that feeds it.
+//! one, precisely so the callback never has to. A standalone voice node's
+//! controls are [`VoiceNodeControls`](super::node_controls::VoiceNodeControls).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,10 +23,9 @@ use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_dsp::PhaseVocoder;
-use tutti_graph::ParamSet;
 use tutti_music::LoopRange;
-use tutti_rt::{AtomicCell, Param};
-use tutti_rt::{Mutex, Publisher, PushError, RingReader, RingWriter};
+use tutti_rt::AtomicCell;
+use tutti_rt::{Mutex, PushError, RingReader, RingWriter};
 use tutti_units::{Amplitude, Beat, Cents, PlaybackRate, StretchFactor};
 
 /// Voice slots a pool reserves, and the most its `AddVoice` drain will hold.
@@ -314,19 +313,8 @@ pub(crate) struct Queued<F: SamplerFloat> {
 }
 
 // ---------------------------------------------------------------------------
-// Handle — held by ECS systems, sends commands to the audio-thread unit.
+// Pool handle — held by ECS systems, sends commands to the audio-thread unit.
 // ---------------------------------------------------------------------------
-
-/// A voice on the transport cannot be played or stopped by hand.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
-#[non_exhaustive]
-pub enum PlayError {
-    /// The voice is placed: its window says when it sounds, and
-    /// [`play`](VoiceNodeHandle::play) and [`stop`](VoiceNodeHandle::stop)
-    /// drive a free-running voice.
-    #[error("the voice is placed on the transport; its window says when it sounds")]
-    Placed,
-}
 
 /// Publishes `value` to `cell` when it differs from the one in it: the
 /// request a stream's streamer reads.
@@ -427,284 +415,6 @@ impl SendError {
     /// means "stop trying".
     pub fn is_disconnected(self) -> bool {
         matches!(self, Self::Disconnected)
-    }
-}
-
-/// The controls of a standalone [`VoiceNode`](super::node::VoiceNode): what
-/// its `IntoNode` hands back. Its gain, a scalar cell the node reads once per
-/// block, its window, loop, speed and play state, published values the node
-/// reads once per block, and, for a voice that streams, the disk [`StreamHandle`]
-/// that feeds it.
-///
-/// # An owned handle, and why it is owned
-///
-/// A host keeps this where the node's control thread is: it is the node's
-/// cross-thread control surface (the audio thread reads what it publishes),
-/// and it is `Clone` so a UI and an automation thread can both hold one. It
-/// owns the disk [`StreamHandle`] because a stream ends when its handle drops, and a
-/// stream held apart from the voice is one a caller can drop by accident and
-/// silence the voice: here the stream lives exactly as long as the last
-/// clone of the handle, which the session's graph keeps for as long as the
-/// node is in it. A stream is control-thread only (its drop sends on a
-/// bounded queue), so it is never the node's: the node reads the ring, this
-/// steers it.
-///
-/// # Why a separate handle rather than reusing [`VoicePoolHandle`]
-///
-/// A pool addresses its voices by [`SlotId`] and hands retired slots back for
-/// the control thread to free. A `VoiceNode` holds exactly one voice for its
-/// whole life: there is no id to address and nothing is ever retired, so both of
-/// those fields would be dead weight that every call site has to supply a
-/// meaningless value for. The controls it takes are also a strict subset: an
-/// add or a remove has no meaning for a node that *is* its voice.
-///
-/// So its methods name the voice implicitly, and there is no command queue at
-/// all: a window, a loop and a speed are values only the latest of which
-/// matters, so each is published rather than sent, and nothing a caller does
-/// here can hand the node a payload (a boxed `Voice`, a wave, a stretch
-/// vocoder) to drop on the audio thread.
-///
-/// ```compile_fail
-/// # use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode};
-/// # use tutti_buffers::{ChannelLayout, Mono, Wave};
-/// # use std::sync::Arc;
-/// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
-/// # let source = MemorySource::from(MemorySourceConfig::new(wave.clone(), ChannelLayout::STEREO).expect("a placeable wave"));
-/// let (_node, handle) = VoiceNode::new(source, Playback::default()).expect("a finite gain and a nonempty width").with_handle();
-/// // A standalone voice node has no door for a pool's wave swap.
-/// let _ = handle.replace_wave(tutti_sampler::SlotId(0), wave);
-/// ```
-///
-/// The same setup with a control it does take compiles:
-///
-/// ```
-/// # use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode, VoiceWindow};
-/// # use tutti_buffers::{ChannelLayout, Mono, Wave};
-/// # use std::sync::Arc;
-/// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
-/// # let source = MemorySource::from(MemorySourceConfig::new(wave.clone(), ChannelLayout::STEREO).expect("a placeable wave"));
-/// let (_node, handle) = VoiceNode::new(source, Playback::default()).expect("a finite gain and a nonempty width").with_handle();
-/// handle.window_cell().publish(Some(VoiceWindow::from(tutti_units::Beat::new(1.0))));
-/// ```
-#[derive(Clone, Debug)]
-pub struct VoiceNodeHandle<F: SamplerFloat> {
-    /// What the handle publishes besides the gain, shared with the node
-    /// (which reads it once per block) and with its fork source (which reads
-    /// it at fork time).
-    pub(crate) steering: SteeringCell,
-    /// The voice's window: `Some` places it on the transport, `None` leaves it
-    /// free-running. The cell the node reads once per block.
-    pub(crate) window: Publisher<Option<VoiceWindow>>,
-    /// The voice's loop. A streamed voice's is its [`StreamHandle`]'s cell, which the
-    /// streamer reads too; a memory voice's is read by the node alone.
-    pub(crate) looping: ControlCell<Option<Loop>>,
-    /// The voice's direction, held as the loop is.
-    pub(crate) direction: ControlCell<PlayDirection>,
-    /// The voice's varispeed: the cell the node reads once per block, on
-    /// either tier (a streamed voice's node writes it into the stream's
-    /// playback cells).
-    pub(crate) speed: Publisher<PlaybackRate>,
-    /// The latest steering, which the setters edit under the lock and
-    /// publish: two handles racing never lose each other's field.
-    latest: Arc<Mutex<Steering>>,
-    /// The voice's gain: the cell the node reads once per block.
-    pub(crate) gain: Param<Amplitude>,
-    /// The gain by address ([`UnitParam::Volume`](tutti_units::UnitParam)),
-    /// for a host that sets params by address.
-    pub(crate) params: ParamSet,
-    /// The stream that feeds a disk voice, whose loop and direction cells the
-    /// handle's are.
-    stream: Option<Arc<Mutex<StreamHandle<F>>>>,
-}
-
-/// What a [`VoiceNode`](super::node::VoiceNode)'s handle publishes besides
-/// the gain, the window, the loop, the direction and the speed, latest wins:
-/// the play state.
-///
-/// The handle publishes (control thread); the node lends the cell once per
-/// block, and applies what differs from what it last applied; the fork
-/// source reads [`Publisher::current`] when a fork is taken, so a clip moved
-/// after the insert exports where it was moved to.
-///
-/// Latest-wins loses nothing a queue would have delivered: applying each
-/// field is a plain overwrite (no seek, no re-arm), so applying every
-/// intermediate value in one block ends in the same state as applying the
-/// last, and nothing else rides with it to be ordered against.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct Steering {
-    /// Whether the handle has stopped the voice.
-    pub(crate) stopped: bool,
-    /// How many times the handle has played the voice: each one starts a
-    /// free-running memory voice's cursor, which a reset leaves stopped. A
-    /// wrapping count, compared only for equality.
-    pub(crate) plays: u32,
-}
-
-pub(crate) type SteeringCell = Publisher<Steering>;
-
-impl<F: SamplerFloat> VoiceNodeHandle<F> {
-    pub(crate) fn new(
-        steering: SteeringCell,
-        window: Publisher<Option<VoiceWindow>>,
-        looping: ControlCell<Option<Loop>>,
-        direction: ControlCell<PlayDirection>,
-        speed: Publisher<PlaybackRate>,
-        gain: Param<Amplitude>,
-        params: ParamSet,
-        stream: Option<StreamHandle<F>>,
-    ) -> Self {
-        Self {
-            latest: Arc::new(Mutex::new(*steering.current())),
-            steering,
-            window,
-            looping,
-            direction,
-            speed,
-            gain,
-            params,
-            stream: stream.map(|s| Arc::new(Mutex::new(s))),
-        }
-    }
-
-    /// Edits the steering under the lock and publishes the result. Control
-    /// thread: publishing allocates the new value and frees the one it
-    /// replaces, here, so the node never does either.
-    fn steer(&self, edit: impl FnOnce(&mut Steering)) {
-        let mut latest = self.latest.lock();
-        edit(&mut latest);
-        self.steering.publish(*latest);
-    }
-
-    /// The cell holding the voice's window: `Some` places the voice on the
-    /// transport, `None` leaves it free-running.
-    ///
-    /// A window is a [`Beat`] (`f64`) plus an optional
-    /// duration: two values, and a precision the transport cannot afford to
-    /// lose, so it is no scalar param (an `f32` beat position loses whole
-    /// frames past ~2²⁴). The node lends the cell once per block, so a window
-    /// published twice between two blocks plays the second. A fork of the node
-    /// taken after a publish starts from it. A streamed voice is always
-    /// placed: `None` leaves it at the window it has. Stretch applies only to
-    /// a placed voice, so a stretched clip given `None` plays dry.
-    ///
-    /// The session writes it (`sampler.window()`); a host driving a node by
-    /// hand publishes into it.
-    pub fn window_cell(&self) -> &Publisher<Option<VoiceWindow>> {
-        &self.window
-    }
-
-    /// Whether the voice plays its window of the transport, as published.
-    pub fn is_placed(&self) -> bool {
-        self.stream.is_some() || self.window.current().is_some()
-    }
-
-    /// The cell holding the voice's loop: `None` plays once.
-    ///
-    /// The node lends it once per block and applies a change to a resident
-    /// source. A streamed voice's is its [`StreamHandle`]'s cell
-    /// ([`StreamHandle::looping_cell`]), which the streamer reads and applies to the
-    /// ring's layout, which the node reads. The session writes it
-    /// (`sampler.looping()`); a host driving a node by hand publishes into it.
-    pub fn looping_cell(&self) -> &ControlCell<Option<Loop>> {
-        &self.looping
-    }
-
-    /// The cell holding the voice's direction, held as the
-    /// [loop](Self::looping_cell) is.
-    pub fn direction_cell(&self) -> &ControlCell<PlayDirection> {
-        &self.direction
-    }
-
-    /// What the streamer reports of a disk voice's stream (whether it is
-    /// still opening, live or ended, and the fault that ended it); `None` for
-    /// a memory voice, which has no stream.
-    #[must_use]
-    pub fn status(&self) -> Option<crate::StreamStatus> {
-        self.stream.as_ref().map(|s| s.lock().status())
-    }
-
-    /// The cell holding the voice's varispeed (pitch follows the rate), on
-    /// either tier.
-    ///
-    /// The node lends it once per block and applies a change, so a speed
-    /// published twice between two blocks plays the second. A fork of the node
-    /// taken after a publish starts from it. The session writes it
-    /// (`sampler.speed()`); a host driving a node by hand publishes into it.
-    pub fn speed_cell(&self) -> &Publisher<PlaybackRate> {
-        &self.speed
-    }
-
-    /// Starts a free-running voice, or resumes one [`stop`](Self::stop)ped:
-    /// the voice sounds from the node's next block, from where its cursor is
-    /// (a reset rewinds it).
-    ///
-    /// Placed means the published window ([`is_placed`](Self::is_placed)),
-    /// checked on the control thread before the steer: a window published
-    /// between the two is not seen by this call.
-    ///
-    /// A free-running voice has limits: it reads forwards, or backwards when
-    /// built reversed, on its own cursor, loops as built, and is never
-    /// stretched (the stretch setters refuse it,
-    /// [`SendError::FreeRunning`]).
-    ///
-    /// # Errors
-    ///
-    /// [`PlayError::Placed`] for a voice on the transport: its window says
-    /// when it sounds.
-    pub fn play(&self) -> Result<(), PlayError> {
-        self.drive(false)
-    }
-
-    /// Stops a free-running voice: it is silent from the node's next block and
-    /// reads nothing, until [`play`](Self::play).
-    ///
-    /// # Errors
-    ///
-    /// [`PlayError::Placed`] for a voice on the transport.
-    pub fn stop(&self) -> Result<(), PlayError> {
-        self.drive(true)
-    }
-
-    fn drive(&self, stopped: bool) -> Result<(), PlayError> {
-        if self.is_placed() {
-            return Err(PlayError::Placed);
-        }
-        self.steer(|s| {
-            s.stopped = stopped;
-            if !stopped {
-                s.plays = s.plays.wrapping_add(1);
-            }
-        });
-        Ok(())
-    }
-
-    /// Whether the voice is playing (not [`stop`](Self::stop)ped).
-    pub fn is_playing(&self) -> bool {
-        !self.latest.lock().stopped
-    }
-
-    /// Sets the voice's gain, from the node's next block on. A write to a
-    /// shared cell: never lost, never queued.
-    ///
-    /// # Errors
-    ///
-    /// [`GainError::NotFinite`] for a NaN or infinite gain; the voice keeps
-    /// the gain it had.
-    pub fn set_gain(&self, gain: Amplitude) -> Result<(), GainError> {
-        GainError::check(gain)?;
-        self.params.set(tutti_units::UnitParam::Volume, gain.get());
-        Ok(())
-    }
-
-    /// The voice's gain, as last set.
-    pub fn gain(&self) -> Amplitude {
-        self.gain.load()
-    }
-
-    /// The node's params by address: its gain, as
-    /// [`UnitParam::Volume`](tutti_units::UnitParam::Volume).
-    pub fn params(&self) -> &ParamSet {
-        &self.params
     }
 }
 
@@ -1469,18 +1179,6 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             }
             other => other,
         }
-    }
-}
-
-/// Frees what the control side retired and no block holds, without publishing
-/// (the placement windows a replacement left behind); control thread, from the owner's tick.
-impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
-    fn reclaim(&self) -> usize {
-        self.steering.reclaim()
-            + self.window.reclaim()
-            + self.looping.reclaim()
-            + self.direction.reclaim()
-            + self.speed.reclaim()
     }
 }
 

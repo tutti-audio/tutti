@@ -12,7 +12,7 @@ use tutti_units::{Amplitude, Beat, PlaybackRate};
 use crate::streamer::{StreamHandle, StreamReader};
 use crate::{
     DiskVoice, GainError, Loop, MemorySource, MemorySourceConfig, PlaceError, Playback, VoiceNode,
-    VoiceNodeHandle, VoiceWindow, voice_width,
+    VoiceNodeControls, VoiceWindow, voice_width,
 };
 
 /// A sample placed on the timeline: where it starts, how loud, and whether it
@@ -46,7 +46,7 @@ use crate::{
 /// another. A streamed clip's is its stream's, which its open chose.
 ///
 /// A clip is a [`VoiceNode`]'s: its controls are the node's
-/// [`VoiceNodeHandle`], which also owns a streamed clip's stream, so the clip
+/// [`VoiceNodeControls`], which also owns a streamed clip's stream, so the clip
 /// sounds for as long as the node is in its graph.
 ///
 /// `Clip` is a thin builder over [`VoiceNode`], which stays the doorway for
@@ -147,10 +147,9 @@ impl<F: SamplerFloat> Clip<F> {
         Ok(self)
     }
 
-    /// Starts the clip at `start` on the timeline. A clip's node is placed
-    /// from the start; its window can be published away
-    /// ([`VoiceNodeHandle::window_cell`]), which frees it to run on its own
-    /// cursor, forwards or backwards as built, unstretched.
+    /// Starts the clip at `start` on the timeline. A clip's node is placed for
+    /// its life; its window can be moved
+    /// ([`VoiceNodeControls::window_cell`]), never taken away.
     pub fn at(mut self, start: Beat) -> Self {
         self.window.start = start;
         self
@@ -227,9 +226,9 @@ impl<F: SamplerFloat, K: PublishedKind> HasPublished<K> for Clip<F> where
 }
 
 impl<F: SamplerFloat> IntoNode<F> for Clip<F> {
-    type Controls = VoiceNodeHandle<F>;
+    type Controls = VoiceNodeControls<F>;
 
-    fn into_parts(self) -> NodeParts<VoiceNodeHandle<F>, F> {
+    fn into_parts(self) -> NodeParts<VoiceNodeControls<F>, F> {
         self.into_node().into_parts()
     }
 }

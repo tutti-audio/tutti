@@ -29,7 +29,7 @@
 //!   thread through a `VoicePoolHandle` (add, remove, re-place, respeed, stretch).
 //!   Adding or removing a voice is a queued command, not a graph edit.
 //! - `VoiceNode`: a single voice as its own node, for previews and single clips,
-//!   controlled through a `VoiceNodeHandle`.
+//!   controlled through a `VoiceNodeControls`.
 //!
 //! A voice placed on the transport (a start beat and an optional duration)
 //! derives its read position from the playhead in its block's `Env`, so it enters,
@@ -136,7 +136,7 @@
 //! - [`Voice`], [`VoiceSource`], [`Playback`]: a voice of either tier and its
 //!   control state.
 //! - [`VoicePool`] with [`VoicePoolHandle`], and [`VoiceNode`] with
-//!   [`VoiceNodeHandle`]: the graph nodes that play voices, and their
+//!   [`VoiceNodeControls`]: the graph nodes that play voices, and their
 //!   control-thread handles (add, steer and remove voices; a node's handle
 //!   owns the disk stream that feeds it).
 //! - [`Clip`]: one sample placed on the timeline, resident or streamed.
@@ -216,9 +216,9 @@ impl<F: tutti_rt::RingFloat + tutti_dsp::FftFloat> SamplerFloat for F {}
 // crate constructs it.
 //
 pub use voice::{
-    DirectionKind, DiskVoice, DiskVoiceControls, GainError, Loop, LoopError, LoopingKind,
-    MemorySource, MemorySourceConfig, PlayDirection, PlayError, Playback, PoolDrops, SendError,
-    SlotId, SpeedKind, StreamingAddError, Voice, VoiceNode, VoiceNodeError, VoiceNodeHandle,
+    DirectionKind, DiskVoice, DiskVoiceControls, FreeRunning, GainError, Loop, LoopError,
+    LoopingKind, MemorySource, MemorySourceConfig, PlayDirection, Playback, PoolDrops, SendError,
+    SlotId, SpeedKind, StreamingAddError, Voice, VoiceNode, VoiceNodeControls, VoiceNodeError,
     VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow, WindowKind, memory_voice, voice_width,
 };
 // The async disk-streaming engine (streamer future + the `DiskStreamer` handle).
