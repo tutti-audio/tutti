@@ -804,7 +804,7 @@ fn write<'a, T: Clone>(slot: &'a mut Arc<T>, structure: &mut Structure) -> &'a m
 }
 
 /// How many times the spec or the shapes were written, and whether any write
-/// has happened since a commit was sent.
+/// has happened since the last commit that returned `Ok`.
 struct Structure {
     moves: u64,
     edited: bool,
