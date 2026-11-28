@@ -62,3 +62,8 @@ mod takes;
 // What an `update`'s events say it sent.
 #[path = "../support/committed.rs"]
 mod committed;
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(feature = "export")]
+#[path = "../support/bounced.rs"]
+mod bounced;

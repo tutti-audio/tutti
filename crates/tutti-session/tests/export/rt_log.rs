@@ -18,9 +18,10 @@ use support::{Noisy, SITE, rt_events_on_any_thread};
 fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() {
     let mut session = Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
-    session.set_sample_rate(SampleRate::of(48_000.0)).unwrap();
+        .sample_rate(SampleRate::of(48_000.0))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds");
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()

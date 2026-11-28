@@ -52,8 +52,10 @@ fn a_bounce_into_memory_carries_the_channels_it_was_asked_for() {
     let wave = |destination: ToMemory| {
         let mut session = Session::builder()
             .outputs_floor(ChannelLayout::STEREO)
-            .build_detached(SampleRate::SR_48K)
-            .expect("a detached session builds");
+            .sample_rate(SampleRate::SR_48K)
+            .block_dates(tutti_session::BlockDates::Frames)
+            .build()
+            .expect("an offline session builds");
         let node = session
             .graph()
             .add(ForkByClone(Const::new(0.25, ChannelLayout::STEREO)));

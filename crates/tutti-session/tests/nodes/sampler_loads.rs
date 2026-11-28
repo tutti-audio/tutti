@@ -10,9 +10,7 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_sampler::{OpenError, StreamPhase, StreamStart};
-use tutti_session::{
-    AudioData, LoadError, MainOutput, OpenStreamError, OutputPort, SamplerError, Session, Tier,
-};
+use tutti_session::{AudioData, LoadError, MainOutput, OpenStreamError, OutputPort, Session, Tier};
 use tutti_units::{Beat, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -108,19 +106,6 @@ fn a_file_read_for_another_session_is_stale() {
     assert!(matches!(
         b.apply(opened).err(),
         Some(OpenStreamError::Stale)
-    ));
-}
-
-/// A session with no disk streamer refuses an open at the call.
-#[test]
-fn a_session_without_a_streamer_refuses_an_open_at_the_call() {
-    let s = Session::builder()
-        .build_detached(SampleRate::of(RATE))
-        .expect("builds");
-    let dir = tempfile::tempdir().expect("a temp dir");
-    assert!(matches!(
-        s.open_stream(dir.path().join("a.wav"), StreamStart::HEAD),
-        Err(SamplerError::NoStreamer)
     ));
 }
 

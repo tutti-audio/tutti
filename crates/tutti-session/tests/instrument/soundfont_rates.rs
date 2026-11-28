@@ -18,7 +18,10 @@ fn a_session_refuses_a_rate_the_soundfont_unit_does_not_run_at() {
     );
     let mut s = Session::builder()
         .outputs_floor(ChannelLayout::MONO)
-        .build_detached(SampleRate::SR_48K)
+        .outputs(ChannelLayout::MONO)
+        .sample_rate(SampleRate::SR_48K)
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
         .expect("builds");
     let key = s.graph().add(unit);
     let supported =

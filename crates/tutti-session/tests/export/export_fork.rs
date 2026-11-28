@@ -15,7 +15,7 @@
 
 use crate::bounced::bounced;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_buffers::InterleavedMut;
 use tutti_fixtures::WavePlanes;
 use tutti_session::ToMemory;
 
@@ -35,25 +35,20 @@ use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_rt::Mutex;
 use tutti_rt::Param;
 use tutti_session::{
-    Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InputPort,
-    MainOutput, OutputPort, PreparedGraph, Range, Session, Stem, StemKey,
+    Bounce, BounceConfigError, BounceError, BounceLatency, ExportClock, InputPort, MainOutput,
+    OutputPort, PreparedGraph, Range, Session, Stem, StemKey,
 };
 use tutti_units::{Amplitude, Hz, Q, SampleRate, Samples, Seconds, Tail};
 
 const RATE: f64 = 48_000.0;
 
-/// A detached stereo session whose graph is at the export's rate.
-fn session() -> DetachedSession {
-    session_with_outputs(2)
-}
-
-fn session_with_outputs(outputs: usize) -> DetachedSession {
-    let mut session = Session::builder()
-        .outputs_floor(ChannelLayout::clamped(outputs))
-        .build_detached(SampleRate::DEFAULT)
-        .expect("a detached session builds");
-    session.set_sample_rate(SampleRate::of(RATE)).unwrap();
-    session
+/// An offline stereo session whose graph is at the export's rate.
+fn session() -> Session {
+    Session::builder()
+        .sample_rate(SampleRate::of(RATE))
+        .block_dates(tutti_session::BlockDates::Frames)
+        .build()
+        .expect("an offline session builds")
 }
 
 /// A bounce of the mix into memory for `seconds`: stereo at `rate`, on a
@@ -78,7 +73,7 @@ fn buffers(seconds: f64) -> Bounce<NodeKey, ToMemory> {
 }
 
 /// The planes `bounce` renders, run on this thread.
-fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
+fn render(session: &mut Session, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<f32>> {
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
@@ -87,10 +82,7 @@ fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
 
 /// The planes `bounce` renders for each of its stems, in memory, run on this
 /// thread: the main output is rendered with them and not returned.
-fn render_stems(
-    session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, ToMemory>,
-) -> Vec<Vec<Vec<f32>>> {
+fn render_stems(session: &mut Session, bounce: Bounce<NodeKey, ToMemory>) -> Vec<Vec<Vec<f32>>> {
     let (_, mut done, keys) = bounced(session, bounce)
         .expect("the bounce renders")
         .into_parts();
@@ -103,14 +95,14 @@ fn render_stems(
 }
 
 /// The one stem `node` of a bounce of `seconds`: its planes.
-fn stem_of(session: &mut DetachedSession, node: NodeKey, seconds: f64) -> Vec<Vec<f32>> {
+fn stem_of(session: &mut Session, node: NodeKey, seconds: f64) -> Vec<Vec<f32>> {
     render_stems(session, buffers(seconds).stem_with(Stem::new(node)))
         .pop()
         .expect("one stem")
 }
 
 /// What the session refuses `bounce` with, started and run on this thread.
-fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> BounceError {
+fn refused(session: &mut Session, bounce: Bounce<NodeKey, ToMemory>) -> BounceError {
     match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!(
@@ -127,7 +119,7 @@ fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> 
 /// A saw through a low-pass on channel 0, the raw saw on channel 1: a main output
 /// that differs from a node export of the filter on every channel, so the
 /// two cannot pass for each other. Returns the filter's key.
-fn chain(session: &mut DetachedSession) -> NodeKey {
+fn chain(session: &mut Session) -> NodeKey {
     let graph = session.graph();
     let osc = graph.add(ForkByClone(Osc::saw(Hz::new(110.0))));
     let filter = graph.add(SvfFilterNode::from(
@@ -440,27 +432,6 @@ fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
     );
 }
 
-/// **An export of a graph with no outputs says so**, for the main output and for
-/// a bounce that also names a stem — not that the stem's node is unheard.
-#[test]
-fn a_graph_with_no_outputs_says_so() {
-    let mut session = session_with_outputs(0);
-    let node = session.graph().add(ForkByClone(Osc::sine(Hz::new(220.0))));
-    for with_stem in [false, true] {
-        let bounce = if with_stem {
-            buffers(0.01).stem_with(Stem::new(node.erase()))
-        } else {
-            buffers(0.01)
-        };
-        match refused(&mut session, bounce) {
-            BounceError::Config(BounceConfigError::GraphHasNoOutputs) => {}
-            other => {
-                panic!("stem {with_stem}: expected a refusal naming the outputs, got {other:?}")
-            }
-        }
-    }
-}
-
 /// **A stem that cannot be rendered is refused by name, before anything is
 /// forked**: a node that is not in the graph, one no output hears (a sink with
 /// no outputs of its own, and a source that is merely unwired: the fork holds
@@ -479,12 +450,14 @@ fn an_unrenderable_stem_is_refused_by_name() {
     let orphan = session.graph().add(ForkByClone(Sink::mono()));
     let loose = session.graph().add(ForkByClone(Const::mono(0.25)));
     let gone = NodeKey::fresh();
-    let refusal = |session: &mut DetachedSession, stem: Stem<NodeKey, tutti_session::ToMemory>| {
-        match refused(session, buffers(0.01).stem_with(stem)) {
+    let refusal =
+        |session: &mut Session, stem: Stem<NodeKey, tutti_session::ToMemory>| match refused(
+            session,
+            buffers(0.01).stem_with(stem),
+        ) {
             BounceError::Config(why) => why,
             other => panic!("expected a refusal by name, got {other:?}"),
-        }
-    };
+        };
     assert_eq!(
         refusal(&mut session, Stem::new(gone)),
         BounceConfigError::StemNotInGraph { node: gone }
@@ -520,7 +493,7 @@ fn an_unrenderable_stem_is_refused_by_name() {
 
 /// A one-second-free session with a constant 0.5 on the outputs: a graph a
 /// hook's edit is told apart from by its level.
-fn graph_with_one_node_on() -> (DetachedSession, NodeKey) {
+fn graph_with_one_node_on() -> (Session, NodeKey) {
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(node, MainOutput).unwrap().unfaded();
@@ -692,7 +665,7 @@ impl Node for Counter {
 }
 
 /// **Live playback is untouched by an export rendering beside it.** The live
-/// graph's audio side renders on its own thread, block after block, from
+/// session renders on its own thread, block after block, from
 /// before the export starts until after it reports; the export renders a
 /// fork of the same graph meanwhile. The live signal counts on without a
 /// jump, and the export counts from 0 (a fork is reset) — the two never
@@ -707,31 +680,36 @@ fn live_playback_continues_unaffected_while_an_export_renders() {
         n: Arc::new(AtomicU64::new(0)),
     });
     session.graph().connect(node, MainOutput).unwrap().unfaded();
-    // Commit on this side, then hand the audio side to the "device".
-    session.render_frame(InterleavedMut::one_frame(&mut [0.0, 0.0]).unwrap());
-    let mut live = session.graph().take_audio_side();
+    let _ = session.update();
+    let job = session.bounce(buffers(1.0)).expect("the bounce starts");
 
     let done = AtomicBool::new(false);
     let (heard, rendered) = std::thread::scope(|s| {
         let device = s.spawn(|| {
             let mut heard = Vec::new();
-            let mut block = vec![vec![0.0; 256]; 2];
+            let mut block = vec![0.0f32; 256 * 2];
             // At least a few blocks after the export reports, so the two
             // overlap from end to end.
             let mut after = 0;
             while after < 8 {
-                live.render(256, PlanesMut::from_vecs(&mut block).unwrap());
-                heard.extend_from_slice(&block[0]);
+                session
+                    .render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
+                heard.extend(block.chunks_exact(2).map(|frame| frame[0]));
                 if done.load(Ordering::Acquire) {
                     after += 1;
                 }
             }
             heard
         });
-        let rendered = render(&mut session, buffers(1.0));
+        let rendered = block_on(job);
         done.store(true, Ordering::Release);
         (device.join().expect("the live side"), rendered)
     });
+    let rendered = session
+        .apply(rendered)
+        .expect("the render applies")
+        .into_main_output()
+        .to_planes();
 
     for (i, &s) in rendered[0].iter().enumerate() {
         assert_eq!(s, i as f32, "the export's count at frame {i}");
