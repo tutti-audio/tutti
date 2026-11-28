@@ -5,7 +5,6 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_fixtures::midi;
-use tutti_graph::TransportPosition;
 use tutti_graph::UmpAt;
 use tutti_graph::{Cx, EventKind, IntoNode, Io, Node, NodeKey, NodeParts, Prepare, Shape, Status};
 use tutti_midi_runtime::{ClipEvents, MidiOut, Outgoing, Taken, TimedMidiEvent};
@@ -13,7 +12,6 @@ use tutti_rt::Mutex;
 use tutti_session::Session;
 use tutti_ump::{Address, CCNumber, MidiGroup};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
-use tutti_units::Bpm;
 use tutti_units::{Beat, BeatDuration};
 
 /// The mezzo-forte default: MIDI 2.0's center velocity.
@@ -323,16 +321,11 @@ pub(crate) fn headed_clip() -> ClipEvents {
     )
 }
 
-/// One frame of the audio side, the `n`th, on a rolling transport that has
-/// run `n` frames (a beat is 24 000 frames at 120 BPM) from beat 0.01, past the
-/// clip's Program Change 5 at beat 0.001.
-pub(crate) fn tick(side: &mut tutti_session::AudioSide, n: u32) {
-    side.set_transport(TransportPosition::new(
-        true,
-        Bpm::of(120.0),
-        Beat::new(0.01 + f64::from(n) / 24_000.0),
-        None,
-    ));
+/// One frame of the session, rendered: on a transport rolling (a beat is
+/// 24 000 frames at 120 BPM and 48 kHz) from beat 0.01, past the clip's
+/// Program Change 5 at beat 0.001: the `n`th frame after a locate to 0.01
+/// and a play is at beat `0.01 + n / 24_000`.
+pub(crate) fn tick(s: &mut Session) {
     let mut out = [0.0f32; 2];
-    side.tick(InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
+    s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
 }
