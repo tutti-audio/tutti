@@ -38,6 +38,7 @@ pub(crate) mod node_controls;
 pub(crate) mod pool;
 pub(crate) mod slot;
 pub(crate) mod stretched;
+mod table;
 pub(crate) mod types;
 // Tests only: they exercise the five modules above in combination and reach
 // private state a sibling module could not see.
@@ -74,6 +75,10 @@ pub use node::{DirectionKind, LoopingKind, SpeedKind, VoiceNode, VoiceNodeError,
 pub use node_config::{Drive, Free, Placed, Streamed, VoiceNodeConfig};
 pub use node_controls::{FreeRunning, StreamHold, VoiceNodeControls};
 pub use pool::{PoolDrops, VoicePool};
+/// The voices a pool holds, as rows. Documented on `table`.
+pub use table::{
+    Row, TableError, VoiceCount, VoiceCountOutOfRange, VoicePoolConfig, VoiceTable, VoiceTableKind,
+};
 /// The voice vocabulary: what a voice is, which tier it reads from, and the
 /// control intent recorded for it. Documented on `types`.
 pub use types::{PlayDirection, Playback, SlotId, Voice, VoiceSource};

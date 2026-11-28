@@ -21,6 +21,7 @@ mod tier_parity;
 mod vocoder_voice;
 mod voice_gain_survives_commit;
 mod voice_node_commands;
+mod voice_table;
 mod wrap_fade_modes;
 
 /// Aborts inside an `RtScope`; inert elsewhere.

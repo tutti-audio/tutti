@@ -4,6 +4,7 @@
 # a row with no item is deleted, so the list only shrinks on its own.
 const streamer::loops::GUARD_FRAMES
 const streamer::open::StreamStart::HEAD
+const voice::table::VoiceCount::DEFAULT
 enum error::PlaceError
 enum error::StreamerStartError
 enum probe::SampleProbeError
@@ -21,6 +22,8 @@ enum voice::node::SpeedKind
 enum voice::node::VoiceNodeError
 enum voice::node::WindowKind
 enum voice::node_controls::StreamHold
+enum voice::table::TableError
+enum voice::table::VoiceTableKind
 enum voice::types::PlayDirection
 enum voice::types::VoiceSource
 fn clip::Clip::at
@@ -197,6 +200,13 @@ fn voice::pool::VoicePool::new
 fn voice::pool::VoicePool::voice_count
 fn voice::pool::VoicePool::with_channels
 fn voice::pool::VoicePool::with_handle
+fn voice::table::Row::same_structure
+fn voice::table::Row::stretching
+fn voice::table::VoicePoolConfig::new
+fn voice::table::VoicePoolConfig::row
+fn voice::table::VoicePoolConfig::table
+fn voice::table::VoicePoolConfig::voices
+fn voice::table::VoiceTable::rows
 fn voice::types::PlayDirection::is_reverse
 mod testing
 struct clip::Clip
@@ -235,6 +245,9 @@ struct voice::node_controls::FreeRunning
 struct voice::node_controls::VoiceNodeControls
 struct voice::pool::PoolDrops
 struct voice::pool::VoicePool
+struct voice::table::Row
+struct voice::table::VoicePoolConfig
+struct voice::table::VoiceTable
 struct voice::types::Playback
 struct voice::types::SlotId
 struct voice::types::Voice
