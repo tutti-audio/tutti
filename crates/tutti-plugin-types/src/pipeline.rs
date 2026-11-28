@@ -189,8 +189,11 @@ pub struct ChunkCounters {
     /// stop in time and were left running (set by
     /// [`attach_detached`](Self::attach_detached)).
     detached: OnceLock<Tally<u64>>,
-    /// The server's own cumulative loss counts, as it last told them
-    /// ([`note_server_losses`](Self::note_server_losses)).
+    /// The server's own cumulative loss counts, as it last told them, over
+    /// the one server life these counters belong to (a respawned server gets
+    /// a new connection and new counters). The only writer is
+    /// [`note_server_losses`](Self::note_server_losses), on the one thread that
+    /// hears the server: its read-then-add is sound only with that one writer.
     server_refused_commands: TallyWriter<u64>,
     server_refused_edits: TallyWriter<u64>,
     server_refused_off_thread_calls: TallyWriter<u64>,

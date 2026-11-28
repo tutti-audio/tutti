@@ -119,7 +119,8 @@ pub(crate) struct Ties {
     /// within their patience and were left running.
     pub(crate) detached: Tally<u64>,
     /// Render lanes that ended without handing their state back: they
-    /// panicked, or were dropped under the executor's shutdown.
+    /// panicked, or were dropped under the executor's shutdown. A lane is
+    /// counted when it is torn down, so this reads 0 while every lane runs.
     pub(crate) lanes_lost: Tally<u64>,
 }
 
