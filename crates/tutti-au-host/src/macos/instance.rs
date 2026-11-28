@@ -86,6 +86,9 @@ pub struct AuLoaded {
     /// Marks of earlier tables that the render may still be setting bits in,
     /// drained each tick until it has let go of them.
     pub(crate) retired_marks: Vec<Arc<Marks>>,
+    /// The host's gestures toward the unit, drained on
+    /// [`flush_edits`](tutti_plugin_types::Control::flush_edits).
+    pub(crate) host_edits: Arc<tutti_plugin_types::HostEdits>,
     /// The plugin's identity, with the editor measured at construction: a Cocoa
     /// view is a property of the instance, readable before `initialize`.
     descriptor: PluginDescriptor,
@@ -224,6 +227,7 @@ impl AuLoaded {
             edits: Arc::new(ReportedEdits::default()),
             ranges,
             retired_marks: Vec::new(),
+            host_edits: tutti_plugin_types::HostEdits::new(),
             descriptor,
             offline: false,
             mode_accepted,

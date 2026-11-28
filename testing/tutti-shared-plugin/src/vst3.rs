@@ -139,6 +139,7 @@ impl Class for Plugin {
         IParameterFunctionName,
         IAutomationState,
         IKeyswitchController,
+        IEditControllerHostEditing,
     );
 }
 
@@ -147,6 +148,19 @@ impl Class for Plugin {
 impl IAutomationStateTrait for Plugin {
     unsafe fn setAutomationState(&self, state: i32) -> tresult {
         self.core.log_automation(state as u32);
+        kResultOk
+    }
+}
+
+/// The host's gesture over a helper parameter, recorded as it came, before
+/// anything is applied.
+impl IEditControllerHostEditingTrait for Plugin {
+    unsafe fn beginEditFromHost(&self, id: u32) -> tresult {
+        self.core.log_host_edit(core::HostEdit::Begin, id, 0.0);
+        kResultOk
+    }
+    unsafe fn endEditFromHost(&self, id: u32) -> tresult {
+        self.core.log_host_edit(core::HostEdit::End, id, 0.0);
         kResultOk
     }
 }
@@ -765,6 +779,8 @@ impl IEditControllerTrait for Plugin {
             core::METER => sdk(ParameterInfo_::ParameterFlags_::kIsReadOnly),
             core::BYPASS => can_automate | is_bypass,
             core::PROGRAM => can_automate | is_program,
+            // A helper: none of automatable, read-only or hidden.
+            core::HELPER => 0,
             _ => can_automate,
         };
         kResultOk
@@ -822,6 +838,9 @@ impl IEditControllerTrait for Plugin {
     unsafe fn setParamNormalized(&self, id: u32, v: f64) -> tresult {
         if default_of(id).is_none() {
             return kInvalidArgument;
+        }
+        if id == core::HELPER {
+            self.core.log_host_edit(core::HostEdit::Value, id, v);
         }
         self.core.apply(id, v);
         kResultOk
