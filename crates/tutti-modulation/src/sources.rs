@@ -1,14 +1,14 @@
-//! Builders for the built-in [`Source`]s: an [`Lfo`], a [`Macro`], a
-//! [`Follower`] and a [`NoteEnvelope`], each converting into the `Source` the
-//! compiler reads (`Source::from`).
+//! Builders for the built-in sources: an [`Lfo`] and a [`Macro`] converting into the
+//! [`TimeSource`] the compiler reads, and a [`NoteEnvelope`] (valid stages) and a
+//! `Ballistics` converting into the [`SignalKind`] it reads.
 //!
 //! These are the source half only. A follower's and a note envelope's input
 //! (the audio or the MIDI that feeds their node) is the host's to wire, keyed
 //! by whatever the host keys its nodes by, so it is not here.
 
-use tutti_units::{BeatsPerCycle, Hz, PhaseIncrement, Seconds};
+use tutti_units::{Ballistics, BeatsPerCycle, Hz, PhaseIncrement};
 
-use crate::{Adsr, LayerClock, LfoShape, Source, Waveform};
+use crate::{LayerClock, LfoShape, NoteEnvelope, SignalKind, TimeSource, Waveform};
 
 /// How an [`Lfo`] keeps time.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -103,8 +103,8 @@ impl Lfo {
     }
 }
 
-impl From<Lfo> for Source {
-    /// A [`Source::Lfo`]: the shape and seed as the wave, the rate and phase
+impl From<Lfo> for TimeSource {
+    /// A [`TimeSource::Lfo`]: the shape and seed as the wave, the rate and phase
     /// as the clock, with no anchor (the compiler's to set).
     fn from(lfo: Lfo) -> Self {
         let clock = match lfo.rate {
@@ -118,7 +118,7 @@ impl From<Lfo> for Source {
                 anchor: None,
             },
         };
-        Source::Lfo {
+        TimeSource::Lfo {
             wave: Waveform::Shape {
                 shape: lfo.shape,
                 seed: lfo.seed,
@@ -132,85 +132,24 @@ impl From<Lfo> for Source {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Macro(pub f64);
 
-impl From<Macro> for Source {
-    /// A [`Source::Macro`] at the value.
+impl From<Macro> for TimeSource {
+    /// A [`TimeSource::Macro`] at the value.
     fn from(m: Macro) -> Self {
-        Source::Macro { value: m.0 }
+        TimeSource::Macro { value: m.0 }
     }
 }
 
-/// An envelope follower's times: the source half of a follower, whose input
-/// the host wires.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Follower {
-    /// Rise time constant.
-    pub attack: Seconds,
-    /// Fall time constant.
-    pub release: Seconds,
-}
-
-impl Follower {
-    /// A 5 ms attack and a 100 ms release.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            attack: Seconds::new(0.005),
-            release: Seconds::new(0.1),
-        }
-    }
-
-    /// Rises with `attack`.
-    #[must_use]
-    pub const fn attack(mut self, attack: Seconds) -> Self {
-        self.attack = attack;
-        self
-    }
-
-    /// Falls with `release`.
-    #[must_use]
-    pub const fn release(mut self, release: Seconds) -> Self {
-        self.release = release;
-        self
-    }
-}
-
-impl Default for Follower {
-    /// [`Follower::new`]: a 5 ms attack and a 100 ms release.
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl From<Follower> for Source {
-    /// A [`Source::Follower`] with the times.
-    fn from(f: Follower) -> Self {
-        Source::Follower {
-            attack: f.attack,
-            release: f.release,
-        }
-    }
-}
-
-/// An ADSR per note: the source half of a note envelope, whose MIDI the host
-/// wires.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct NoteEnvelope {
-    /// The stages.
-    pub adsr: Adsr,
-}
-
-impl NoteEnvelope {
-    /// An envelope of `adsr`.
-    #[must_use]
-    pub const fn new(adsr: Adsr) -> Self {
-        Self { adsr }
-    }
-}
-
-impl From<NoteEnvelope> for Source {
-    /// A [`Source::NoteEnvelope`] of the stages.
+impl From<NoteEnvelope> for SignalKind {
+    /// A [`SignalKind::NoteEnvelope`] of the stages.
     fn from(e: NoteEnvelope) -> Self {
-        Source::NoteEnvelope { adsr: e.adsr }
+        SignalKind::NoteEnvelope(e)
+    }
+}
+
+impl From<Ballistics> for SignalKind {
+    /// A [`SignalKind::Follower`] with the times.
+    fn from(b: Ballistics) -> Self {
+        SignalKind::Follower(b)
     }
 }
 

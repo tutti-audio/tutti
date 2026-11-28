@@ -3,7 +3,7 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::Cost;
-use tutti_modulation::{Adsr, NoteAdsr, SignalKind, SignalSource, SourceId};
+use tutti_modulation::{Adsr, NoteAdsr, SourceId};
 
 use super::{SourceNode, SourcePorts};
 
@@ -42,16 +42,6 @@ impl NoteEnvelopeConfig {
     #[must_use]
     pub const fn new(source: SourceId, adsr: Adsr) -> Self {
         Self { source, adsr }
-    }
-
-    /// The config `decl` describes (what `tutti_modulation::compile` gives each note
-    /// envelope): `None` when `decl` is not a note envelope.
-    #[must_use]
-    pub fn from_decl(decl: &SignalSource) -> Option<Self> {
-        match decl.kind {
-            SignalKind::NoteEnvelope { adsr } => Some(Self::new(decl.id, adsr)),
-            SignalKind::Follower { .. } => None,
-        }
     }
 }
 

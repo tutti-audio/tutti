@@ -972,8 +972,8 @@ fn a_republished_program_is_allocation_free_on_the_audio_thread() {
     use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
     use tutti_graph::{Editor, EventOutputPort, ForkByClone, ParamIn, ParamRange, Prepare};
     use tutti_modulation::{
-        Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, Source as ModSource,
-        SourceKey, TargetDecl, TargetKey, Waveform, compile,
+        Declarations, Law, LayerClock, Polarity, RouteDecl, RouteKey, SourceKey, TargetDecl,
+        TargetKey, TimeSource, Waveform, compile,
     };
     use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
     use tutti_nodes::testing::Osc;
@@ -1003,7 +1003,7 @@ fn a_republished_program_is_allocation_free_on_the_audio_thread() {
     let lfo = |rate: f64| {
         [(
             SourceKey(1),
-            ModSource::Lfo {
+            TimeSource::Lfo {
                 wave: Waveform::Shape {
                     shape: tutti_modulation::LfoShape::Sine,
                     seed: 0,
@@ -1047,7 +1047,8 @@ fn a_republished_program_is_allocation_free_on_the_audio_thread() {
         .unwrap();
     let sources = lfo(2.0);
     let decl = Declarations {
-        sources: &sources,
+        time: &sources,
+        signals: &[],
         routes: &routes,
         targets: &targets,
     };
@@ -1086,7 +1087,8 @@ fn a_republished_program_is_allocation_free_on_the_audio_thread() {
     for i in 0..40 {
         let sources = lfo(if i % 2 == 0 { 3.0 } else { 2.0 });
         let decl = Declarations {
-            sources: &sources,
+            time: &sources,
+            signals: &[],
             routes: &routes,
             targets: &targets,
         };

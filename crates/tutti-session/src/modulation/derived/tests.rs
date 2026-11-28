@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tutti_buffers::MaxBlock;
 use tutti_graph::{Editor, Prepare};
-use tutti_modulation::{Declarations, Source, SourceKey};
+use tutti_modulation::{Declarations, SourceKey, TimeSource};
 use tutti_units::{Frame, PlayReading, SampleRate, Samples};
 
 use super::{Derived, OwnMods};
@@ -15,16 +15,17 @@ const fn reading(epoch: u32) -> PlayReading {
     }
 }
 
-/// Applies `sources` with the reading of epoch 7, which the editor's own clock
+/// Applies `time` with the reading of epoch 7, which the editor's own clock
 /// (at its first epoch) is not at; whether it was refused, and whether an
 /// update that reads epoch 7 and one that reads epoch 8 are stale.
-fn applied(sources: &[(SourceKey, Source)]) -> (bool, bool, bool) {
+fn applied(time: &[(SourceKey, TimeSource)]) -> (bool, bool, bool) {
     let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     let (mut editor, _exec) = Editor::<f32>::new(prepare);
     let own = OwnMods::new(Arc::new(ValueTable::default()));
     let mut derived = Derived::default();
     let decl = Declarations {
-        sources,
+        time,
+        signals: &[],
         routes: &[],
         targets: &[],
     };
@@ -53,6 +54,6 @@ fn a_play_start_after_the_applys_reading_is_applied() {
 /// is refused, once per epoch.
 #[test]
 fn a_play_start_after_a_refused_applys_reading_is_applied() {
-    let twice = (SourceKey(1), Source::Macro { value: 0.0 });
+    let twice = (SourceKey(1), TimeSource::Macro { value: 0.0 });
     assert_eq!(applied(&[twice.clone(), twice]), (true, false, true));
 }

@@ -120,23 +120,13 @@ impl TargetKey {
     }
 }
 
-/// Whether a note envelope's stages are usable: the times finite and
-/// non-negative, the sustain in `[0, 1]` (a note envelope's raw value stays in
-/// `[0, 1]`).
-fn adsr_valid(adsr: &Adsr) -> bool {
-    let time = |s: Seconds| s.get() >= 0.0 && s.get().is_finite();
-    time(adsr.attack)
-        && time(adsr.decay)
-        && time(adsr.release)
-        && (0.0..=1.0).contains(&adsr.sustain.get())
-}
-
-/// What a source is.
+/// A source with no node: a closed-form function of time that feeds a route's layers.
 ///
 /// Exhaustive: [`compile`] handles each kind its own way, so a new kind is a
-/// change every consumer has to see.
+/// change every consumer has to see. A source that is a node in the graph is a
+/// [`SignalKind`].
 #[derive(Clone, Debug, PartialEq)]
-pub enum Source {
+pub enum TimeSource {
     /// A wave on a clock: a closed-form layer, no node. The clock's anchor
     /// is the compiler's to set; a declared one is refused
     /// ([`ProgramCompileError::AnchorDeclared`]).
@@ -152,38 +142,15 @@ pub enum Source {
         /// The raw value.
         value: f64,
     },
-    /// An envelope follower: a node whose audio input the host wires, its
-    /// level sent into each lane it reaches.
-    Follower {
-        /// Rise time constant.
-        attack: Seconds,
-        /// Fall time constant.
-        release: Seconds,
-    },
-    /// A note envelope: a node on a MIDI input, its ADSR sent into each
-    /// lane it reaches.
-    NoteEnvelope {
-        /// The stages.
-        adsr: Adsr,
-    },
-}
-
-impl Source {
-    /// Whether the source is a signal: a node in the graph (a follower or a
-    /// note envelope), not a time function. A depth is scaled by a time
-    /// function only.
-    #[must_use]
-    pub fn is_signal(&self) -> bool {
-        signal_kind(self).is_some()
-    }
 }
 
 /// What scales a route's depth: a time function whose value, through its own
 /// amount, multiplies the route's offset ([`DepthBy`]).
 ///
 /// A route has at most one, so a scale of a scale cannot be written. Both
-/// sources must be time functions (an LFO or a macro); [`compile`] refuses a
-/// signal source ([`ProgramCompileError::DepthBySignal`]).
+/// sources must be [`TimeSource`]s declared in [`Declarations::time`]; a
+/// [`SourceKey`] that names a signal source is refused
+/// ([`ProgramCompileError::DepthBySignal`]).
 #[derive(Clone, Debug)]
 pub struct Scale {
     /// What scales.
@@ -294,14 +261,18 @@ impl fmt::Debug for TargetDecl {
 
 /// Everything a host declares, as slices of `(key, value)` in any order.
 ///
-/// Plain data, built with a struct literal: three borrowed slices with no
-/// invariant of their own. The limits ([`MAX_LANE_LAYERS`](crate::MAX_LANE_LAYERS),
+/// Plain data, built with a struct literal: four borrowed slices with no
+/// invariant of their own beyond one [`SourceKey`] naming one source across `time` and
+/// `signals`. The limits ([`MAX_LANE_LAYERS`](crate::MAX_LANE_LAYERS),
 /// [`MAX_LANE_INPUTS`](crate::MAX_LANE_INPUTS)) are on what they compile to,
 /// and [`compile`] refuses a declaration past them.
 #[derive(Clone, Copy, Debug)]
 pub struct Declarations<'a> {
-    /// The sources.
-    pub sources: &'a [(SourceKey, Source)],
+    /// The sources that are functions of time.
+    pub time: &'a [(SourceKey, TimeSource)],
+    /// The sources that are nodes in the graph: each kind holds params already
+    /// in their domain.
+    pub signals: &'a [(SourceKey, SignalKind)],
     /// The routes.
     pub routes: &'a [(RouteKey, RouteDecl)],
     /// Per target: range and automation.
@@ -309,7 +280,7 @@ pub struct Declarations<'a> {
 }
 
 /// The node a signal-driven source needs, described: what its constructor
-/// takes (`EnvelopeFollowerNode::from_decl`, `NoteEnvelopeNode::from_decl`
+/// takes (`EnvelopeFollowerConfig`'s and `NoteEnvelopeConfig`'s conversions
 /// in `tutti-nodes`), and nothing a running node keeps.
 ///
 /// Equality is bitwise, so it is [`Eq`].
@@ -322,46 +293,52 @@ pub struct SignalSource {
     pub kind: SignalKind,
 }
 
-/// A signal-driven source's node kind and params.
+/// An ADSR per note: the source half of a note envelope, whose MIDI the host
+/// wires.
 ///
-/// Exhaustive: each kind needs a node in `tutti-nodes`, so a new kind is a
-/// change that crate has to see.
-#[derive(Clone, Copy, Debug)]
-pub enum SignalKind {
-    /// An envelope follower: one-pole attack and release on its audio
-    /// input's level, sent raw in `[0, 1]` on the play-clock grid.
-    Follower {
-        /// Rise time constant.
-        attack: Seconds,
-        /// Fall time constant.
-        release: Seconds,
-    },
-    /// A note envelope on its MIDI input, sent raw in `[0, 1]`.
-    NoteEnvelope {
-        /// The stages.
-        adsr: Adsr,
-    },
+/// The stages are valid by construction: [`new`](Self::new) refuses an ADSR whose
+/// times are not finite and non-negative or whose sustain is outside `[0, 1]`
+/// (a note envelope's raw value stays in `[0, 1]`), so a [`SignalKind`] never
+/// holds one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NoteEnvelope {
+    adsr: Adsr,
 }
 
-impl PartialEq for SignalKind {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Follower { attack, release },
-                Self::Follower {
-                    attack: a,
-                    release: r,
-                },
-            ) => {
-                attack.get().to_bits() == a.get().to_bits()
-                    && release.get().to_bits() == r.get().to_bits()
-            }
-            (Self::NoteEnvelope { adsr }, Self::NoteEnvelope { adsr: b }) => adsr == b,
-            _ => false,
-        }
+impl NoteEnvelope {
+    /// An envelope of `adsr`, or `None` when a time is negative, NaN or infinite or the
+    /// sustain is outside `[0, 1]`. Never clamps.
+    #[must_use]
+    pub fn new(adsr: Adsr) -> Option<Self> {
+        let time = |s: Seconds| s.get() >= 0.0 && s.get().is_finite();
+        let valid = time(adsr.attack)
+            && time(adsr.decay)
+            && time(adsr.release)
+            && (0.0..=1.0).contains(&adsr.sustain.get());
+        valid.then_some(Self { adsr })
+    }
+
+    /// The stages.
+    #[must_use]
+    pub const fn adsr(self) -> Adsr {
+        self.adsr
     }
 }
 
+/// A signal-driven source's node kind and params, each already in its domain.
+///
+/// Exhaustive: each kind needs a node in `tutti-nodes`, so a new kind is a
+/// change that crate has to see.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SignalKind {
+    /// An envelope follower: one-pole attack and release on its audio
+    /// input's level, sent raw in `[0, 1]` on the play-clock grid.
+    Follower(Ballistics),
+    /// A note envelope on its MIDI input, sent raw in `[0, 1]`.
+    NoteEnvelope(NoteEnvelope),
+}
+
+/// Both kinds hold finite values only, so equality is reflexive.
 impl Eq for SignalKind {}
 
 impl PartialEq for SignalSource {
@@ -533,15 +510,19 @@ pub fn compile(
     now: PlayReading,
     rate: SampleRate,
 ) -> Result<Compiled, ProgramCompileError> {
-    let sources = index(decl.sources, ProgramCompileError::DuplicateSource)?;
+    let time = index(decl.time, ProgramCompileError::DuplicateSource)?;
+    let signals = index(decl.signals, ProgramCompileError::DuplicateSource)?;
+    if let Some(&key) = signals.keys().find(|k| time.contains_key(k)) {
+        return Err(ProgramCompileError::DuplicateSource(key));
+    }
     let routes = index(decl.routes, ProgramCompileError::DuplicateRoute)?;
     let targets = index(decl.targets, ProgramCompileError::DuplicateTarget)?;
 
-    for (&key, source) in &sources {
-        check_source(key, source)?;
+    for (&key, source) in &time {
+        check_time_source(key, source)?;
     }
     for (&key, route) in &routes {
-        if !sources.contains_key(&route.source) {
+        if !time.contains_key(&route.source) && !signals.contains_key(&route.source) {
             return Err(ProgramCompileError::UnknownSource { route: key });
         }
     }
@@ -561,16 +542,15 @@ pub fn compile(
     }
 
     // Scales: a time function scales a route of a time function.
-    let is_signal = |s: SourceKey| sources[&s].is_signal();
     for (&key, route) in &routes {
         let Some(scale) = &route.scale else {
             continue;
         };
-        if !sources.contains_key(&scale.source) {
-            return Err(ProgramCompileError::UnknownSource { route: key });
-        }
-        if is_signal(scale.source) || is_signal(route.source) {
+        if signals.contains_key(&scale.source) || signals.contains_key(&route.source) {
             return Err(ProgramCompileError::DepthBySignal { route: key });
+        }
+        if !time.contains_key(&scale.source) {
+            return Err(ProgramCompileError::UnknownSource { route: key });
         }
     }
 
@@ -582,34 +562,30 @@ pub fn compile(
     // source's slot is free at once.
     let mut nodes = BTreeMap::new();
     let kept = |k: &SourceKey| prev.and_then(|p| p.nodes.get(k)).map(|n| n.id);
-    for (&key, source) in &sources {
-        if let Some(kind) = signal_kind(source)
-            && let Some(id) = kept(&key)
-        {
+    for (&key, &&kind) in &signals {
+        if let Some(id) = kept(&key) {
             nodes.insert(key, SignalSource { id, kind });
         }
     }
     let mut taken: BTreeSet<SourceId> = nodes.values().map(|n| n.id).collect();
     let mut next = prev.map_or(0, |p| p.next_source.get().get());
-    for (&key, source) in &sources {
-        if let Some(kind) = signal_kind(source) {
-            if nodes.contains_key(&key) {
-                continue;
-            }
-            // Past `u32::MAX` the ids wrap; one still held is skipped.
-            while taken.contains(&next_id(next)) {
-                next = next.wrapping_add(1);
-            }
-            taken.insert(next_id(next));
-            nodes.insert(
-                key,
-                SignalSource {
-                    id: next_id(next),
-                    kind,
-                },
-            );
+    for (&key, &&kind) in &signals {
+        if nodes.contains_key(&key) {
+            continue;
+        }
+        // Past `u32::MAX` the ids wrap; one still held is skipped.
+        while taken.contains(&next_id(next)) {
             next = next.wrapping_add(1);
         }
+        taken.insert(next_id(next));
+        nodes.insert(
+            key,
+            SignalSource {
+                id: next_id(next),
+                kind,
+            },
+        );
+        next = next.wrapping_add(1);
     }
 
     // Layers and input layers, per target.
@@ -623,14 +599,17 @@ pub fn compile(
     // One dated clock per LFO, from its own clock in `prev`: every layer it
     // drives reads the same anchor, whichever target, route or depth slot.
     let mut clocks = BTreeMap::new();
-    for (&key, source) in &sources {
-        if let Source::Lfo { clock, .. } = source {
+    for (&key, source) in &time {
+        if let TimeSource::Lfo { clock, .. } = source {
             let old = prev.and_then(|p| p.clocks.get(&key));
             clocks.insert(key, anchored(*clock, old, now, rate));
         }
     }
     let dated = |key: SourceKey| {
-        let (clock, wave) = time_function(sources[&key]);
+        let (clock, wave) = match time[&key] {
+            TimeSource::Lfo { wave, clock } => (*clock, wave.clone()),
+            TimeSource::Macro { value } => (MACRO_CLOCK, Waveform::Const(*value)),
+        };
         (clocks.get(&key).copied().unwrap_or(clock), wave)
     };
     for (&key, route) in &routes {
@@ -645,33 +624,30 @@ pub fn compile(
             .entry(target)
             .or_default()
             .push((id, route.depth.handle()));
-        match &sources[&route.source] {
-            Source::Follower { .. } | Source::NoteEnvelope { .. } => {
-                entry.1.push(InputLayer {
-                    id,
-                    source: nodes[&route.source].id,
-                    amount: route.amount(),
-                });
-                edges.insert((route.source, target));
-            }
-            Source::Lfo { .. } | Source::Macro { .. } => {
-                let (clock, wave) = dated(route.source);
-                let depth_by = route.scale.as_ref().map(|by| {
-                    let (clock, wave) = dated(by.source);
-                    DepthBy {
-                        clock,
-                        wave,
-                        amount: by.amount(),
-                    }
-                });
-                entry.0.push(Layer {
-                    id,
+        if let Some(node) = nodes.get(&route.source) {
+            entry.1.push(InputLayer {
+                id,
+                source: node.id,
+                amount: route.amount(),
+            });
+            edges.insert((route.source, target));
+        } else {
+            let (clock, wave) = dated(route.source);
+            let depth_by = route.scale.as_ref().map(|by| {
+                let (clock, wave) = dated(by.source);
+                DepthBy {
                     clock,
                     wave,
-                    amount: route.amount(),
-                    depth_by,
-                });
-            }
+                    amount: by.amount(),
+                }
+            });
+            entry.0.push(Layer {
+                id,
+                clock,
+                wave,
+                amount: route.amount(),
+                depth_by,
+            });
         }
     }
 
@@ -737,11 +713,11 @@ fn index<K: Ord + Copy, V>(
     Ok(out)
 }
 
-/// A source's params in their domain, or the refusal.
-fn check_source(key: SourceKey, source: &Source) -> Result<(), ProgramCompileError> {
+/// A time source's params in their domain, or the refusal.
+fn check_time_source(key: SourceKey, source: &TimeSource) -> Result<(), ProgramCompileError> {
     let bad = Err(ProgramCompileError::BadSource(key));
     match source {
-        Source::Lfo { wave, clock } => {
+        TimeSource::Lfo { wave, clock } => {
             let ok_clock = match *clock {
                 LayerClock::Beats { phase, .. } => phase.get().is_finite(),
                 LayerClock::Seconds {
@@ -773,48 +749,12 @@ fn check_source(key: SourceKey, source: &Source) -> Result<(), ProgramCompileErr
             };
             if ok_clock && ok_wave { Ok(()) } else { bad }
         }
-        Source::Macro { value } => {
+        TimeSource::Macro { value } => {
             if value.is_finite() {
                 Ok(())
             } else {
                 bad
             }
-        }
-        Source::Follower { attack, release } => {
-            if Ballistics::new(*attack, *release).is_some() {
-                Ok(())
-            } else {
-                bad
-            }
-        }
-        Source::NoteEnvelope { adsr } => {
-            if adsr_valid(adsr) {
-                Ok(())
-            } else {
-                bad
-            }
-        }
-    }
-}
-
-/// A signal source's node kind; `None` for a time function.
-fn signal_kind(source: &Source) -> Option<SignalKind> {
-    match *source {
-        Source::Follower { attack, release } => Some(SignalKind::Follower { attack, release }),
-        Source::NoteEnvelope { adsr } => Some(SignalKind::NoteEnvelope { adsr }),
-        Source::Lfo { .. } | Source::Macro { .. } => None,
-    }
-}
-
-/// A time function's clock and wave (an LFO's own; a macro's constant).
-fn time_function(source: &Source) -> (LayerClock, Waveform) {
-    match source {
-        Source::Lfo { wave, clock } => (*clock, wave.clone()),
-        Source::Macro { value } => (MACRO_CLOCK, Waveform::Const(*value)),
-        // Callers reach here with a time function only (signal sources are
-        // input layers, and refused as depth scalers).
-        Source::Follower { .. } | Source::NoteEnvelope { .. } => {
-            (MACRO_CLOCK, Waveform::Const(0.0))
         }
     }
 }

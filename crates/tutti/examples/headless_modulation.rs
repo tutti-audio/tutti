@@ -17,11 +17,12 @@
 //! oscillator is `tutti-nodes`'s, a dev-dependency of this crate.
 
 use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti::modulation::{Follower, Lfo};
+use tutti::modulation::Lfo;
 use tutti::nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+use tutti::types::Ballistics;
 use tutti::{
     Bipolar, ChannelLayout, DepthTarget, Error, Hz, InputPort, InterleavedMut, MainOutput,
-    MaxBlock, OutputPort, Q, RouteSpec, SampleRate, Samples, Session, SessionEvent,
+    MaxBlock, OutputPort, Q, RouteSpec, SampleRate, Samples, Seconds, Session, SessionEvent,
 };
 use tutti_nodes::testing::Osc;
 
@@ -107,7 +108,10 @@ fn main() -> Result<(), Error> {
     m.range(resonance, Q::new(0.5)..Q::new(8.0))?;
     let wobble = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(wobble, cutoff, Bipolar::of(0.2)))?;
-    let hits = m.follower(Follower::default(), kick);
+    let hits = m.follower(
+        Ballistics::new(Seconds::new(0.005), Seconds::new(0.1)).expect("valid times"),
+        kick,
+    );
     m.route(RouteSpec::new(hits, resonance, Bipolar::of(0.5)))?;
 
     // The first update's one plan carries the nodes and their lanes (a target

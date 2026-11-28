@@ -17,7 +17,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_modulation::ControlProgram;
-use tutti_modulation::{Follower, Lfo, Polarity, TargetKey};
+use tutti_modulation::{Lfo, Polarity, TargetKey};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_session::{
     MainOutput, ModTarget, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError, RouteSpec,
@@ -128,7 +128,7 @@ fn the_8_1_example_renders_its_analytic_values() {
     let wobble = m.lfo(Lfo::sine().rate(BeatsPerCycle::of(0.5)));
     m.route(RouteSpec::new(wobble, cutoff, Bipolar::of(0.3)))
         .unwrap();
-    let kick = m.follower(Follower::default(), kick_bus);
+    let kick = m.follower(common::meter(), kick_bus);
     m.route(RouteSpec::new(kick, gain, Bipolar::of(-0.6)))
         .unwrap(); // sidechain
     settle(&mut s);
@@ -407,7 +407,7 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let follower = m.follower(Follower::default(), late);
+    let follower = m.follower(common::meter(), late);
     m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
         .unwrap();
 
@@ -557,7 +557,7 @@ fn a_steady_update_sends_nothing_and_publishes_nothing() {
     steady(&mut s, &before);
 
     let mut m = s.mods_mut();
-    let follower = m.follower(Follower::default(), other);
+    let follower = m.follower(common::meter(), other);
     m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.25)))
         .unwrap();
     let events = s.update();

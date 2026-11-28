@@ -23,11 +23,11 @@ use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
-use tutti_modulation::{Follower, Lfo};
+use tutti_modulation::Lfo;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{InputPort, Key, MainOutput, OutputPort, RouteSpec, Session, SessionEvent};
 use tutti_units::Samples;
-use tutti_units::{BeatsPerCycle, Bipolar, Hz, Q};
+use tutti_units::{Ballistics, BeatsPerCycle, Bipolar, Hz, Q, Seconds};
 
 const UPDATES: usize = 2_000;
 
@@ -65,7 +65,10 @@ fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
             m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.1)))
                 .unwrap();
         }
-        let follower = m.follower(Follower::new(), filters[0]);
+        let follower = m.follower(
+            Ballistics::new(Seconds::new(0.005), Seconds::new(0.1)).expect("valid times"),
+            filters[0],
+        );
         m.route(RouteSpec::new(follower, last.cutoff(), Bipolar::of(-0.2)))
             .unwrap();
     }

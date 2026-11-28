@@ -624,9 +624,9 @@ pub mod session {
     ))]
     pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
     pub use tutti_session::{
-        AutomationTake, MixRef, ModRouteId, ModSourceId, ModState, ModTarget, Mods, ModsView,
-        NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError, RouteInfo,
-        Scale, ScaleError, SourceError, SourceInfo, SourceName, TargetName,
+        AutomationTake, MixRef, ModRouteId, ModSource, ModSourceId, ModState, ModTarget, Mods,
+        ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
+        RouteInfo, Scale, ScaleError, SourceError, SourceInfo, SourceName, TargetName,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{
@@ -773,12 +773,12 @@ pub mod measure {
 }
 
 /// Modulation (`tutti-modulation`): the sources and curves an application
-/// declares, and the `Lfo` and `Follower` that read them.
+/// declares, and the `Lfo` and `LevelFollower` that read them.
 pub mod modulation {
     pub use tutti_modulation::{
-        Amount, ControlSource, Corners, Curve, CurveSegment, DepthBy, Follower, LevelFollower, Lfo,
-        LfoRate, Macro, NoteAdsr, NoteEnvelope, Polarity, ProgramCompileError, ProgramError,
-        SignalKind, TargetDecl,
+        Amount, ControlSource, Corners, Curve, CurveSegment, DepthBy, LevelFollower, Lfo, LfoRate,
+        Macro, NoteAdsr, NoteEnvelope, Polarity, ProgramCompileError, ProgramError, SignalKind,
+        TargetDecl, TimeSource,
     };
     pub use tutti_modulation::{
         ControlProgram, InputLayer, Layer, LfoShape, PeriodPoint, SignalSource, SourceId, Waveform,

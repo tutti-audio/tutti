@@ -1,11 +1,11 @@
 use super::*;
-use crate::RateAnchor;
-use tutti_units::Amplitude;
+use crate::{Adsr, RateAnchor};
+use tutti_units::{Amplitude, Seconds};
 
-/// The fields of an [`Source::Lfo`]: `(shape, seed, clock)`.
-fn lfo_parts(source: Source) -> (LfoShape, u64, LayerClock) {
+/// The fields of a [`TimeSource::Lfo`]: `(shape, seed, clock)`.
+fn lfo_parts(source: TimeSource) -> (LfoShape, u64, LayerClock) {
     match source {
-        Source::Lfo {
+        TimeSource::Lfo {
             wave: Waveform::Shape { shape, seed },
             clock,
         } => (shape, seed, clock),
@@ -79,32 +79,29 @@ fn an_lfos_clock_and_seed_are_pinned_field_by_field() {
 /// A macro is its value.
 #[test]
 fn a_macro_is_its_value() {
-    assert_eq!(Source::from(Macro(-0.4)), Source::Macro { value: -0.4 });
+    assert_eq!(
+        TimeSource::from(Macro(-0.4)),
+        TimeSource::Macro { value: -0.4 }
+    );
 }
 
-/// A follower defaults to 5 ms / 100 ms, `Default` agrees with `new`, and
-/// each builder sets only its own field.
+/// A follower's times are a `Ballistics`: a negative, NaN or infinite time has no
+/// value, and the pair is the follower the compiler reads.
 #[test]
-fn a_followers_times_are_pinned_field_by_field() {
-    assert_eq!(
-        Source::from(Follower::default()),
-        Source::Follower {
-            attack: Seconds::new(0.005),
-            release: Seconds::new(0.1),
-        }
-    );
-    assert_eq!(Follower::default(), Follower::new());
-    assert_eq!(
-        Source::from(
-            Follower::new()
-                .attack(Seconds::new(0.02))
-                .release(Seconds::new(0.3))
-        ),
-        Source::Follower {
-            attack: Seconds::new(0.02),
-            release: Seconds::new(0.3),
-        }
-    );
+fn a_follower_is_a_ballistics_and_a_bad_time_has_none() {
+    let b = Ballistics::new(Seconds::new(0.02), Seconds::new(0.3)).expect("valid times");
+    assert_eq!(SignalKind::from(b), SignalKind::Follower(b));
+    for (attack, release) in [
+        (-0.1, 0.1),
+        (0.1, -0.1),
+        (f64::NAN, 0.1),
+        (0.1, f64::INFINITY),
+    ] {
+        assert!(
+            Ballistics::new(Seconds::new(attack), Seconds::new(release)).is_none(),
+            "{attack} / {release}"
+        );
+    }
 }
 
 /// A note envelope carries its stages unchanged.
@@ -116,8 +113,30 @@ fn a_note_envelope_carries_its_stages() {
         sustain: Amplitude::new(0.6),
         release: Seconds::new(0.5),
     };
-    assert_eq!(
-        Source::from(NoteEnvelope::new(adsr)),
-        Source::NoteEnvelope { adsr }
-    );
+    let e = NoteEnvelope::new(adsr).expect("valid stages");
+    assert_eq!(e.adsr(), adsr);
+    assert_eq!(SignalKind::from(e), SignalKind::NoteEnvelope(e));
+}
+
+/// A note envelope's times are finite and not negative and its sustain is in
+/// `[0, 1]`; the constructor has no value for anything else, and the bounds
+/// themselves are valid.
+#[test]
+fn a_note_envelope_refuses_stages_out_of_their_domain() {
+    let valid = Adsr::default();
+    let with = |f: fn(&mut Adsr)| {
+        let mut a = valid;
+        f(&mut a);
+        NoteEnvelope::new(a)
+    };
+    assert!(NoteEnvelope::new(valid).is_some());
+    assert!(with(|a| a.sustain = Amplitude::new(1.5)).is_none());
+    assert!(with(|a| a.sustain = Amplitude::new(-0.1)).is_none());
+    assert!(with(|a| a.sustain = Amplitude::new(f64::NAN)).is_none());
+    assert!(with(|a| a.attack = Seconds::new(-0.01)).is_none());
+    assert!(with(|a| a.decay = Seconds::new(f64::INFINITY)).is_none());
+    assert!(with(|a| a.release = Seconds::new(f64::NAN)).is_none());
+    assert!(with(|a| a.sustain = Amplitude::new(0.0)).is_some());
+    assert!(with(|a| a.sustain = Amplitude::new(1.0)).is_some());
+    assert!(with(|a| a.attack = Seconds::new(0.0)).is_some());
 }

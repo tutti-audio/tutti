@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tutti_modulation::{Curve, Law, LayerClock, LfoRate, Polarity, Source, TargetKey};
+use tutti_modulation::{Curve, Law, LayerClock, LfoRate, Polarity, TargetKey, TimeSource};
 use tutti_nodes::automation::Trajectory;
 use tutti_rt::Mutex;
 use tutti_units::Bipolar;
@@ -23,7 +23,7 @@ use super::param::ParamTarget;
 use super::slot::{Held, ShapeKey, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
-use crate::{ModRouteId, ModSourceId};
+use crate::{ModRouteId, ModSource, ModSourceId};
 
 /// Whether a declaration changed since the apply built its declarations:
 /// shared by the session's [`Mods`](crate::Mods) and every [`Declared`] cell.
@@ -83,21 +83,21 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for Field<T> {
 }
 
 /// An LFO source's rate, in the source's clock.
-pub(crate) struct RateField(pub(crate) Arc<Declared<Source>>);
+pub(crate) struct RateField(pub(crate) Arc<Declared<ModSource>>);
 
 impl Held for RateField {
     type Value = LfoRate;
 
     fn current(&self) -> LfoRate {
         match self.0.get() {
-            Source::Lfo {
+            ModSource::Time(TimeSource::Lfo {
                 clock: LayerClock::Beats { per_cycle, .. },
                 ..
-            } => LfoRate::Beats(per_cycle),
-            Source::Lfo {
+            }) => LfoRate::Beats(per_cycle),
+            ModSource::Time(TimeSource::Lfo {
                 clock: LayerClock::Seconds { rate, .. },
                 ..
-            } => LfoRate::Hz(rate),
+            }) => LfoRate::Hz(rate),
             _ => unreachable!("the slot is unregistered before the source stops being an LFO"),
         }
     }
@@ -111,7 +111,7 @@ impl Held for RateField {
 
     fn replace(&self, value: &LfoRate) -> bool {
         self.0.edit(|source| {
-            let Source::Lfo { clock, .. } = source else {
+            let ModSource::Time(TimeSource::Lfo { clock, .. }) = source else {
                 return false;
             };
             // The phase offset stays; the compile dates the rate change.
@@ -131,14 +131,14 @@ impl Held for RateField {
 }
 
 /// A macro source's value.
-pub(crate) struct MacroField(pub(crate) Arc<Declared<Source>>);
+pub(crate) struct MacroField(pub(crate) Arc<Declared<ModSource>>);
 
 impl Held for MacroField {
     type Value = Bipolar;
 
     fn current(&self) -> Bipolar {
         match self.0.get() {
-            Source::Macro { value } => Bipolar::clamped(value),
+            ModSource::Time(TimeSource::Macro { value }) => Bipolar::clamped(value),
             _ => unreachable!("the slot is unregistered before the source stops being a macro"),
         }
     }
@@ -147,7 +147,7 @@ impl Held for MacroField {
         self.0.edit(|source| {
             let next = value.get();
             match source {
-                Source::Macro { value } if *value != next => {
+                ModSource::Time(TimeSource::Macro { value }) if *value != next => {
                     *value = next;
                     true
                 }

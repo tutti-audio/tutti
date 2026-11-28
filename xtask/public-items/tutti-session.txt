@@ -67,6 +67,7 @@ enum midi_network_none::NetworkEvent
 enum midi_port::MidiOpenError
 enum midi_port::MidiPortError
 enum midi_port::PortCause
+enum modulation::ModSource
 enum modulation::ModTarget
 enum modulation::RouteError
 enum modulation::ScaleError

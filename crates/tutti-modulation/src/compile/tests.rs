@@ -3,10 +3,11 @@
 use super::*;
 use crate::LfoShape;
 use crate::shape::shape;
+use crate::{Adsr, NoteEnvelope};
 use tutti_curve::Exponent;
 use tutti_curve::{Breakpoint, Trajectory};
 use tutti_rt::Param;
-use tutti_units::{Amplitude, Frame, Hz, ParamId, UnitParam};
+use tutti_units::{Amplitude, Ballistics, Frame, Hz, ParamId, Seconds, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 
@@ -33,8 +34,8 @@ fn ranged(min: f64, max: f64) -> TargetDecl {
     }
 }
 
-fn lfo(shape: LfoShape, clock: LayerClock) -> Source {
-    Source::Lfo {
+fn lfo(shape: LfoShape, clock: LayerClock) -> TimeSource {
+    TimeSource::Lfo {
         wave: Waveform::Shape { shape, seed: 0 },
         clock,
     }
@@ -83,11 +84,10 @@ fn to(node: u64) -> TargetKey {
     target(node)
 }
 
-fn follower() -> Source {
-    Source::Follower {
-        attack: Seconds::new(0.01),
-        release: Seconds::new(0.2),
-    }
+fn follower() -> SignalKind {
+    SignalKind::Follower(
+        Ballistics::new(Seconds::new(0.01), Seconds::new(0.2)).expect("valid times"),
+    )
 }
 
 fn adsr() -> Adsr {
@@ -99,14 +99,28 @@ fn adsr() -> Adsr {
     }
 }
 
+fn note_envelope() -> SignalKind {
+    SignalKind::NoteEnvelope(NoteEnvelope::new(adsr()).expect("a valid ADSR"))
+}
+
 fn run(
-    sources: &[(SourceKey, Source)],
+    time: &[(SourceKey, TimeSource)],
+    routes: &[(RouteKey, RouteDecl)],
+    targets: &[(TargetKey, TargetDecl)],
+) -> Result<Compiled, ProgramCompileError> {
+    run_signals(time, &[], routes, targets)
+}
+
+fn run_signals(
+    time: &[(SourceKey, TimeSource)],
+    signals: &[(SourceKey, SignalKind)],
     routes: &[(RouteKey, RouteDecl)],
     targets: &[(TargetKey, TargetDecl)],
 ) -> Result<Compiled, ProgramCompileError> {
     compile(
         &Declarations {
-            sources,
+            time,
+            signals,
             routes,
             targets,
         },
@@ -137,20 +151,23 @@ fn trajectory() -> Arc<dyn Curve> {
 /// a follower and a note envelope, into three native targets and a plugin
 /// parameter, one with automation.
 struct Rig {
-    sources: Vec<(SourceKey, Source)>,
+    time: Vec<(SourceKey, TimeSource)>,
+    signals: Vec<(SourceKey, SignalKind)>,
     routes: Vec<(RouteKey, RouteDecl)>,
     targets: Vec<(TargetKey, TargetDecl)>,
 }
 
 impl Rig {
     fn new() -> Self {
-        let sources = vec![
+        let time = vec![
             (SourceKey(10), lfo(LfoShape::Sine, seconds(2.0))),
             (SourceKey(11), lfo(LfoShape::Triangle, beats(4.0))),
-            (SourceKey(12), Source::Macro { value: 0.5 }),
+            (SourceKey(12), TimeSource::Macro { value: 0.5 }),
+            (SourceKey(15), TimeSource::Macro { value: -0.25 }),
+        ];
+        let signals = vec![
             (SourceKey(13), follower()),
-            (SourceKey(14), Source::NoteEnvelope { adsr: adsr() }),
-            (SourceKey(15), Source::Macro { value: -0.25 }),
+            (SourceKey(14), note_envelope()),
         ];
         let routes = vec![
             (RouteKey(100), route(10, to(1), 0.3)),
@@ -174,7 +191,8 @@ impl Rig {
             (plugin(4, 7), ranged(0.0, 1.0)),
         ];
         Self {
-            sources,
+            time,
+            signals,
             routes,
             targets,
         }
@@ -183,7 +201,8 @@ impl Rig {
     fn compile(&self, prev: Option<&Compiled>, at: PlayReading) -> Compiled {
         compile(
             &Declarations {
-                sources: &self.sources,
+                time: &self.time,
+                signals: &self.signals,
                 routes: &self.routes,
                 targets: &self.targets,
             },
@@ -203,9 +222,9 @@ impl Rig {
             .1
     }
 
-    fn source_mut(&mut self, key: u64) -> &mut Source {
+    fn source_mut(&mut self, key: u64) -> &mut TimeSource {
         &mut self
-            .sources
+            .time
             .iter_mut()
             .find(|(k, _)| k.0 == key)
             .expect("a source")
@@ -234,18 +253,21 @@ fn equal_declarations_in_any_order_compile_equal() {
             (SourceKey(14), plugin(4, 7)),
         ]
     );
-    let reorders: [fn(&mut Vec<_>); 3] = [
-        |v: &mut Vec<_>| v.reverse(),
-        |v: &mut Vec<_>| v.rotate_left(1),
-        |v: &mut Vec<_>| {
-            let n = v.len();
-            let (a, b) = v.split_at(n / 2);
-            *v = b.iter().cloned().chain(a.iter().cloned()).collect();
-        },
-    ];
-    for f in reorders {
+    fn reorder<T: Clone>(how: usize, v: &mut Vec<T>) {
+        match how {
+            0 => v.reverse(),
+            1 => v.rotate_left(1),
+            _ => {
+                let n = v.len();
+                let (a, b) = v.split_at(n / 2);
+                *v = b.iter().cloned().chain(a.iter().cloned()).collect();
+            }
+        }
+    }
+    for how in 0..3 {
         let mut r = Rig::new();
-        f(&mut r.sources);
+        reorder(how, &mut r.time);
+        reorder(how, &mut r.signals);
         // A route's depth is a cell compared by identity: the clone shares it.
         let mut rt = rig.routes.clone();
         rt.reverse();
@@ -296,13 +318,12 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                     _ => 2.5,
                 };
                 let at = time(beat, 0.0, 1);
-                let sources = [
+                let time = [
                     (SourceKey(1), lfo(LfoShape::Triangle, beats(4.0))),
-                    (SourceKey(2), Source::Macro { value: raw }),
-                    (SourceKey(3), follower()),
-                    (SourceKey(4), Source::NoteEnvelope { adsr: adsr() }),
-                    (SourceKey(5), Source::Macro { value: 1.0 }),
+                    (SourceKey(2), TimeSource::Macro { value: raw }),
+                    (SourceKey(5), TimeSource::Macro { value: 1.0 }),
                 ];
+                let signals = [(SourceKey(3), follower()), (SourceKey(4), note_envelope())];
                 let routes = [
                     (RouteKey(1), r(1, target(1))),
                     (RouteKey(2), r(2, target(2))),
@@ -330,7 +351,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                     (plugin(4, 1), ranged(0.0, 800.0)),
                     (plugin(5, 2), ranged(0.0, 800.0)),
                 ];
-                let c = run(&sources, &routes, &targets).expect("compiles");
+                let c = run_signals(&time, &signals, &routes, &targets).expect("compiles");
                 let at_unit = |t: TargetKey, inputs: &[Option<f64>]| {
                     c.programs[&t].value_at(None, Some(0.0), &at, span, inputs)
                 };
@@ -382,7 +403,7 @@ fn a_depth_write_changes_no_program_and_the_snapshot_reads_it() {
 fn a_macro_move_changes_exactly_the_programs_it_reaches() {
     let mut rig = Rig::new();
     let before = rig.compile(None, now(1, 0));
-    *rig.source_mut(12) = Source::Macro { value: -0.75 };
+    *rig.source_mut(12) = TimeSource::Macro { value: -0.75 };
     let after = rig.compile(Some(&before), now(1, 0));
     let changed: Vec<TargetKey> = after
         .programs
@@ -496,7 +517,7 @@ fn an_anchor_is_carried_until_a_play_start() {
     let c4 = rig.compile(Some(&c2), now(8, 0));
     assert_eq!(anchor(&c4), None, "a play start drops it");
 
-    *rig.source_mut(10) = Source::Lfo {
+    *rig.source_mut(10) = TimeSource::Lfo {
         wave: Waveform::Shape {
             shape: LfoShape::Sine,
             seed: 0,
@@ -527,21 +548,18 @@ fn a_signal_source_keeps_its_id() {
     assert_eq!(c0.nodes[&SourceKey(13)].id, SourceId::new(ParamId::new(0)));
     assert_eq!(c0.nodes[&SourceKey(14)].id, SourceId::new(ParamId::new(1)));
     let mut more = Rig::new();
-    more.sources.push((SourceKey(1), follower()));
+    more.signals.push((SourceKey(1), follower()));
     let c1 = more.compile(Some(&c0), now(1, 0));
     assert_eq!(c1.nodes[&SourceKey(13)].id, SourceId::new(ParamId::new(0)));
     assert_eq!(c1.nodes[&SourceKey(14)].id, SourceId::new(ParamId::new(1)));
     assert_eq!(c1.nodes[&SourceKey(1)].id, SourceId::new(ParamId::new(2)));
-    assert_eq!(
-        c1.nodes[&SourceKey(14)].kind,
-        SignalKind::NoteEnvelope { adsr: adsr() }
-    );
+    assert_eq!(c1.nodes[&SourceKey(14)].kind, note_envelope());
 
     // Remove follower 13 (and its routes) and add follower 2 in one compile.
     let mut swap = more;
-    swap.sources.retain(|(k, _)| k.0 != 13);
+    swap.signals.retain(|(k, _)| k.0 != 13);
     swap.routes.retain(|(_, r)| r.source != SourceKey(13));
-    swap.sources.push((SourceKey(2), follower()));
+    swap.signals.push((SourceKey(2), follower()));
     let c2 = swap.compile(Some(&c1), now(1, 0));
     assert!(!c2.nodes.contains_key(&SourceKey(13)));
     assert_eq!(
@@ -550,7 +568,7 @@ fn a_signal_source_keeps_its_id() {
         "not 13's id"
     );
     // Nor in any later compile.
-    swap.sources.push((SourceKey(3), follower()));
+    swap.signals.push((SourceKey(3), follower()));
     let c3 = swap.compile(Some(&c2), now(1, 0));
     assert_eq!(c3.nodes[&SourceKey(2)].id, SourceId::new(ParamId::new(3)));
     assert_eq!(
@@ -584,7 +602,7 @@ fn each_refusal_fires_by_name() {
         .map(|k| (RouteKey(k), route(1, to(1), 0.1)))
         .collect();
     assert_eq!(
-        run(&f, &routes, &t1),
+        run_signals(&[], &f, &routes, &t1),
         Err(ProgramCompileError::TooManyInputs {
             target: target(1),
             count: 9
@@ -629,18 +647,16 @@ fn each_refusal_fires_by_name() {
         Err(ProgramCompileError::LiveCurve(target(1)))
     );
     // A scale from a signal source, and of a route from one.
-    let sig = [
-        (SourceKey(1), lfo(LfoShape::Sine, beats(1.0))),
-        (SourceKey(2), follower()),
-    ];
+    let time = [(SourceKey(1), lfo(LfoShape::Sine, beats(1.0)))];
+    let signals = [(SourceKey(2), follower())];
     let from_signal = [(RouteKey(1), scaled(route(1, to(1), 0.5), 2, 1.0))];
     assert_eq!(
-        run(&sig, &from_signal, &t1),
+        run_signals(&time, &signals, &from_signal, &t1),
         Err(ProgramCompileError::DepthBySignal { route: RouteKey(1) })
     );
     let of_signal = [(RouteKey(1), scaled(route(2, to(1), 0.5), 1, 1.0))];
     assert_eq!(
-        run(&sig, &of_signal, &t1),
+        run_signals(&time, &signals, &of_signal, &t1),
         Err(ProgramCompileError::DepthBySignal { route: RouteKey(1) })
     );
     // Unknown references.
@@ -673,21 +689,17 @@ fn each_refusal_fires_by_name() {
         run(&one_lfo, &r1, &[t1[0].clone(), t1[0].clone()]),
         Err(ProgramCompileError::DuplicateTarget(target(1)))
     );
-    // Sources out of their domain, and a declared anchor.
+    assert_eq!(
+        run_signals(&one_lfo, &[(SourceKey(1), follower())], &r1, &t1),
+        Err(ProgramCompileError::DuplicateSource(SourceKey(1))),
+        "one key names one source across both lists"
+    );
+    // Time sources out of their domain (a follower's and a note envelope's are
+    // refused where `Ballistics` and `NoteEnvelope` are built), and a declared anchor.
     let bad_sources = [
-        Source::Macro { value: f64::NAN },
-        Source::Follower {
-            attack: Seconds::new(-0.1),
-            release: Seconds::new(0.1),
-        },
-        Source::NoteEnvelope {
-            adsr: Adsr {
-                sustain: Amplitude::new(1.5),
-                ..adsr()
-            },
-        },
+        TimeSource::Macro { value: f64::NAN },
         lfo(LfoShape::Sine, seconds(f64::NAN)),
-        Source::Lfo {
+        TimeSource::Lfo {
             wave: Waveform::Const(f64::NAN),
             clock: beats(1.0),
         },
@@ -699,7 +711,7 @@ fn each_refusal_fires_by_name() {
             "{s:?}"
         );
     }
-    let anchored = Source::Lfo {
+    let anchored = TimeSource::Lfo {
         wave: Waveform::Shape {
             shape: LfoShape::Sine,
             seed: 0,
@@ -760,14 +772,14 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
         };
         sources.push((
             SourceKey(2 * k),
-            Source::Lfo {
+            TimeSource::Lfo {
                 wave: Waveform::Shape { shape, seed: 0 },
                 clock: free,
             },
         ));
         sources.push((
             SourceKey(2 * k + 1),
-            Source::Lfo {
+            TimeSource::Lfo {
                 wave: Waveform::Shape { shape, seed: 0 },
                 clock: synced,
             },
@@ -858,7 +870,7 @@ fn a_route_added_after_a_rate_edit_reads_the_lfos_anchor() {
 #[test]
 fn a_route_moved_to_another_lfo_takes_that_lfos_clock() {
     let mut rig = Rig::new();
-    rig.sources
+    rig.time
         .push((SourceKey(20), lfo(LfoShape::Sine, seconds(3.0))));
     rig.routes.push((RouteKey(200), route(20, to(2), 0.5)));
     let c0 = rig.compile(None, now(3, 0));
@@ -946,7 +958,7 @@ fn a_value_that_is_not_finite_is_refused() {
     for v in [f64::INFINITY, f64::NAN] {
         let constant = [(
             SourceKey(1),
-            Source::Lfo {
+            TimeSource::Lfo {
                 wave: Waveform::Const(v),
                 clock: beats(1.0),
             },
@@ -984,7 +996,8 @@ fn a_value_that_is_not_finite_is_refused() {
     let at = |rate, phase, prev: Option<&Compiled>, play| {
         compile(
             &Declarations {
-                sources: &[(SourceKey(10), lfo(LfoShape::Sine, clock(rate, phase)))],
+                time: &[(SourceKey(10), lfo(LfoShape::Sine, clock(rate, phase)))],
+                signals: &[],
                 routes: &[],
                 targets: &t1,
             },
@@ -1043,7 +1056,7 @@ fn a_clock_phase_past_the_bound_is_refused() {
 #[test]
 fn a_depth_by_scaler_reads_its_own_lfos_clock() {
     let mut rig = Rig::new();
-    rig.sources
+    rig.time
         .push((SourceKey(20), lfo(LfoShape::Sine, seconds(3.0))));
     rig.route_mut(100).scale = scaled(route(10, to(1), 0.0), 20, 1.0).scale;
     let depth_clock = |c: &Compiled| {

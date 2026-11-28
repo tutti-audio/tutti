@@ -9,7 +9,7 @@ use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_modulation::{Follower, Lfo};
+use tutti_modulation::Lfo;
 use tutti_session::{
     ModTarget, PHASES, ParamRef, PhaseCx, Problem, RouteSpec, Session, SessionEvent, SourceName,
     TargetName,
@@ -38,7 +38,7 @@ fn an_unresolved_target_and_an_unfed_follower_are_named() {
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.route(RouteSpec::new(lfo, ghost, Bipolar::of(0.5)))
         .unwrap();
-    let follower = m.follower(Follower::default(), NodeKey(404));
+    let follower = m.follower(crate::common::meter(), NodeKey(404));
     m.route(RouteSpec::new(follower, ghost, Bipolar::of(0.5)))
         .unwrap();
 
