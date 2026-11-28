@@ -829,8 +829,13 @@ mod state_object_tests {
         for restoring in [true, false] {
             let (mut host, transport) = pair();
             let executor = tutti_platform::Executor::new();
-            let seen =
-                crate::server::working(&executor, &transport, ReqId::new(9), restoring, || {
+            let seen = crate::server::working(
+                &executor,
+                &tutti_rt::tally::<u64>().writer(),
+                &transport,
+                ReqId::new(9),
+                restoring,
+                || {
                     (0..2)
                         .map(
                             |_| match read_frame::<_, ControlFrame>(&mut host).expect("a beat") {
@@ -842,7 +847,8 @@ mod state_object_tests {
                             },
                         )
                         .collect::<Vec<_>>()
-                });
+                },
+            );
             let want = if restoring {
                 Working::Restoring
             } else {

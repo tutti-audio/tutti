@@ -578,6 +578,8 @@ pub(crate) struct RenderSide {
     wake: Bell,
     /// How the thread tells the main thread it has made progress.
     notify: Notify,
+    /// Adds to [`Ties::detached`], for the thread that stops the lane.
+    detached: TallyWriter<u64>,
     losses: LossWriters,
     /// Blocks the plugin has failed: the cause of the first, and of each
     /// that makes a power of two, goes home ([`Back::Failure`]).
@@ -633,6 +635,7 @@ pub(crate) fn link() -> std::io::Result<(RenderLink, RenderSide)> {
             informs: Informs::new(loads),
             wake: render_ties.wake,
             notify: render_ties.notify,
+            detached: render_ties.detached,
             losses: writers,
             failures: 0,
         },
@@ -969,6 +972,8 @@ pub(crate) struct RenderThread {
     lane: Option<Lane>,
     /// Rung to end the lane's wait when it is stopped.
     wake: Bell,
+    /// Counts a lane left running when it is stopped.
+    detached: TallyWriter<u64>,
     /// Why the audio connection ended, if it did: the lane then only trades
     /// the Processor, until it is stopped.
     ended: Arc<OnceLock<Arc<IpcError>>>,
@@ -1002,6 +1007,7 @@ impl RenderThread {
     ) -> Result<Self, Box<SpawnFailed>> {
         let ended = Arc::new(OnceLock::new());
         let wake = side.wake.clone();
+        let detached = side.detached.clone();
         let slot = Arc::new(Mutex::new(Some(side)));
         let stop = Arc::new(AtomicBool::new(false));
         let lane = render_lane(Parts {
@@ -1015,6 +1021,7 @@ impl RenderThread {
             Ok(task) => Ok(Self {
                 lane: Some(Lane { task, stop }),
                 wake,
+                detached,
                 ended,
             }),
             Err(error) => Err(Box::new(SpawnFailed {
@@ -1102,7 +1109,7 @@ impl Drop for RenderThread {
                 Ok(_) => {}
                 Err(Unjoined::TimedOut(task)) => {
                     tracing::warn!("plugin-server: the render lane did not stop; leaving it");
-                    crate::leak::note_detached();
+                    self.detached.add(1);
                     task.detach();
                 }
                 Err(Unjoined::Driving(task)) => task.detach(),

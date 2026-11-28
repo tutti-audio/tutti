@@ -362,6 +362,11 @@ impl PluginPart {
         }
     }
 
+    /// [`MainWork::deferred_drops`] of the session's collector.
+    pub(crate) fn deferred_drops(&self) -> u64 {
+        self.main_work.deferred_drops()
+    }
+
     /// Runs the work other threads handed to the main thread, when `main` is the
     /// calling thread's proof.
     pub(crate) fn run_main_work(&self, main: Option<MainThreadMarker>) {
@@ -402,9 +407,8 @@ impl PluginPart {
 ///
 /// End a session that hosted an in-process plugin with `close` on the main
 /// thread; dropped elsewhere, it leaks those plugins and counts them in
-/// `tutti_plugin_types::MainWork::stranded()`; `MainWork::deferred_drops()` and
-/// `contained_panics()`, both in `tutti_plugin_types`, are the other
-/// process-wide readings. It is a field,
+/// `tutti_plugin_types::MainWork::stranded()`, and `contained_panics()` in
+/// `tutti_plugin_types` is the other process-wide reading. It is a field,
 /// not a `Drop` of the session, so a session moves to another clock field by field.
 #[derive(Debug)]
 pub(crate) struct EarlyWork(SharedWork, Tasks);
@@ -444,6 +448,11 @@ pub(crate) struct SharedWork(Arc<Mutex<MainWork>>);
 impl SharedWork {
     fn new(work: MainWork) -> Self {
         Self(Arc::new(Mutex::new(work)))
+    }
+
+    /// [`MainWork::deferred_drops`].
+    pub(crate) fn deferred_drops(&self) -> u64 {
+        self.0.lock().deferred_drops()
     }
 
     /// [`MainWork::run`].

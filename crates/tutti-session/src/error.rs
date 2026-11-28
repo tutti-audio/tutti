@@ -135,6 +135,12 @@ pub enum ConnectError {
     /// An event input that the node does not have.
     #[error("no such event input: {0:?}")]
     NoSuchEventIn(crate::EventInputPort),
+    /// A wire ends at a node that takes no audio there: a declared
+    /// instrument is played through its events, and its audio is its strip's.
+    #[error(
+        "{0:?} is a declared instrument and takes no audio input: wire its event input, or wire from its strip"
+    )]
+    NotAnInput(tutti_graph::NodeKey),
     /// A node feeds itself: a node cannot be its own source.
     #[error("{0:?} cannot feed itself")]
     Itself(tutti_graph::NodeKey),
