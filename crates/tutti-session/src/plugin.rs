@@ -766,11 +766,6 @@ pub(crate) fn event(node: NodeKey, change: PluginChange) -> SessionEvent {
 /// What a plugin reported, waiting for the next `Phase::Plugins`.
 pub(crate) type Signals = Arc<Mutex<Vec<PluginSignal>>>;
 
-/// Queues `notice` as if the plugin had reported it.
-pub(crate) fn queue(notices: &Signals, notice: PluginSignal) {
-    notices.lock().push(notice);
-}
-
 /// A queue for what `handle` reports and the subscription that fills it.
 fn hear(handle: &PluginHandle) -> (Signals, Subscription) {
     let notices = Signals::default();
@@ -1095,12 +1090,6 @@ impl RebindState {
         Some(Self::Idle { rebinder, laid_out })
     }
 
-    /// Whether a rebuilt node's Processor has not arrived.
-    #[cfg(feature = "testing")]
-    pub(crate) fn is_settling(&self) -> bool {
-        matches!(self, Self::Staged(_) | Self::Settling { .. })
-    }
-
     pub(crate) fn laid_out(&self) -> &tutti_plugin_types::Layout {
         match self {
             Self::Idle { laid_out, .. } | Self::Settling { laid_out, .. } => laid_out,
@@ -1118,18 +1107,15 @@ impl RebindState {
     }
 }
 
-/// The part of a plugin's record a [`ParamGesture`](crate::ParamGesture) keeps:
-/// whether the plugin it began on is still the one at the node, and which
-/// parameters it declares now. Shared (`Arc`) because a gesture spans frames
-/// and cannot borrow the session; the session ends it when the record retires or
-/// the plugin is replaced, and refreshes the ids when a read lands.
+/// Whether the plugin a task began on is still the one at the node: shared
+/// (`Arc`) because a task outlives the frame it began in; the session ends it
+/// when the record retires or the plugin is replaced.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Gate(Arc<Mutex<GateState>>);
 
 #[derive(Debug, Default)]
 struct GateState {
     ended: bool,
-    declared: std::collections::HashSet<ParamId>,
 }
 
 impl Gate {
@@ -1147,17 +1133,6 @@ impl Gate {
     /// has a gate of its own.
     pub(crate) fn is(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
-    }
-
-    /// The ids the mirror declares now (a read landed).
-    pub(crate) fn declare(&self, mirror: &tutti_plugin_host::PluginParamValues) {
-        self.0.lock().declared = mirror.descriptors().iter().map(|p| p.id()).collect();
-    }
-
-    /// Whether the plugin is still there and declares `id`.
-    pub(crate) fn holds(&self, id: ParamId) -> bool {
-        let state = self.0.lock();
-        !state.ended && state.declared.contains(&id)
     }
 }
 
@@ -1971,9 +1946,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
                 let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
-                let (node, _) = self
+                let node = self
                     .graph
-                    .place(NodeKey::fresh(), crate::graph::Split::of(bound));
+                    .add_split(NodeKey::fresh(), crate::graph::Split::of(bound));
                 let hosted = HostedPlugin::new(handle, loaded_ref, node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
                 self.graph.write_own_bypass(node.erase());
@@ -1985,7 +1960,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         {
             hosted.mirror = values;
             hosted.param_read = unread;
-            hosted.gate.declare(&hosted.mirror);
         }
         self.graph.provide_plugin(key.erase());
         (key, rebinder)
@@ -2103,7 +2077,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 hosted.mirror.land(values);
                 hosted.carried = None;
                 hosted.driven.report_knobs(&hosted.mirror);
-                hosted.gate.declare(&hosted.mirror);
                 self.graph.provide_plugin(node);
                 true
             }
@@ -2367,7 +2340,6 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             hosted.mirror = values;
             hosted.param_read = unread;
             hosted.mirror_token = Arc::new(());
-            hosted.gate.declare(&hosted.mirror);
             hosted.provide_values(node, &table);
         }
         let restore = match (restore, withheld) {
@@ -3437,6 +3409,13 @@ mod tests {
     }
 
     impl tutti_plugin_types::AnyThread for Fake {
+        fn edit(
+            &self,
+            _: tutti_plugin_types::ParamEdit,
+            _: tutti_plugin_types::ParamRole,
+        ) -> tutti_plugin_types::EditOutcome {
+            tutti_plugin_types::EditOutcome::NotDefined
+        }
         fn parameter_value(
             &self,
             id: ParamId,

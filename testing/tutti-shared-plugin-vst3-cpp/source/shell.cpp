@@ -34,6 +34,14 @@ static const FUID kControllerUID (0x54534850, 0x43505002, 0x53484152, 0x45440001
 // They assume one instance per process: the contract runs each case in a process of its own (nextest isolates
 // every test), and no test hosts two instances of this plugin at once.
 static std::atomic<uint32_t> gAutomationN {0}, gAutomationLast {0};
+// The host's gestures over the helper parameter, in the order the controller heard them (core.rs, kinds 13 to 15).
+static shared::Core::HostStep gHost[32];
+static std::atomic<uint32_t> gHostN {0};
+static void recordHost (uint32_t kind, uint32_t id, double value)
+{
+	uint32_t n = gHostN.load ();
+	if (n < 32) { gHost[n] = {kind, id, value}; gHostN.store (n + 1); }
+}
 
 static std::vector<uint8_t> readAll (IBStream* s)
 {
@@ -101,6 +109,8 @@ public:
 	tresult PLUGIN_API getState (IBStream* s) SMTG_OVERRIDE
 	{
 		core.automationN = gAutomationN.load (); core.automationLast = gAutomationLast.load ();
+		core.hostN = gHostN.load ();
+		for (uint32_t k = 0; k < core.hostN; ++k) core.host[k] = gHost[k];
 		auto b = core.save (); int32 w = 0;
 		return (s && s->write (b.data (), int32 (b.size ()), &w) == kResultOk && w == int32 (b.size ())) ? kResultOk : kResultFalse;
 	}
@@ -202,7 +212,8 @@ class SharedController : public EditControllerEx1,
                          public IXmlRepresentationController,
                          public IParameterFunctionName,
                          public IMidiLearn,
-                         public IAutomationState
+                         public IAutomationState,
+                         public IEditControllerHostEditing
 {
 public:
 	OBJ_METHODS (SharedController, EditControllerEx1)
@@ -215,6 +226,7 @@ public:
 		DEF_INTERFACE (IParameterFunctionName)
 		DEF_INTERFACE (IMidiLearn)
 		DEF_INTERFACE (IAutomationState)
+		DEF_INTERFACE (IEditControllerHostEditing)
 	END_DEFINE_INTERFACES (EditControllerEx1)
 	REFCOUNT_METHODS (EditControllerEx1)
 
@@ -223,6 +235,16 @@ public:
 	{
 		gAutomationLast = uint32_t (state); gAutomationN++;
 		return kResultOk;
+	}
+
+	// IEditControllerHostEditing: the host's gesture over a helper parameter, recorded as it came, with the
+	// values the controller is given between the two (core.rs, kinds 13 to 15).
+	tresult PLUGIN_API beginEditFromHost (ParamID id) SMTG_OVERRIDE { recordHost (13, id, 0.0); return kResultOk; }
+	tresult PLUGIN_API endEditFromHost (ParamID id) SMTG_OVERRIDE { recordHost (15, id, 0.0); return kResultOk; }
+	tresult PLUGIN_API setParamNormalized (ParamID id, ParamValue v) SMTG_OVERRIDE
+	{
+		if (id == shared::kHelper) recordHost (14, id, v);
+		return EditControllerEx1::setParamNormalized (id, v);
 	}
 
 	// Event bus 0, channel 0: controller 74 drives `level`; nothing else is mapped (core.rs).
@@ -351,6 +373,8 @@ public:
 		parameters.addParameter (STR16 ("program"), nullptr, 2, 0.0,
 		                         ParameterInfo::kCanAutomate | ParameterInfo::kIsList | ParameterInfo::kIsProgramChange,
 		                         shared::kProgram, kProgramUnit);
+		// The helper (core.rs, HELPER): none of automatable, read-only or hidden.
+		parameters.addParameter (STR16 ("helper"), nullptr, 0, 0.0, 0, shared::kHelper);
 		return kResultOk;
 	}
 	// `tone` is the one parameter with a plain domain of its own (core.rs, "Spec").

@@ -123,8 +123,11 @@ fn plugin::component::Parts::set_controller_state
 fn plugin::component::Parts::setup_processing
 fn plugin::component::Parts::sync_controller_to_component_state
 fn plugin::component::Parts::tail_samples
+fn plugin::controller::Parts::begin_edit_from_host
 fn plugin::controller::Parts::compatible_param_id
+fn plugin::controller::Parts::end_edit_from_host
 fn plugin::controller::Parts::has_automation_state
+fn plugin::controller::Parts::has_host_editing
 fn plugin::controller::Parts::has_midi_mapping
 fn plugin::controller::Parts::keyswitch_count
 fn plugin::controller::Parts::keyswitch_info

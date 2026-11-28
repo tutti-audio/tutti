@@ -8,7 +8,7 @@ use super::gesture::Gesture;
 use super::saved::SavedValues;
 use super::state::{ValueState, Values};
 use super::target::AnyAssign;
-use super::watcher::{IntoTargets, Watcher};
+use super::watcher::{IntoTargets, IntoWatched, Watcher};
 use crate::{AppKey, Clock, Session};
 
 impl<K: AppKey, C: Clock> Session<K, C> {
@@ -108,7 +108,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// let change = watcher.changes().unwrap().unwrap();
     /// assert_eq!(change.value, Hz::new(800.0));
     /// ```
-    pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
+    pub fn watch<W: IntoWatched>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
         self.values.watch(targets)
     }
 

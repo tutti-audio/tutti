@@ -229,7 +229,12 @@ fn a_parked_replace_seeds_the_same_way() {
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 3.0))))
         .expect("the node is in the graph");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 1, "parked");
+    assert!(
+        !s.update()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Replaced { .. })),
+        "parked: nothing has landed yet"
+    );
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
     assert_eq!(s.get(tone.q()).unwrap(), Q::new(3.0));
 
@@ -267,7 +272,19 @@ fn a_replace_behind_a_waiting_one_seeds_from_it() {
         .graph()
         .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
         .expect("the node is in the graph");
-    assert_eq!(s.graph_ref().testing().waiting_replacements(), 2);
+    assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
+
+    let mut out = [0.0f32];
+    let mut landed = 0;
+    for _ in 0..16 {
+        s.render(&mut InterleavedMut::one_frame(&mut out).unwrap());
+        landed += s
+            .update()
+            .iter()
+            .filter(|e| matches!(e, SessionEvent::Replaced { .. }))
+            .count();
+    }
+    assert_eq!(landed, 2, "both replaces land");
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
 }
 

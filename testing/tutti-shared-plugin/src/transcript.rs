@@ -56,6 +56,12 @@ pub enum Kind {
     /// An AU mapping the host removed from the unit's table, recorded as
     /// [`Kind::Mapped`] is.
     Unmapped,
+    /// VST3 `beginEditFromHost`: the `id` is the parameter.
+    HostBegin,
+    /// A `setParamNormalized` of the helper parameter: the `id` and the `value`.
+    HostValue,
+    /// VST3 `endEditFromHost`.
+    HostEnd,
 }
 
 /// The part of a ramped parameter event beyond a point.
@@ -236,6 +242,9 @@ impl Transcript {
                     10 => Kind::Ramp,
                     11 => Kind::Mapped,
                     12 => Kind::Unmapped,
+                    13 => Kind::HostBegin,
+                    14 => Kind::HostValue,
+                    15 => Kind::HostEnd,
                     other => panic!("the transcript holds event kind {other}"),
                 };
                 let id_word = c.u64();

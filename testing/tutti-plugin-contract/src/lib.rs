@@ -61,6 +61,7 @@ macro_rules! contract {
             tail_markers_reported,
             the_control_surface_answers_alike_loaded_and_active,
             a_gesture_is_reported_in_order,
+            a_host_gesture_reaches_the_plugin_as_the_format_defines,
             parameters_listed,
             presets_listed_in_order,
             own_bypass_is_declared_and_written,

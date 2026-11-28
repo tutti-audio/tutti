@@ -299,11 +299,6 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
         .replace_plugin(node, Replacement::new(Box::new(incoming)))
         .expect("the replace is accepted");
     assert_eq!(landed, node);
-    assert_eq!(
-        s.graph_ref().testing().waiting_replacements(),
-        0,
-        "nothing waits"
-    );
     // Rebuilt by the replace: not ready until the job is run and landed.
     assert!(
         !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()),
