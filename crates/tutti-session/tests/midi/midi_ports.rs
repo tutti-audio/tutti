@@ -91,19 +91,22 @@ fn roll(s: &mut Session, frames: usize) {
 /// before it gives up, a guard against a hang only.
 const HANG_GUARD_BLOCKS: usize = 10 * 48_000 / 512;
 
-/// Renders blocks until the synth has heard the Note Ons `want`, failing with `what` if
-/// [`HANG_GUARD_BLOCKS`] go by first. A device's event is put on the frame its arrival's
-/// wall-clock time maps to, and blocks render faster than real time, so how many frames
-/// pass before it plays grows with the time the test spent since its last block.
+/// Plays and renders blocks until the synth has heard the Note Ons `want`, failing with
+/// `what` if [`HANG_GUARD_BLOCKS`] go by first, then renders 4,096 frames more and fails if
+/// anything else was heard. A device's event is put on the frame its arrival's wall-clock
+/// time maps to, and blocks render faster than real time, so how many frames pass before it
+/// plays grows with the time the test spent since its last block.
 fn roll_until_heard(s: &mut Session, seen: &Seen, want: &[u8], what: &str) {
     play(s);
     for _ in 0..HANG_GUARD_BLOCKS {
         if note_ons(seen) == want {
-            return;
+            break;
         }
         blocks(s, 1);
     }
     assert_eq!(note_ons(seen), want, "{what}");
+    roll(s, 4_096);
+    assert_eq!(note_ons(seen), want, "{what}, once");
 }
 
 fn key(channel: u8, n: u8) -> tutti_ump::Ump {
