@@ -27,7 +27,7 @@ use tutti_ump::{MidiChannel, NoteNumber, U7};
 
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, Event, Fade, ForkByClone, Io, Node, Prepare, Shape, Status};
-use tutti_modulation::{Adsr, Follower, Lfo, NoteEnvelope, Polarity};
+use tutti_modulation::{Adsr, Lfo, Polarity};
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{ModDelayConfig, PhaserConfig, Stagger};
 use tutti_session::{
@@ -311,7 +311,7 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    let follower = m.follower(Follower::default(), kick);
+    let follower = m.follower(common::meter(), kick);
     m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.1)))
         .unwrap();
     m.route(RouteSpec::new(follower, cutoff, Bipolar::of(-0.2)))
@@ -377,7 +377,7 @@ fn a_removed_feed_node_leaves_its_source_unfed() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     m.range_raw(steady, 0.0, 1.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    let follower = m.follower(Follower::default(), kick);
+    let follower = m.follower(common::meter(), kick);
     let one = m.macro_(1.0);
     m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.1)))
         .unwrap();
@@ -425,7 +425,7 @@ fn a_removed_feed_node_leaves_its_source_unfed() {
     let c = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(c, 0.0, 1.0).unwrap();
-    let env = m.note_envelope(NoteEnvelope::new(Adsr::default()), clip, 0);
+    let env = m.note_envelope(common::envelope(Adsr::default()), clip, 0);
     m.route(RouteSpec::new(env, c, Bipolar::of(0.5))).unwrap();
     settle(&mut s);
     assert!(s.mod_state().source_node(env).is_some(), "precondition");
@@ -524,7 +524,7 @@ fn held_envelope_scene() -> (Session, ParamRef, ParamRef, ModSourceId) {
     let mut m = s.mods_mut();
     m.range_raw(c1, 0.0, 1.0).unwrap();
     m.range_raw(c2, 0.0, 1.0).unwrap();
-    let env = m.note_envelope(NoteEnvelope::new(adsr), clip, 0);
+    let env = m.note_envelope(common::envelope(adsr), clip, 0);
     let zero = m.macro_(0.0);
     m.route(RouteSpec::new(env, c1, Bipolar::of(0.5))).unwrap();
     m.route(RouteSpec::new(zero, c2, Bipolar::of(0.5))).unwrap();
@@ -618,7 +618,7 @@ fn a_rebuilt_source_resyncs_so_its_lane_does_not_hold_the_old_value() {
     };
     let before = s.mod_state().source_node(env).expect("a node");
     s.mods_mut()
-        .set_source(env, NoteEnvelope::new(adsr))
+        .set_source(env, common::envelope(adsr))
         .unwrap();
     let _ = s.update();
     assert_eq!(s.mod_state().pending_resyncs(), 0, "sent with the commit");
@@ -640,7 +640,7 @@ fn a_follower_route_owes_no_resync() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let follower = m.follower(Follower::default(), other);
+    let follower = m.follower(common::meter(), other);
     m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
         .unwrap();
     let _ = s.update();
@@ -722,7 +722,7 @@ fn a_note_envelope_fed_from_a_missing_event_output_is_refused() {
     };
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1.0).unwrap();
-    let env = m.note_envelope(NoteEnvelope::new(adsr), probe, 3);
+    let env = m.note_envelope(common::envelope(adsr), probe, 3);
     m.route(RouteSpec::new(env, cutoff, Bipolar::of(0.5)))
         .unwrap();
     assert_eq!(
@@ -868,7 +868,7 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
     settle(&mut s);
 
     let mut m = s.mods_mut();
-    let follower = m.follower(Follower::default(), probe);
+    let follower = m.follower(common::meter(), probe);
     let route = m
         .route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
         .unwrap();
@@ -1393,7 +1393,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
         frame(&mut s);
     }
     let mut m = s.mods_mut();
-    let kick = m.follower(Follower::default(), pulse);
+    let kick = m.follower(common::meter(), pulse);
     m.route(RouteSpec::new(kick, cutoff, Bipolar::of(0.15)))
         .unwrap();
     let plans: usize = (0..6).map(|_| frame(&mut s)).sum();
@@ -1609,7 +1609,7 @@ fn a_scale_by_or_of_a_signal_source_is_refused() {
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    let follower = m.follower(Follower::default(), probe);
+    let follower = m.follower(common::meter(), probe);
     let mac = m.macro_(0.5);
     let by_time = m
         .route(RouteSpec::new(mac, cutoff, Bipolar::of(0.2)))

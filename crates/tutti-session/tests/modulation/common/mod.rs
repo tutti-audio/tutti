@@ -3,8 +3,9 @@
 #![allow(dead_code)]
 
 use tutti_buffers::{ChannelLayout, InterleavedMut, MaxBlock};
+use tutti_modulation::{Adsr, NoteEnvelope};
 use tutti_session::Session;
-use tutti_units::Samples;
+use tutti_units::{Ballistics, Samples, Seconds};
 
 pub(crate) mod bands;
 pub(crate) mod probe;
@@ -27,4 +28,14 @@ pub(crate) fn render(s: &mut Session, blocks: usize, block: usize) -> Vec<f32> {
         all.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));
     }
     all
+}
+
+/// A follower's usual times: a 5 ms attack and a 100 ms release.
+pub(crate) fn meter() -> Ballistics {
+    Ballistics::new(Seconds::new(0.005), Seconds::new(0.1)).expect("valid times")
+}
+
+/// The note envelope of `adsr`, whose stages the test has made valid.
+pub(crate) fn envelope(adsr: Adsr) -> NoteEnvelope {
+    NoteEnvelope::new(adsr).expect("valid stages")
 }

@@ -8,8 +8,9 @@
 //!
 //! ## What is here
 //!
-//! - **The compiler.** `compile(&Declarations, prev, now, rate)`: sources
-//!   (`Source::Lfo`, `Macro`, `Follower`, `NoteEnvelope`), routes (`RouteDecl`,
+//! - **The compiler.** `compile(&Declarations, prev, now, rate)`: time sources
+//!   (`TimeSource::Lfo`, `Macro`), signal sources (`SignalKind::Follower`,
+//!   `NoteEnvelope`), routes (`RouteDecl`,
 //!   to a param or to another route's depth) and targets (`TargetDecl`: range
 //!   and automation) in, a `Compiled` out. Pure: no clock, no state, no
 //!   `Publisher`. Equal declarations compile equal, so a host republishes only
@@ -18,11 +19,13 @@
 //!   where it has a value) plus time-function layers and event-input layers
 //!   (which add), summed in `LayerId` order. A description: equal programs
 //!   evaluate to equal bits.
-//! - **The source builders.** `Lfo` (`Lfo::sine().rate(BeatDuration::new(0.5))`),
-//!   `Macro`, and the source halves of a follower (`Follower`: attack and
-//!   release) and a note envelope (`NoteEnvelope`: the ADSR), each a
-//!   `Source` through `Source::from`. What feeds a follower or a note envelope
-//!   is the host's to wire.
+//! - **The source builders.** `Lfo` (`Lfo::sine().rate(BeatDuration::new(0.5))`)
+//!   and `Macro`, each a `TimeSource` through `TimeSource::from`; the source
+//!   halves of a follower (`Ballistics`: attack and release) and a note
+//!   envelope (`NoteEnvelope`: the ADSR), each a `SignalKind` through
+//!   `SignalKind::from`. Each holds only values in its domain, so the compile
+//!   has no such refusal. What feeds a follower or a note envelope is the
+//!   host's to wire.
 //! - **The vocabulary.** `Curve` / `CurveSegment` (a value as a pure function
 //!   of a beat: automation), `LfoShape`, `Polarity`, and the one shaping
 //!   function every offset goes through, `shape(raw, depth, polarity, curve)`.
@@ -47,15 +50,15 @@
 //! ```rust
 //! use tutti_modulation::{
 //!     compile, LayerClock, Law, Declarations, LfoShape, Polarity, ProgramTime, RouteDecl,
-//!     RouteKey, Source, SourceKey, TargetDecl, TargetKey, Waveform,
+//!     RouteKey, SourceKey, TargetDecl, TargetKey, TimeSource, Waveform,
 //! };
 //! use tutti_rt::Param;
 //! use tutti_units::{Beat, BeatsPerCycle, Bipolar, Frame, ParamAddr, PhaseIncrement, PlayReading, SamplePosition, SampleRate, UnitParam};
 //!
 //! let cutoff = TargetKey::param(7, ParamAddr::Unit(UnitParam::Cutoff));
-//! let sources = [(
+//! let time = [(
 //!     SourceKey(1),
-//!     Source::Lfo {
+//!     TimeSource::Lfo {
 //!         wave: Waveform::Shape { shape: LfoShape::Square, seed: 0 },
 //!         clock: LayerClock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
 //!     },
@@ -72,7 +75,7 @@
 //!     },
 //! )];
 //! let targets = [(cutoff, TargetDecl { min: 200.0, max: 1_000.0, automation: None })];
-//! let decl = Declarations { sources: &sources, routes: &routes, targets: &targets };
+//! let decl = Declarations { time: &time, signals: &[], routes: &routes, targets: &targets };
 //! let rate = SampleRate::SR_48K;
 //! let compiled = compile(&decl, None, PlayReading { epoch: 1, play: Frame::new(0) }, rate).unwrap();
 //!
@@ -105,9 +108,9 @@ mod source;
 mod sources;
 
 pub use compile::{
-    Compiled, Declarations, MAX_CLOCK_PHASE, ProgramCompileError, RATE_ANCHOR_MARGIN, RouteDecl,
-    RouteKey, Scale, SignalKind, SignalSource, Source, SourceKey, TargetDecl, TargetKey, compile,
-    layer_id,
+    Compiled, Declarations, MAX_CLOCK_PHASE, NoteEnvelope, ProgramCompileError, RATE_ANCHOR_MARGIN,
+    RouteDecl, RouteKey, Scale, SignalKind, SignalSource, SourceKey, TargetDecl, TargetKey,
+    TimeSource, compile, layer_id,
 };
 pub use curve::{Curve, CurveSegment};
 pub use program::{
@@ -117,6 +120,6 @@ pub use program::{
 };
 pub use shape::{LfoShape, Polarity, shape};
 pub use source::{CONTROL_GRID, ControlSource, Leg, LevelFollower, NoteAdsr, PlayGrid};
-pub use sources::{Follower, Lfo, LfoRate, Macro, NoteEnvelope};
+pub use sources::{Lfo, LfoRate, Macro};
 pub use tutti_curve::{Curvature, Exponent, Law};
 pub use tutti_music::Adsr;

@@ -635,12 +635,10 @@ fn resolve_source<F: Float>(
         editor.shapes().contains_key(&node)
     });
     let width = match (decl.kind, feed) {
-        (SignalKind::Follower { .. }, None) => return Ok(None),
-        (SignalKind::Follower { .. }, Some(Feed::Audio(node))) => {
-            editor.shapes()[&node].audio_out()
-        }
-        (SignalKind::NoteEnvelope { .. }, None) => ChannelLayout::EMPTY,
-        (SignalKind::NoteEnvelope { .. }, Some(Feed::Events(from))) => {
+        (SignalKind::Follower(_), None) => return Ok(None),
+        (SignalKind::Follower(_), Some(Feed::Audio(node))) => editor.shapes()[&node].audio_out(),
+        (SignalKind::NoteEnvelope(_), None) => ChannelLayout::EMPTY,
+        (SignalKind::NoteEnvelope(_), Some(Feed::Events(from))) => {
             if from.port() >= editor.shapes()[&from.node()].event_out {
                 return Err(Refusal::WrongFeed(source));
             }
@@ -778,7 +776,7 @@ fn owe_resyncs(
     for id in read(now).difference(&before) {
         let found = compiled.nodes.iter().find(|(_, n)| n.id == *id);
         if let Some((&key, node)) = found
-            && matches!(node.kind, SignalKind::NoteEnvelope { .. })
+            && matches!(node.kind, SignalKind::NoteEnvelope(_))
         {
             owed.insert(key);
         }
@@ -889,18 +887,15 @@ fn build_lane<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &LanePlan) -
 
 /// Inserts the node of `plan` at `key`.
 fn insert_source<F: Float>(editor: &mut Editor<F>, key: NodeKey, plan: &SourcePlan) {
+    let id = plan.decl.id;
     match plan.decl.kind {
-        SignalKind::Follower { .. } => {
-            let node = EnvelopeFollowerNode::from(
-                EnvelopeFollowerConfig::from_decl(plan.width, &plan.decl)
-                    .expect("a follower's declaration"),
-            );
+        SignalKind::Follower(ballistics) => {
+            let node =
+                EnvelopeFollowerNode::from(EnvelopeFollowerConfig::new(plan.width, id, ballistics));
             editor.insert(key, "envelope-follower", ForkByClone(node));
         }
-        SignalKind::NoteEnvelope { .. } => {
-            let node = NoteEnvelopeNode::from(
-                NoteEnvelopeConfig::from_decl(&plan.decl).expect("a note envelope's"),
-            );
+        SignalKind::NoteEnvelope(envelope) => {
+            let node = NoteEnvelopeNode::from(NoteEnvelopeConfig::new(id, envelope.adsr()));
             editor.insert(key, "note-envelope", ForkByClone(node));
         }
     }

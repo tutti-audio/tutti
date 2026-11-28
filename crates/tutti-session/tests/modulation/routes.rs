@@ -4,11 +4,11 @@
 
 use crate::common::session;
 use tutti_buffers::ChannelLayout;
-use tutti_modulation::{Law, Lfo, Polarity, Source};
+use tutti_modulation::{Law, Lfo, Polarity, TimeSource};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{
-    DepthTarget, ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session,
-    SourceError, ValueErrorKind,
+    DepthTarget, ModSource, ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec,
+    Session, SourceError, ValueErrorKind,
 };
 use tutti_units::{Bipolar, Hz, Q};
 
@@ -80,8 +80,12 @@ fn routes_and_sources_are_found_again() {
             .map(|i| (i.id, i.source, i.fed_by))
             .collect::<Vec<_>>(),
         [
-            (lfo, Source::from(Lfo::sine()), None),
-            (knob, Source::Macro { value: 0.5 }, None),
+            (lfo, ModSource::from(Lfo::sine()), None),
+            (
+                knob,
+                ModSource::Time(TimeSource::Macro { value: 0.5 }),
+                None
+            ),
         ]
     );
 

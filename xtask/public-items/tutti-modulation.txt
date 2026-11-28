@@ -12,8 +12,8 @@ const program::MAX_LANE_LAYERS
 const source::CONTROL_GRID
 enum compile::ProgramCompileError
 enum compile::SignalKind
-enum compile::Source
 enum compile::TargetKey
+enum compile::TimeSource
 enum curve::CurveSegment
 enum program::LayerClock
 enum program::ProgramError
@@ -21,7 +21,8 @@ enum program::Waveform
 enum shape::LfoShape
 enum shape::Polarity
 enum sources::LfoRate
-fn compile::Source::is_signal
+fn compile::NoteEnvelope::adsr
+fn compile::NoteEnvelope::new
 fn compile::TargetKey::edge
 fn compile::TargetKey::mix
 fn compile::TargetKey::node
@@ -65,9 +66,6 @@ fn source::PlayGrid::stride
 fn source::follower::LevelFollower::follow
 fn source::follower::LevelFollower::new
 fn source::note_adsr::NoteAdsr::new
-fn sources::Follower::attack
-fn sources::Follower::new
-fn sources::Follower::release
 fn sources::Lfo::new
 fn sources::Lfo::phase
 fn sources::Lfo::rate
@@ -76,9 +74,9 @@ fn sources::Lfo::seed
 fn sources::Lfo::sine
 fn sources::Lfo::square
 fn sources::Lfo::triangle
-fn sources::NoteEnvelope::new
 struct compile::Compiled
 struct compile::Declarations
+struct compile::NoteEnvelope
 struct compile::RouteDecl
 struct compile::RouteKey
 struct compile::Scale
@@ -102,9 +100,7 @@ struct source::Leg
 struct source::PlayGrid
 struct source::follower::LevelFollower
 struct source::note_adsr::NoteAdsr
-struct sources::Follower
 struct sources::Lfo
 struct sources::Macro
-struct sources::NoteEnvelope
 trait curve::Curve
 trait source::ControlSource

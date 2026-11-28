@@ -27,8 +27,7 @@ use tutti_graph::{
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
-    Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SignalKind,
-    SignalSource, SourceId,
+    Adsr, Amount, ControlProgramBuilder, InputLayer, Law, LayerId, Polarity, SourceId,
 };
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
@@ -751,14 +750,10 @@ fn a_note_envelopes_stages_land_on_their_frames() {
     let render = |sizes: &[usize]| {
         let (mut ed, mut exec) = editor(128);
         ed.insert(NodeKey(1), "midi", ForkByClone(Midi { plan: plan.clone() }));
-        let decl = SignalSource {
-            id: SourceId::new(ParamId::new(3)),
-            kind: SignalKind::NoteEnvelope {
-                adsr: adsr(0.01, 0.02, 0.5, 0.03),
-            },
-        };
-        let node =
-            NoteEnvelopeNode::from(NoteEnvelopeConfig::from_decl(&decl).expect("a note envelope"));
+        let node = NoteEnvelopeNode::from(NoteEnvelopeConfig::new(
+            SourceId::new(ParamId::new(3)),
+            adsr(0.01, 0.02, 0.5, 0.03),
+        ));
         assert_eq!(node.source(), SourceId::new(ParamId::new(3)));
         ed.insert(NodeKey(2), "envelope", ForkByClone(node));
         wire_events(&mut ed, 1, 2);
@@ -819,35 +814,6 @@ fn a_note_envelopes_stages_land_on_their_frames() {
             }
         }
     }
-}
-
-/// **`from_decl` builds the kind it is given, and refuses the other.**
-#[test]
-fn from_decl_builds_its_own_kind() {
-    let f = SignalSource {
-        id: SourceId::new(ParamId::new(9)),
-        kind: SignalKind::Follower {
-            attack: Seconds::new(0.01),
-            release: Seconds::new(0.1),
-        },
-    };
-    let n = SignalSource {
-        id: SourceId::new(ParamId::new(4)),
-        kind: SignalKind::NoteEnvelope {
-            adsr: adsr(0.01, 0.1, 0.5, 0.2),
-        },
-    };
-    let node = EnvelopeFollowerNode::from(
-        EnvelopeFollowerConfig::from_decl(ChannelLayout::STEREO, &f).expect("a follower"),
-    );
-    assert_eq!(node.source(), SourceId::new(ParamId::new(9)));
-    assert_eq!(Node::<f32>::shape(&node).audio_in(), ChannelLayout::STEREO);
-    assert!(EnvelopeFollowerConfig::from_decl(ChannelLayout::MONO, &n).is_none());
-    assert_eq!(
-        NoteEnvelopeConfig::from_decl(&n).map(|n| NoteEnvelopeNode::from(n).source()),
-        Some(SourceId::new(ParamId::new(4)))
-    );
-    assert!(NoteEnvelopeConfig::from_decl(&f).is_none());
 }
 
 /// **Pad dips with the kick, end to end.** A 50 ms stereo burst from

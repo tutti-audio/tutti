@@ -127,7 +127,7 @@ fn continues(
 /// coarse (audio-rate modulation): an audio generator whose output feeds a
 /// node's own audio input. Beat-synced it reads the beat of every frame from
 /// its block's `Env`, so it is sample-accurate and renders identically offline.
-/// The control-rate alternative is a `tutti_modulation::Source::Lfo` route,
+/// The control-rate alternative is a `tutti_modulation::TimeSource::Lfo` route,
 /// which a control lane evaluates into the param's port.
 ///
 /// The depth is a live atomic the UI can write, multiplied onto the wave.

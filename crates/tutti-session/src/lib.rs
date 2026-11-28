@@ -300,8 +300,8 @@ pub use midi_network::*;
 #[cfg(feature = "midi")]
 pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
-    AutomationTake, MixRef, ModRouteId, ModSourceId, ModState, ModTarget, Mods, ModsView,
-    NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
+    AutomationTake, MixRef, ModRouteId, ModSource, ModSourceId, ModState, ModTarget, Mods,
+    ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
     RouteInfo, RouteSpec, Scale, ScaleError, SourceError, SourceInfo, SourceName, TargetName,
 };
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};

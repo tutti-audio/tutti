@@ -248,9 +248,7 @@ fn reverb_spring::SpringReverbConfig::stages
 fn reverb_spring::SpringReverbConfig::tone
 fn ring_mod::RingModConfig::frequency
 fn ring_mod::RingModConfig::new
-fn signal::follower::EnvelopeFollowerConfig::from_decl
 fn signal::follower::EnvelopeFollowerConfig::new
-fn signal::note_envelope::NoteEnvelopeConfig::from_decl
 fn signal::note_envelope::NoteEnvelopeConfig::new
 fn signal::sender::SourceNode::source
 fn spatial::ambisonic::AmbisonicDecoderConfig::decoding

@@ -37,12 +37,12 @@ use tutti_platform::Instant;
 
 use tutti_graph::NodeKey;
 use tutti_modulation::{
-    Curve, Declarations, Follower, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey,
-    Source, SourceKey, TargetDecl, TargetKey,
+    Curve, Declarations, Law, Lfo, Macro, NoteEnvelope, Polarity, RouteDecl, RouteKey, SignalKind,
+    SourceKey, TargetDecl, TargetKey, TimeSource,
 };
 use tutti_nodes::automation::{AutomationRecorder, RecordMode, Trajectory};
 use tutti_rt::Param;
-use tutti_units::{Bipolar, ParamAddr, ParamId, UnitAddr, UnitParam};
+use tutti_units::{Ballistics, Bipolar, ParamAddr, ParamId, UnitAddr, UnitParam};
 
 use crate::ChannelEdge;
 use crate::DeclarationError;
@@ -321,30 +321,74 @@ pub enum SourceError {
     },
 }
 
-/// Whether a source follows a node, so it is declared with one.
-const fn kind_name(source: &Source) -> &'static str {
-    match source {
-        Source::Lfo { .. } => "LFO",
-        Source::Macro { .. } => "macro",
-        Source::Follower { .. } => "follower",
-        Source::NoteEnvelope { .. } => "note envelope",
+/// A source the session declares: a function of time, or a node in the graph.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ModSource {
+    /// An LFO or a macro: no node.
+    Time(TimeSource),
+    /// A follower or a note envelope: a node, fed by one the host names.
+    Signal(SignalKind),
+}
+
+impl From<Lfo> for ModSource {
+    fn from(lfo: Lfo) -> Self {
+        Self::Time(lfo.into())
     }
 }
 
-/// Whether two sources are of one kind.
-const fn same_kind(a: &Source, b: &Source) -> bool {
-    match (a, b) {
-        (Source::Lfo { .. }, Source::Lfo { .. })
-        | (Source::Macro { .. }, Source::Macro { .. })
-        | (Source::Follower { .. }, Source::Follower { .. })
-        | (Source::NoteEnvelope { .. }, Source::NoteEnvelope { .. }) => true,
-        (
-            Source::Lfo { .. }
-            | Source::Macro { .. }
-            | Source::Follower { .. }
-            | Source::NoteEnvelope { .. },
-            _,
-        ) => false,
+impl From<Macro> for ModSource {
+    fn from(m: Macro) -> Self {
+        Self::Time(m.into())
+    }
+}
+
+impl From<Ballistics> for ModSource {
+    /// A follower with these times.
+    fn from(ballistics: Ballistics) -> Self {
+        Self::Signal(ballistics.into())
+    }
+}
+
+impl From<NoteEnvelope> for ModSource {
+    fn from(envelope: NoteEnvelope) -> Self {
+        Self::Signal(envelope.into())
+    }
+}
+
+impl ModSource {
+    /// The source's kind, for [`SourceError::ChangesKind`]'s message.
+    const fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Time(TimeSource::Lfo { .. }) => "LFO",
+            Self::Time(TimeSource::Macro { .. }) => "macro",
+            Self::Signal(SignalKind::Follower(_)) => "follower",
+            Self::Signal(SignalKind::NoteEnvelope(_)) => "note envelope",
+        }
+    }
+
+    /// Whether `other` is of the same kind.
+    const fn same_kind(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (
+                Self::Time(TimeSource::Lfo { .. }),
+                Self::Time(TimeSource::Lfo { .. })
+            ) | (
+                Self::Time(TimeSource::Macro { .. }),
+                Self::Time(TimeSource::Macro { .. })
+            ) | (
+                Self::Signal(SignalKind::Follower(_)),
+                Self::Signal(SignalKind::Follower(_))
+            ) | (
+                Self::Signal(SignalKind::NoteEnvelope(_)),
+                Self::Signal(SignalKind::NoteEnvelope(_))
+            )
+        )
+    }
+
+    /// Whether the source is a node in the graph.
+    const fn is_signal(&self) -> bool {
+        matches!(self, Self::Signal(_))
     }
 }
 
@@ -580,7 +624,7 @@ enum OwnFeed {
 struct OwnSource {
     /// The source in force: its rate or macro value is the target of
     /// `ModSourceId::rate` or `value`.
-    source: Arc<Declared<Source>>,
+    source: Arc<Declared<ModSource>>,
     feed: Option<OwnFeed>,
 }
 
@@ -678,7 +722,8 @@ pub(crate) struct OwnMods {
 /// from [`OwnMods`] and kept until they may change.
 #[derive(Debug)]
 pub(crate) struct OwnDeclarations {
-    sources: Vec<(SourceKey, Source)>,
+    time: Vec<(SourceKey, TimeSource)>,
+    signals: Vec<(SourceKey, SignalKind)>,
     routes: Vec<(RouteKey, RouteDecl)>,
     targets: Vec<(TargetKey, TargetDecl)>,
 }
@@ -686,7 +731,8 @@ pub(crate) struct OwnDeclarations {
 impl OwnDeclarations {
     fn borrow(&self) -> Declarations<'_> {
         Declarations {
-            sources: &self.sources,
+            time: &self.time,
+            signals: &self.signals,
             routes: &self.routes,
             targets: &self.targets,
         }
@@ -772,17 +818,17 @@ impl OwnMods {
     }
 
     /// Registers the target `source` has: an LFO's rate, a macro's value.
-    fn provide_source(&self, id: ModSourceId, source: &Arc<Declared<Source>>) {
+    fn provide_source(&self, id: ModSourceId, source: &Arc<Declared<ModSource>>) {
         match source.get() {
-            Source::Lfo { .. } => self.table.provide_staged(
+            ModSource::Time(TimeSource::Lfo { .. }) => self.table.provide_staged(
                 SlotId::SourceRate(id),
                 PublishedSlot::new(RateField(Arc::clone(source))),
             ),
-            Source::Macro { .. } => self.table.provide_staged(
+            ModSource::Time(TimeSource::Macro { .. }) => self.table.provide_staged(
                 SlotId::SourceValue(id),
                 PublishedSlot::new(MacroField(Arc::clone(source))),
             ),
-            Source::Follower { .. } | Source::NoteEnvelope { .. } => {}
+            ModSource::Signal(_) => {}
         }
     }
 
@@ -908,12 +954,16 @@ impl OwnMods {
     }
 
     fn declarations(&self) -> OwnDeclarations {
+        let (mut time, mut signals) = (Vec::new(), Vec::new());
+        for (&key, own) in &self.sources {
+            match own.source.get() {
+                ModSource::Time(source) => time.push((key, source)),
+                ModSource::Signal(kind) => signals.push((key, kind)),
+            }
+        }
         OwnDeclarations {
-            sources: self
-                .sources
-                .iter()
-                .map(|(&k, s)| (k, s.source.get()))
-                .collect(),
+            time,
+            signals,
             routes: self.routes.iter().map(|(&k, r)| (k, r.decl())).collect(),
             targets: declare_targets(
                 self.ranges.iter().map(|(&k, bounds)| {
@@ -1103,7 +1153,7 @@ pub struct SourceInfo {
     /// The source.
     pub id: ModSourceId,
     /// What it is (an LFO, a macro at its value, ...).
-    pub source: Source,
+    pub source: ModSource,
     /// The node it follows, for a follower or a note envelope.
     pub fed_by: Option<NodeKey>,
 }
@@ -1228,7 +1278,7 @@ impl Mods<'_> {
         ModsView::new(self.own)
     }
 
-    fn add_source(&mut self, source: Source, feed: Option<OwnFeed>) -> ModSourceId {
+    fn add_source(&mut self, source: ModSource, feed: Option<OwnFeed>) -> ModSourceId {
         let key = SourceKey(self.own.mint());
         let id = source_id(key);
         let source = Declared::new(source, &self.own.edited);
@@ -1247,10 +1297,11 @@ impl Mods<'_> {
         self.add_source(Macro(value).into(), None)
     }
 
-    /// A follower of every audio output of `input`.
-    pub fn follower(&mut self, follower: Follower, input: impl Into<NodeKey>) -> ModSourceId {
+    /// A follower of every audio output of `input`, with the attack and release of
+    /// `ballistics`.
+    pub fn follower(&mut self, ballistics: Ballistics, input: impl Into<NodeKey>) -> ModSourceId {
         let input = input.into();
-        self.add_source(follower.into(), Some(OwnFeed::Audio(input)))
+        self.add_source(ballistics.into(), Some(OwnFeed::Audio(input)))
     }
 
     /// A note envelope on event output `port` of `midi` (a clip node, a
@@ -1280,18 +1331,18 @@ impl Mods<'_> {
     pub fn set_source(
         &mut self,
         id: ModSourceId,
-        source: impl Into<Source>,
+        source: impl Into<ModSource>,
     ) -> Result<(), SourceError> {
         let Some(s) = self.own.sources.get(&SourceKey(id.get())) else {
             return Err(SourceError::NoSuchSource(NoSuchModSource(id)));
         };
         let source = source.into();
         let from = s.source.get();
-        if !same_kind(&from, &source) {
+        if !from.same_kind(&source) {
             return Err(SourceError::ChangesKind {
                 id,
-                from: kind_name(&from),
-                to: kind_name(&source),
+                from: from.kind_name(),
+                to: source.kind_name(),
             });
         }
         self.own.retire_source(id);

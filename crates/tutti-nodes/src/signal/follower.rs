@@ -4,7 +4,7 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{Cost, Io};
-use tutti_modulation::{LevelFollower, SignalKind, SignalSource, SourceId};
+use tutti_modulation::{LevelFollower, SourceId};
 use tutti_units::Ballistics;
 
 use super::{SourceNode, SourcePorts};
@@ -47,19 +47,6 @@ impl EnvelopeFollowerConfig {
             input,
             source,
             ballistics,
-        }
-    }
-
-    /// The config `decl` describes (what `tutti_modulation::compile` gives each follower),
-    /// following an `input`-wide signal: `None` when `decl` is not a follower or its times
-    /// are not valid ones (`compile` refuses those).
-    #[must_use]
-    pub fn from_decl(input: ChannelLayout, decl: &SignalSource) -> Option<Self> {
-        match decl.kind {
-            SignalKind::Follower { attack, release } => {
-                Some(Self::new(input, decl.id, Ballistics::new(attack, release)?))
-            }
-            SignalKind::NoteEnvelope { .. } => None,
         }
     }
 }
