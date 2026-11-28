@@ -65,6 +65,15 @@ pub fn placed_source<F: Float>(
     )
 }
 
+/// `node` with fresh cells and the controls that write them, without a graph:
+/// what a test that drives a node by hand steers it through. A node inserted
+/// into a graph takes its controls from `into_parts`.
+pub fn controlled<F: crate::SamplerFloat>(
+    node: crate::VoiceNode<F>,
+) -> (crate::VoiceNode<F>, crate::VoiceNodeControls<F>) {
+    node.controlled()
+}
+
 /// The spare vocoders `pool`'s voices carry: what a loop under the voices asks of a pool's
 /// memory, for a test of which voices carry one.
 pub fn spare_count<F: crate::SamplerFloat>(pool: &crate::VoicePool<F>) -> usize {

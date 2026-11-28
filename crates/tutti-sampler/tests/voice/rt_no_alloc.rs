@@ -1341,10 +1341,10 @@ fn voice_node_command_drain_does_not_allocate() {
     });
     source.play();
 
-    let (node, handle) =
+    let (node, handle) = tutti_sampler::testing::controlled(
         tutti_sampler::VoiceNode::with_channels(source, Playback::default(), ChannelLayout::STEREO)
-            .expect("a finite gain and a nonempty width")
-            .with_handle();
+            .expect("a finite gain and a nonempty width"),
+    );
     let mut rig = Rig::new(node, 64);
 
     // Warm-up outside the gate: the first blocks touch lazily-sized state, and
@@ -1356,10 +1356,13 @@ fn voice_node_command_drain_does_not_allocate() {
     // Queue more than one block's worth, so the drain loop runs repeatedly
     // rather than taking its empty fast path once.
     for i in 0..8u64 {
-        handle.window_cell().publish(Some(VoiceWindow::span(
-            Beat::new(i as f64 * 0.25),
-            BeatDuration::new(4.0),
-        )));
+        handle
+            .window_cell()
+            .expect("a placed voice")
+            .publish(VoiceWindow::span(
+                Beat::new(i as f64 * 0.25),
+                BeatDuration::new(4.0),
+            ));
     }
 
     // First block drains the eight queued commands...

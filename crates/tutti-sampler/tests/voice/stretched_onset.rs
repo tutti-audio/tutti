@@ -264,16 +264,17 @@ fn a_disk_voice_whose_ring_has_not_caught_up_plays_on_time_and_counts_an_underru
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(1.0)));
-    let (node, handle) = VoiceNode::streaming(
-        voice,
-        stream,
-        Playback {
-            stretch: StretchFactor::new(1.5),
-            ..Playback::default()
-        },
-    )
-    .expect("a finite gain and a nonempty width")
-    .with_handle();
+    let (node, handle) = tutti_sampler::testing::controlled(
+        VoiceNode::streaming(
+            voice,
+            stream,
+            Playback {
+                stretch: StretchFactor::new(1.5),
+                ..Playback::default()
+            },
+        )
+        .expect("a finite gain and a nonempty width"),
+    );
     let mut node = contract::prepared(node, SampleRate::of(SR), BLOCK);
     assert_eq!(node.shape().latency.samples(), tutti_units::Samples::new(0));
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
