@@ -476,6 +476,12 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         WIDTH,
         "the order states the width: an ACN bus of order `n` has `(n + 1)^2` channels, so a width argument could only disagree with it",
     ),
+    ty(
+        "crates/tutti-nodes/src/spatial/ambisonic.rs",
+        "AmbisonicDecoderConfig::new",
+        WIDTH,
+        "the bed states the output width, and the order of `input` states the input's: a width argument could only disagree with them",
+    ),
     ty("crates/tutti-nodes/", "AdditiveConfig", WIDTH, FIXED_SOURCE),
     ty(
         "crates/tutti-nodes/",

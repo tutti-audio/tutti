@@ -5,10 +5,10 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use tutti_buffers::{
-    AmbisonicOrder, ChannelIndex, ChannelLayout, ChannelTopology, Interleaved, Mono, Wave,
+    AmbisonicOrder, Bed, ChannelIndex, ChannelLayout, ChannelTopology, Interleaved, Mono, Wave,
 };
 use tutti_dsp::{
-    Algorithm, ButterworthOrder, ClipperDrive, CombDelay, CombForm, CompressorControls,
+    Algorithm, BedLayout, ButterworthOrder, ClipperDrive, CombDelay, CombForm, CompressorControls,
     CrossoverControls, CutAlignment, CutResponse, DynamicMode, FdnControls, FdnLayout, FmPatch,
     FreeverbControls, FreezeControls, GateControls, GraphicBands, HarmonicNormalization, HopSize,
     HrirSphere, HysteresisDrive, Inline, KeyFilter, KeySource, LadderSaturation, LadderType,
@@ -20,25 +20,26 @@ use tutti_dsp::{
 };
 use tutti_graph::{HostValues, IntoNode, NodeConfig, ParamSet};
 use tutti_nodes::{
-    AdditiveConfig, AmbisonicEncoderConfig, AmbisonicRotatorConfig, AutoPanConfig,
-    BellFilterConfig, BitCrusherConfig, BrickwallLimiterConfig, ClickNodeConfig, ClickSettings,
-    CombFilterConfig, CompressorConfig, ConvolverConfig, CrossoverConfig, CutFilterConfig,
-    DcBlockerConfig, DecorrelatorConfig, DelayConfig, DelayControls, DelayLayout, DelaySync,
-    DiodeClipperConfig, DistanceConfig, DistortionConfig, DynamicEqConfig, EarlyReflectionsConfig,
-    EnvelopeFilterConfig, EqBandConfig, FdnConfig, FdnNodeControls, FirConvolverConfig, FmConfig,
-    FreeverbConfig, FrequencyShifterConfig, GateConfig, GranularConfig, GranularSource,
-    GraphicEqConfig, HrtfBinauralConfig, HysteresisConfig, ImpulseResponses, InterpolationMode,
-    IrLayout, KarplusStrongConfig, LadderFilterConfig, LevellerConfig, LimiterConfig, MaxDelay,
-    MidSideConfig, ModDelayConfig, ModalBankConfig, MultibandBands, MultibandCompressorConfig,
-    MultibandControls, PhaserConfig, PitchShifterConfig, PlateReverbConfig, PolarityConfig,
-    RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger, StereoWidthConfig, SvfFilterConfig,
-    SvfType, SweepRange, TiltFilterConfig, TransientShaperConfig, TremoloConfig, TubeStageConfig,
-    WaveguideStringConfig, WavetableConfig,
+    AdditiveConfig, AmbisonicDecoderConfig, AmbisonicEncoderConfig, AmbisonicRotatorConfig,
+    AutoPanConfig, BellFilterConfig, BitCrusherConfig, BrickwallLimiterConfig, ClickNodeConfig,
+    ClickSettings, CombFilterConfig, CompressorConfig, ConvolverConfig, CrossoverConfig,
+    CutFilterConfig, DcBlockerConfig, Decoding, DecorrelatorConfig, DelayConfig, DelayControls,
+    DelayLayout, DelaySync, DiodeClipperConfig, DistanceConfig, DistortionConfig, DynamicEqConfig,
+    EarlyReflectionsConfig, EnvelopeFilterConfig, EqBandConfig, FdnConfig, FdnNodeControls,
+    FirConvolverConfig, FmConfig, FreeverbConfig, FrequencyShifterConfig, GateConfig,
+    GranularConfig, GranularSource, GraphicEqConfig, HrtfBinauralConfig, HysteresisConfig,
+    ImpulseResponses, InterpolationMode, IrLayout, KarplusStrongConfig, LadderFilterConfig,
+    LevellerConfig, LimiterConfig, MaxDelay, MidSideConfig, ModDelayConfig, ModalBankConfig,
+    MultibandBands, MultibandCompressorConfig, MultibandControls, PhaserConfig, PitchShifterConfig,
+    PlateReverbConfig, PolarityConfig, RingModConfig, ShimmerConfig, SpringReverbConfig, Stagger,
+    StereoWidthConfig, SvfFilterConfig, SvfType, SweepRange, TiltFilterConfig,
+    TransientShaperConfig, TremoloConfig, TubeStageConfig, VbapPannerConfig, WaveguideStringConfig,
+    WavetableConfig,
 };
 use tutti_units::{
     Amplitude, ArcDegrees, Azimuth, Bipolar, BitDepth, Cents, CompressionRatio, Db, Direction,
     Drive, Elevation, Feedback, FrequencyRatio, Gain, HoldFactor, Hz, Metres, Mix, ModulationIndex,
-    Normalized, Q, Resonance, SampleRate, SampleSpan, Samples, Seconds, Semitones, Speed,
+    Normalized, Q, Resonance, SampleRate, SampleSpan, Samples, Seconds, Semitones, Speed, Spread,
     StereoWidth,
 };
 
@@ -836,6 +837,41 @@ fn each_config_lists_its_values_and_compares_its_structure() {
             // The roll is fixed for the life of the node, not a param: structure.
             rotator.roll(ArcDegrees::new(45.0)),
         ],
+    );
+
+    let quad = BedLayout::try_from(Bed::Quad).unwrap();
+    let decoder = AmbisonicDecoderConfig::new(quad.clone())
+        .input(AmbisonicOrder::of(1), HarmonicNormalization::Sn3d);
+    check_plain(
+        "ambisonic decoder",
+        &decoder,
+        &[
+            AmbisonicDecoderConfig::new(quad.clone())
+                .input(AmbisonicOrder::of(2), HarmonicNormalization::Sn3d),
+            AmbisonicDecoderConfig::new(quad.clone())
+                .input(AmbisonicOrder::of(1), HarmonicNormalization::N3d),
+            AmbisonicDecoderConfig::new(BedLayout::try_from(Bed::Surround51).unwrap())
+                .input(AmbisonicOrder::of(1), HarmonicNormalization::Sn3d),
+            decoder.clone().decoding(Decoding::Sampling),
+        ],
+    );
+
+    // Panning.
+    let vbap = VbapPannerConfig::new(quad);
+    check(
+        "vbap panner",
+        &vbap,
+        Some(
+            &vbap
+                .clone()
+                .azimuth(Azimuth::new(45.0))
+                .elevation(Elevation::new(30.0))
+                .spread(Spread::new(0.5))
+                .width(StereoWidth::new(1.5)),
+        ),
+        &[VbapPannerConfig::new(
+            BedLayout::try_from(Bed::Surround51).unwrap(),
+        )],
     );
 
     // Hand configs: no params, so the whole config is structure.

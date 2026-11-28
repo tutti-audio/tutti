@@ -1,3 +1,4 @@
+use tutti_buffers::Bed;
 use tutti_dsp::Harmonics;
 use tutti_graph::contract::{BlockRig, assert_param_fork};
 use tutti_graph::{IntoNode, Node};
@@ -9,9 +10,9 @@ use crate::test_support::prepared;
 const THIRD: AmbisonicOrder = AmbisonicOrder::MAX;
 const RATE: SampleRate = SampleRate::SR_48K;
 
-/// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> ChannelTopology {
-    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
+/// The speakers of `bed`, which has two or more.
+fn speakers(bed: Bed) -> BedLayout {
+    BedLayout::try_from(bed).expect("a bed with speakers to pan between")
 }
 
 fn aim(azimuth: f64, elevation: f64) -> Direction {
@@ -143,12 +144,11 @@ fn the_rotator_rolls_about_the_front_by_the_configured_arc() {
 #[test]
 fn the_sampling_decoder_to_a_quad_keeps_the_sum_of_the_feeds_at_the_source() {
     let order = AmbisonicOrder::of(1);
-    let node = AmbisonicDecoderNode::<f64>::try_from(
-        AmbisonicDecoderConfig::new(Bed::Quad)
-            .input(ambix(order))
+    let node = AmbisonicDecoderNode::<f64>::from(
+        AmbisonicDecoderConfig::new(speakers(Bed::Quad))
+            .input(order, HarmonicNormalization::Sn3d)
             .decoding(Decoding::Sampling),
-    )
-    .unwrap();
+    );
     let wave = harmonics(order, HarmonicNormalization::Sn3d, aim(30.0, 20.0));
     let got = run(node, &wave, 2, |_| {});
     assert_eq!(got.len(), 4);
@@ -159,10 +159,10 @@ fn the_sampling_decoder_to_a_quad_keeps_the_sum_of_the_feeds_at_the_source() {
 #[test]
 fn the_decoder_leaves_the_lfe_silent() {
     let order = AmbisonicOrder::of(3);
-    let node = AmbisonicDecoderNode::<f64>::try_from(
-        AmbisonicDecoderConfig::new(Bed::Surround51).input(ambix(order)),
-    )
-    .unwrap();
+    let node = AmbisonicDecoderNode::<f64>::from(
+        AmbisonicDecoderConfig::new(speakers(Bed::Surround51))
+            .input(order, HarmonicNormalization::Sn3d),
+    );
     let wave = harmonics(order, HarmonicNormalization::Sn3d, aim(10.0, 0.0));
     let got = run(node, &wave, 2, |_| {});
     assert_eq!(got.len(), 6);
@@ -188,10 +188,9 @@ fn a_decoder_reads_n3d_and_sn3d_encodings_of_one_field_to_the_same_feeds() {
     let order = AmbisonicOrder::of(2);
     let d = aim(-70.0, 15.0);
     let feeds = |n| {
-        let node = AmbisonicDecoderNode::<f64>::try_from(
-            AmbisonicDecoderConfig::new(Bed::Surround50).input(bus(order, n)),
-        )
-        .unwrap();
+        let node = AmbisonicDecoderNode::<f64>::from(
+            AmbisonicDecoderConfig::new(speakers(Bed::Surround50)).input(order, n),
+        );
         run(node, &harmonics(order, n, d), 2, |_| {})
     };
     let a = feeds(HarmonicNormalization::Sn3d);
@@ -199,25 +198,6 @@ fn a_decoder_reads_n3d_and_sn3d_encodings_of_one_field_to_the_same_feeds() {
     for (a, b) in a.iter().zip(&b) {
         assert!((a - b).abs() < 1e-12);
     }
-}
-
-#[test]
-fn a_decoder_refuses_a_bus_that_is_not_a_bed_and_a_bed_with_one_speaker() {
-    let order = AmbisonicOrder::of(1);
-    let unassigned =
-        ChannelTopology::unassigned(tutti_buffers::ChannelLayout::from_count(3)).unwrap();
-    assert!(matches!(
-        AmbisonicDecoderNode::<f32>::try_from(
-            AmbisonicDecoderConfig::new(unassigned).input(ambix(order))
-        ),
-        Err(AmbisonicError::NotABed)
-    ));
-    assert!(matches!(
-        AmbisonicDecoderNode::<f32>::try_from(
-            AmbisonicDecoderConfig::new(Bed::Mono).input(ambix(order))
-        ),
-        Err(AmbisonicError::Geometry(_))
-    ));
 }
 
 /// The shapes: the encoder is mono in and `(order + 1)^2` out, the rotator keeps the
@@ -241,12 +221,10 @@ fn the_shapes_are_mono_to_the_order_through_and_the_order_to_the_bed() {
         (shape.audio_in().count(), shape.audio_out().count()),
         (9, 9)
     );
-    let decoder = prepared(
-        AmbisonicDecoderNode::<f32>::try_from(
-            AmbisonicDecoderConfig::new(Bed::Surround51).input(ambix(AmbisonicOrder::of(1))),
-        )
-        .unwrap(),
-    );
+    let decoder = prepared(AmbisonicDecoderNode::<f32>::from(
+        AmbisonicDecoderConfig::new(speakers(Bed::Surround51))
+            .input(AmbisonicOrder::of(1), HarmonicNormalization::Sn3d),
+    ));
     let shape = decoder.shape();
     assert_eq!(
         (shape.audio_in().count(), shape.audio_out().count()),
@@ -264,26 +242,6 @@ fn forks_share_no_cell() {
     ));
 }
 
-/// The nodes run in ACN with SN3D or N3D: a bus that is no ambisonic one, or an ambisonic
-/// one of another order or scaling, is refused by name.
-#[test]
-fn the_decoder_refuses_a_bus_that_is_not_acn_in_sn3d_or_n3d() {
-    let fuma = ChannelTopology::Ambisonic(AmbisonicFormat::fuma(AmbisonicOrder::of(1)));
-    let max_n = ChannelTopology::Ambisonic(AmbisonicFormat::new(
-        AmbisonicOrder::of(1),
-        AmbisonicOrdering::Acn,
-        AmbisonicNormalization::MaxN,
-    ));
-    for bus in [fuma, max_n] {
-        assert!(matches!(
-            AmbisonicDecoderNode::<f32>::try_from(
-                AmbisonicDecoderConfig::new(Bed::Quad).input(bus)
-            ),
-            Err(AmbisonicError::Unsupported(_))
-        ));
-    }
-}
-
 /// Each channel of the bed carries the harmonics sampled at its own speaker: feed `c` of a
 /// plane wave is `(1 / L) sum_n (2 n + 1) Y_n(speaker c) Y_n(source)` over the `L` placed
 /// speakers, with the LFE skipped in the count and its channel left out of the map.
@@ -291,12 +249,11 @@ fn the_decoder_refuses_a_bus_that_is_not_acn_in_sn3d_or_n3d() {
 fn the_sampling_decoder_feeds_each_channel_the_harmonics_at_its_own_speaker() {
     let order = AmbisonicOrder::of(2);
     let bed = Bed::Surround51;
-    let node = AmbisonicDecoderNode::<f64>::try_from(
-        AmbisonicDecoderConfig::new(bed)
-            .input(ambix(order))
+    let node = AmbisonicDecoderNode::<f64>::from(
+        AmbisonicDecoderConfig::new(speakers(bed))
+            .input(order, HarmonicNormalization::Sn3d)
             .decoding(Decoding::Sampling),
-    )
-    .unwrap();
+    );
     let source = harmonics(order, HarmonicNormalization::Sn3d, aim(30.0, 20.0));
     let got = run(node, &source, 2, |_| {});
     let speakers = bed.topology().positions().unwrap().to_vec();

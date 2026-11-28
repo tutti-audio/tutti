@@ -165,6 +165,6 @@ fn a_width_crossing_the_fold_threshold_crossfades_in_even_steps() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
-        .expect("a bed with speakers to pan between")
+    let bed = tutti_dsp::BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+    tutti_nodes::VbapPannerNode::from(tutti_nodes::VbapPannerConfig::new(bed))
 }

@@ -21,9 +21,7 @@ enum params::ControlRead
 enum params::ControlValid
 enum params::Ring
 enum polarity::PolarityError
-enum spatial::ambisonic::AmbisonicError
 enum spatial::ambisonic::Decoding
-enum spatial::vbap::error::VbapError
 fn additive::AdditiveConfig::frequency
 fn additive::AdditiveConfig::level
 fn additive::AdditiveConfig::new

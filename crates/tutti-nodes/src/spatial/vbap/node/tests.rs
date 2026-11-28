@@ -735,6 +735,6 @@ fn in_an_f64_graph_the_panner_is_linear_on_wide_signals() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> crate::VbapPannerNode<F> {
-    crate::VbapPannerNode::try_from(crate::VbapPannerConfig::new(bed))
-        .expect("a bed with speakers to pan between")
+    let bed = tutti_dsp::BedLayout::try_from(bed).expect("a bed with speakers to pan between");
+    crate::VbapPannerNode::from(crate::VbapPannerConfig::new(bed))
 }

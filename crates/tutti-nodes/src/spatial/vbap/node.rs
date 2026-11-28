@@ -1,6 +1,5 @@
-use super::error::{Result, VbapError};
-use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
-use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
+use tutti_buffers::{Bed, ChannelLayout, Float, Fold, Mono, MonoMut};
+use tutti_dsp::{BedLayout, COEFF_INTERVAL, Lerp, Ramp, VbapGains, VbapKernel};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
@@ -23,10 +22,10 @@ const GRID: usize = COEFF_INTERVAL;
 const RAMP: Seconds = Seconds::new(0.05);
 
 // The params a [`VbapPannerNode`] lets the graph modulate, in port order, and the
-// [`VbapPannerConfig`] it is made from: the bus it pans over, and the bearing, height,
+// [`VbapPannerConfig`] it is made from: the bed it pans over, and the bearing, height,
 // spread and width at the start.
-tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, #[derive(Copy, PartialEq)] VbapPannerConfig, VbapPannerCells {
-    required { output: ChannelTopology }
+tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, #[derive(PartialEq)] VbapPannerConfig, VbapPannerCells {
+    required { output: BedLayout }
     params {
         Azimuth => azimuth: Azimuth { whole } = Azimuth::FRONT,
         Elevation => elevation: Elevation { whole } = Elevation::LEVEL,
@@ -54,7 +53,7 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 
 /// A VBAP loudspeaker panner: stereo in, one output per channel of a [`Bed`].
 ///
-/// Build it from a [`VbapPannerConfig`] over a bed, whose speakers sit where
+/// Build it from a [`VbapPannerConfig`] over a [`BedLayout`], whose speakers sit where
 /// `tutti_buffers::Bed::direction` puts them. It is a
 /// graph node (`tutti_graph::Node` and [`ParamNode`](tutti_graph::ParamNode)); inserting it hands back its
 /// [`ParamSet`](tutti_graph::ParamSet) ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
@@ -70,9 +69,11 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 /// use tutti_buffers::{Bed, MaxBlock};
 /// use tutti_units::{SampleRate, Samples, UnitParam};
 /// use tutti_graph::{ParamNode, Prepare, Renderer};
+/// use tutti_dsp::BedLayout;
 /// use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
 ///
-/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad)).unwrap();
+/// let quad = BedLayout::try_from(Bed::Quad).unwrap();
+/// let panner = VbapPannerNode::<f32>::from(VbapPannerConfig::new(quad));
 /// panner.param_set().set(UnitParam::Azimuth, 45.0); // front-left
 ///
 /// let (mut renderer, ..) = Renderer::alone(panner, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
@@ -86,9 +87,8 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 /// one BS.2051 table in `tutti_buffers`, and a channel's speaker is its place
 /// among the bed's placed speakers. VBAP pans across the two or three speakers
 /// surrounding a direction, so it needs an arrangement and not merely a channel
-/// count; a topology that is not a bed ([`Bed::from_topology`]) is not a panner
-/// input. [`Bed::Mono`] has one speaker, so no direction to pan between, and is
-/// refused.
+/// count. [`Bed::Mono`] has one speaker, so no direction to pan between, and is
+/// refused by [`BedLayout`].
 ///
 /// # The ramp
 ///
@@ -176,32 +176,21 @@ pub struct VbapPannerNode<F: Float> {
     seated: bool,
 }
 
-impl<F: Float> TryFrom<VbapPannerConfig> for VbapPannerNode<F> {
-    type Error = VbapError;
-
-    /// A panner over the config's bus: stereo in, the bus's channels out, in the bus's
-    /// order, each placed speaker at its [`Bed::direction`] and the LFE, if the bus has
+impl<F: Float> From<VbapPannerConfig> for VbapPannerNode<F> {
+    /// A panner over the config's bed: stereo in, the bed's channels out, in the bed's
+    /// order, each placed speaker at its [`Bed::direction`] and the LFE, if the bed has
     /// one, silent.
-    ///
-    /// The refusal is of the one bus: a placement VBAP can pan over is a [`Bed`] with at
-    /// least two speakers, which `ChannelTopology` cannot say.
-    ///
-    /// # Errors
-    ///
-    /// [`VbapError::NotABed`] for a bus that places no bed, and
-    /// [`VbapError::Geometry`] for a bed whose speakers cannot be panned over: [`Bed::Mono`].
-    fn try_from(config: VbapPannerConfig) -> Result<Self> {
-        let bed = Bed::from_topology(&config.output).ok_or(VbapError::NotABed)?;
-        let layout = SpeakerLayout::try_from(bed)?;
+    fn from(config: VbapPannerConfig) -> Self {
+        let bed = config.output.bed();
         let steps = ramp_steps(SampleRate::SR_48K);
-        let mut kernel = VbapKernel::new(layout);
+        let mut kernel = VbapKernel::new(config.output.layout().clone());
         let gains = kernel.gains(
             config.azimuth,
             config.elevation,
             config.width,
             config.spread,
         );
-        Ok(Self {
+        Self {
             kernel,
             layout: bed.width(),
             cells: VbapPannerCells::from_config(&config),
@@ -219,7 +208,7 @@ impl<F: Float> TryFrom<VbapPannerConfig> for VbapPannerNode<F> {
             steps,
             pos: 0,
             seated: false,
-        })
+        }
     }
 }
 
