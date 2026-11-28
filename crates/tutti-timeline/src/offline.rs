@@ -144,8 +144,11 @@ impl OfflineTimeline {
     #[must_use]
     pub fn new(config: &OfflineTimelineConfig) -> Self {
         let map = &config.tempo_map;
-        let mut clock =
-            FrameClock::new(config.start_beat, map.points()[0].tempo, config.sample_rate);
+        let mut clock = FrameClock::new(
+            config.start_beat,
+            map.tempo_at(Beat::new(0.0)),
+            config.sample_rate,
+        );
         let mut walk = TempoWalk::default();
         let stepped = map.constant_tempo().is_none();
         if stepped {

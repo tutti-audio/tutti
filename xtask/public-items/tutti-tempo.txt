@@ -21,6 +21,7 @@ fn map::TempoMap::builder
 fn map::TempoMap::constant
 fn map::TempoMap::constant_tempo
 fn map::TempoMap::new
+fn map::TempoMap::point_after
 fn map::TempoMap::points
 fn map::TempoMap::seconds_at
 fn map::TempoMap::stepped_to
@@ -28,6 +29,7 @@ fn map::TempoMap::tempo_at
 fn map::TempoMap::tempo_at_seconds
 fn map::TempoMap::view
 fn map::TempoMap::with_point
+fn map::TempoMap::with_steps
 fn point::TempoPoint::ramp_beats
 fn point::TempoPoint::ramp_time
 fn point::TempoPoint::step

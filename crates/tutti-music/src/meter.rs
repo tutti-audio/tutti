@@ -415,6 +415,22 @@ impl BarPosition {
     pub fn is_downbeat(&self) -> bool {
         self.beat == BeatsPerBar::of(1) && self.fraction.get().abs() < DOWNBEAT_EPSILON
     }
+
+    /// The timeline position of the onset of the notated beat this position
+    /// is in.
+    #[inline]
+    #[must_use]
+    pub fn beat_onset(&self) -> Beat {
+        self.bar_start + self.signature.beat_length() * (self.beat.get() - 1) as f64
+    }
+
+    /// The length of a notated beat under the signature in force here, in
+    /// quarter notes.
+    #[inline]
+    #[must_use]
+    pub fn beat_length(&self) -> BeatDuration {
+        self.signature.beat_length()
+    }
 }
 
 /// How close to a beat's onset counts as being *on* it.
@@ -773,6 +789,16 @@ impl MeterMap {
         Some(Self::new(kept.chain([MeterChange::new(at, signature)])))
     }
 
+    /// Returns the beat of the first change after `beat`, or `None` when the
+    /// signature in force at `beat` stays for good.
+    #[inline]
+    #[must_use]
+    pub fn change_after(&self, beat: Beat) -> Option<Beat> {
+        self.changes
+            .get(self.changes.partition_point(|c| c.beat <= beat))
+            .map(|c| c.beat)
+    }
+
     /// Returns the changes in force, in timeline order. Never empty.
     #[inline]
     pub fn changes(&self) -> &[MeterChange] {
@@ -832,6 +858,29 @@ impl Meter for MeterMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The next change is strictly after the beat**: a change on the beat itself is the one
+    /// in force, so it is not "after"; past the last change there is none.
+    #[test]
+    fn change_after_is_the_first_change_strictly_after_the_beat() {
+        let map = MeterMap::new([
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(8.0), seven_eight()),
+            MeterChange::new(Beat::new(15.0), TimeSignature::default()),
+        ]);
+        assert_eq!(map.change_after(Beat::new(0.0)), Some(Beat::new(8.0)));
+        assert_eq!(map.change_after(Beat::new(7.5)), Some(Beat::new(8.0)));
+        assert_eq!(
+            map.change_after(Beat::new(8.0)),
+            Some(Beat::new(15.0)),
+            "one on the beat is in force"
+        );
+        assert_eq!(
+            map.change_after(Beat::new(15.0)),
+            None,
+            "the last stays for good"
+        );
+    }
 
     /// 7/8 — the meter that exposes every "numerator is the bar length" bug.
     fn seven_eight() -> TimeSignature {

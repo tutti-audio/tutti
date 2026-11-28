@@ -90,14 +90,7 @@ impl Transport {
     /// Crate-private: [`audio`](Self::audio) is the only caller, and it only
     /// calls with the motion machine in hand.
     pub(crate) fn links(&self) -> super::state::ClockLinks {
-        super::state::ClockLinks {
-            paused: Arc::clone(&self.settings.paused),
-            seek: self.motion.seek.clone(),
-            position_writeback: Some(Arc::clone(&self.settings.beat)),
-            segment_generation: Some(Arc::clone(&self.settings.segment_generation)),
-            steady_time: Some(Arc::clone(&self.settings.steady_time)),
-            current_tempo: Some(Arc::clone(&self.settings.current_tempo)),
-        }
+        self.settings.clock_links(self.motion.seek.clone())
     }
 
     /// The device rate this transport converts musical time against: the
@@ -123,7 +116,7 @@ impl Transport {
     pub fn set_sample_rate(&self, sample_rate: impl Into<SampleRate>) {
         let rate = sample_rate.into();
         if self.sample_rate.swap(rate) != rate {
-            self.motion.timed().mark_rate_change();
+            self.motion.mark_rate_change();
         }
     }
 }
@@ -190,7 +183,7 @@ mod tests {
     #[test]
     fn read_view_spans_both_halves() {
         let t = Transport::new(SampleRate::SR_48K);
-        t.settings.set_beat(Beat::new(8.0));
+        t.settings.locate(Beat::new(8.0));
         t.settings.set_tempo(Bpm::of(90.0));
         let _ = t.motion.send(MotionCommand::Play);
         Audio::of(&t.motion).drain();
