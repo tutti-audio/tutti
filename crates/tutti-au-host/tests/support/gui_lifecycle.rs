@@ -472,12 +472,12 @@ fn dropping_off_the_main_thread_defers_and_counts_the_close() {
     unsafe { retain(view) };
     let held = unsafe { retain_count(view) };
 
-    let before = tutti_plugin_types::MainWork::deferred_drops();
+    let before = work.deferred_drops();
     std::thread::spawn(move || drop(editor))
         .join()
         .expect("the drop off the main thread must not panic");
     assert_eq!(
-        tutti_plugin_types::MainWork::deferred_drops(),
+        work.deferred_drops(),
         before + 1,
         "{}: a drop off the main thread defers its close and counts it once",
         unit.label

@@ -44,6 +44,12 @@ pub struct ServerLosses {
     /// Callbacks the plugin made from a thread its format forbids, which the
     /// server refused.
     pub refused_off_thread_calls: Calls,
+    /// Tasks of the server's (the render lane, the load's beat) that did not
+    /// stop within their patience and were left running.
+    pub detached_tasks: u64,
+    /// Render lanes of the server's that ended without handing their state
+    /// back: they panicked, or were dropped under the executor's shutdown.
+    pub lanes_lost: u64,
 }
 
 /// What became of the chunks a served plugin's pipeline did not have answered
@@ -185,9 +191,11 @@ pub struct ChunkCounters {
     detached: OnceLock<Tally<u64>>,
     /// The server's own cumulative loss counts, as it last told them
     /// ([`note_server_losses`](Self::note_server_losses)).
-    server_refused_commands: AtomicU64,
-    server_refused_edits: AtomicU64,
-    server_refused_off_thread_calls: AtomicU64,
+    server_refused_commands: TallyWriter<u64>,
+    server_refused_edits: TallyWriter<u64>,
+    server_refused_off_thread_calls: TallyWriter<u64>,
+    server_detached_tasks: TallyWriter<u64>,
+    server_lanes_lost: TallyWriter<u64>,
     /// Whether the chunk of a sequence has been answered, set when the node is
     /// bound (the shared-memory slab's reply flag, which this file does not
     /// name).
@@ -221,9 +229,11 @@ impl Default for ChunkCounters {
             mirror_transfers_refused: OnceLock::new(),
             editor_requests_dropped: OnceLock::new(),
             detached: OnceLock::new(),
-            server_refused_commands: AtomicU64::new(0),
-            server_refused_edits: AtomicU64::new(0),
-            server_refused_off_thread_calls: AtomicU64::new(0),
+            server_refused_commands: tally().writer(),
+            server_refused_edits: tally().writer(),
+            server_refused_off_thread_calls: tally().writer(),
+            server_detached_tasks: tally().writer(),
+            server_lanes_lost: tally().writer(),
             answered: OnceLock::new(),
         }
     }
@@ -291,14 +301,21 @@ impl ChunkCounters {
         let _ = self.detached.set(detached);
     }
 
-    /// Takes the server's cumulative counts, as it last told them.
+    /// Takes the server's cumulative counts, as it last told them: each count
+    /// rises to the figure told and never falls below what it has counted. One
+    /// thread tells them (the one that hears the server).
     pub fn note_server_losses(&self, losses: ServerLosses) {
-        self.server_refused_off_thread_calls
-            .store(losses.refused_off_thread_calls.get(), Ordering::Relaxed);
-        self.server_refused_commands
-            .store(losses.commands_refused, Ordering::Relaxed);
-        self.server_refused_edits
-            .store(losses.edits_refused, Ordering::Relaxed);
+        fn rise_to(count: &TallyWriter<u64>, told: u64) {
+            count.add(told.saturating_sub(count.get()));
+        }
+        rise_to(
+            &self.server_refused_off_thread_calls,
+            losses.refused_off_thread_calls.get(),
+        );
+        rise_to(&self.server_refused_commands, losses.commands_refused);
+        rise_to(&self.server_refused_edits, losses.edits_refused);
+        rise_to(&self.server_detached_tasks, losses.detached_tasks);
+        rise_to(&self.server_lanes_lost, losses.lanes_lost);
     }
 
     /// What became of the missed chunks, as the counts stand now. Each count
@@ -333,11 +350,11 @@ impl ChunkCounters {
     /// told any.
     pub fn server_losses(&self) -> ServerLosses {
         ServerLosses {
-            commands_refused: self.server_refused_commands.load(Ordering::Relaxed),
-            edits_refused: self.server_refused_edits.load(Ordering::Relaxed),
-            refused_off_thread_calls: Calls::new(
-                self.server_refused_off_thread_calls.load(Ordering::Relaxed),
-            ),
+            commands_refused: self.server_refused_commands.get(),
+            edits_refused: self.server_refused_edits.get(),
+            refused_off_thread_calls: Calls::new(self.server_refused_off_thread_calls.get()),
+            detached_tasks: self.server_detached_tasks.get(),
+            lanes_lost: self.server_lanes_lost.get(),
         }
     }
 

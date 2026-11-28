@@ -864,6 +864,8 @@ mod event_route_tests {
             commands_refused: 2,
             edits_refused: 1,
             refused_off_thread_calls: tutti_units::Calls::new(4),
+            detached_tasks: 3,
+            lanes_lost: 1,
         }));
         assert_eq!(
             controls.server_losses(),
@@ -871,12 +873,16 @@ mod event_route_tests {
                 commands_refused: 2,
                 edits_refused: 1,
                 refused_off_thread_calls: tutti_units::Calls::new(4),
+                detached_tasks: 3,
+                lanes_lost: 1,
             }
         );
         route.hear(IpcEvent::ServerLosses(tutti_plugin_types::ServerLosses {
             commands_refused: 5,
             edits_refused: 1,
             refused_off_thread_calls: tutti_units::Calls::new(4),
+            detached_tasks: 3,
+            lanes_lost: 1,
         }));
         assert_eq!(controls.server_losses().commands_refused, 5);
     }

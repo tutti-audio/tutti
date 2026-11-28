@@ -707,6 +707,8 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
         let losses = ServerLosses {
             commands_refused: self.ties.commands_refused.get(),
             edits_refused: self.ties.edits_refused.get(),
+            detached_tasks: self.ties.detached.get(),
+            lanes_lost: self.ties.lanes_lost.get(),
             refused_off_thread_calls: self
                 .lifecycle
                 .control()
@@ -720,6 +722,8 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
                 commands_refused: losses.commands_refused,
                 edits_refused: losses.edits_refused,
                 refused_off_thread_calls: losses.refused_off_thread_calls,
+                detached_tasks: losses.detached_tasks,
+                lanes_lost: losses.lanes_lost,
             });
         }
         std::mem::take(&mut self.events)

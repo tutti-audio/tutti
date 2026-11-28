@@ -320,11 +320,11 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// End a session that hosted an in-process plugin with `close` on the main
     /// thread; dropped elsewhere, it leaks those plugins and counts them in
-    /// [`stranded()`](tutti_plugin_types::MainWork::stranded). Plugins dropped off their
-    /// own thread are counted in
-    /// [`deferred_drops()`](tutti_plugin_types::MainWork::deferred_drops). Both counts are
-    /// process-wide, as is [`contained_panics()`](tutti_plugin_types::contained_panics),
-    /// the panics plugin callbacks caused and the host contained. The
+    /// [`stranded()`](tutti_plugin_types::MainWork::stranded), a process-wide count, as is
+    /// [`contained_panics()`](tutti_plugin_types::contained_panics), the panics plugin
+    /// callbacks caused and the host contained. Plugins dropped off their own thread are
+    /// counted per session, in [`deferred_plugin_drops`](Self::deferred_plugin_drops), which
+    /// is read before the close. The
     /// main-thread callbacks a plugin made from another thread are per plugin:
     /// [`Diagnostics::refused_off_thread_calls`](crate::Diagnostics::refused_off_thread_calls).
     #[cfg(feature = "plugin")]
@@ -334,6 +334,15 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let collected = session.plugins.take_collector(main);
         drop(session);
         collected.run(main);
+    }
+
+    /// How many plugins this session loaded were dropped off their own thread
+    /// and handed to the session's collector to close on the main thread, since
+    /// the session was made. The owner of the plugins should have dropped them
+    /// on the main thread; a nonzero count is worth a look.
+    #[cfg(feature = "plugin")]
+    pub fn deferred_plugin_drops(&self) -> u64 {
+        self.plugins.deferred_drops()
     }
 
     /// The graph, to edit. An edit marks it edited; the next

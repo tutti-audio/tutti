@@ -669,8 +669,7 @@ mod tail {
 // disposed on the thread it was made on; the render thread holds the unit through the
 // `AuProcessor` and the control side through the controller, and whichever drops last must not
 // dispose it on the render thread: the disposal goes to the owner's main-thread collector. The
-// test reads the process-wide `MainWork::deferred_drops`, so it needs the process of its own
-// that nextest gives each test.
+// test reads the collector's `MainWork::deferred_drops`.
 
 const FRAMES: usize = 64;
 
@@ -724,10 +723,10 @@ fn an_in_process_au_dropped_while_rendered_is_disposed_by_the_control_tick() {
 
     // The control side lets go first. The render thread still holds the unit, so nothing is
     // disposed and nothing is pending for the tick.
-    let before = MainWork::deferred_drops();
+    let before = work.deferred_drops();
     drop(controller);
     assert_eq!(
-        MainWork::deferred_drops(),
+        work.deferred_drops(),
         before,
         "the control side's drop was not the last reference"
     );
@@ -737,7 +736,7 @@ fn an_in_process_au_dropped_while_rendered_is_disposed_by_the_control_tick() {
     release_tx.send(()).expect("the render thread waits");
     render_thread.join().expect("the render thread drops");
     assert_eq!(
-        MainWork::deferred_drops(),
+        work.deferred_drops(),
         before + 1,
         "the last drop, on the render thread, was deferred to the collector"
     );
