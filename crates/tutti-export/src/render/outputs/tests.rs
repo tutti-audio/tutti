@@ -36,7 +36,7 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 /// rendered with `budget` bytes of memory for the spill. Returns the file
 /// written, the planes, and whether a spill file was seen beside the target
 /// at any reading of the render.
-fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, bool) {
+fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Wave, bool) {
     let path = dir.join("n.wav");
     let job = Job::new(
         RATE,
@@ -74,7 +74,7 @@ fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, 
     .into_finished()
     .expect("not cancelled");
     let written = done.file(&file).unwrap().clone();
-    let planes = done.buffers(&buffers).unwrap().planes().to_vec();
+    let planes = done.buffers(&buffers).unwrap().clone();
     (written, planes, seen_spill)
 }
 
@@ -113,10 +113,10 @@ fn a_normalized_output_spills_past_the_budget_and_writes_what_it_would_in_memory
         let samples: Vec<f32> = file.samples::<f32>().map(|s| s.unwrap()).collect();
         assert_eq!(samples.len(), FRAMES * 2, "budget {budget}");
         for (i, frame) in samples.chunks(2).enumerate() {
-            for c in 0..2 {
+            for (c, &sample) in frame.iter().enumerate() {
                 assert_eq!(
-                    frame[c],
-                    planes[c][i] * scale as f32,
+                    sample,
+                    planes.at(c, i) * scale as f32,
                     "budget {budget}: frame {i} channel {c}"
                 );
             }
@@ -192,17 +192,16 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
     assert!(names(dir.path()).is_empty());
 }
 
-/// **A render too long to hold in memory is an error, not an abort**: planes
-/// are reserved fallibly, so a span no allocator can give (more frames than
+/// **A render too long to hold in memory is an error, not an abort**: a wave
+/// is reserved fallibly, so a span no allocator can give (more frames than
 /// an address space has bytes) is `RenderTooLarge`, where `Vec::with_capacity`
 /// takes the process down.
 ///
-/// Checked to fail by swapping `try_reserve_exact` for `Vec::with_capacity`
-/// once locally: the test process aborts.
 #[test]
-fn planes_no_allocator_can_give_are_render_too_large() {
+fn a_wave_no_allocator_can_give_is_render_too_large() {
     let plan = RenderPlan::of_frames(Samples::new(usize::MAX / 2));
-    let err = reserve_planes::<f32>(&plan, ChannelLayout::STEREO).unwrap_err();
+    let stereo = ChannelSet::default_for(ChannelLayout::STEREO);
+    let err = reserve_wave::<f32>(&plan, stereo, ChannelPlacement::Default, RATE).unwrap_err();
     assert!(
         matches!(err, RenderError::RenderTooLarge { channels, .. } if channels == ChannelLayout::STEREO),
         "{err:?}"

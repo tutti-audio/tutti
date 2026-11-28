@@ -4,6 +4,7 @@
 use crate::bounced::bounced;
 use std::path::Path;
 use std::time::Duration;
+use tutti_fixtures::WavePlanes;
 use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
@@ -111,7 +112,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     )
     .expect("the bounce renders")
     .into_main_output()
-    .into_planes();
+    .to_planes();
     for k in 0..LEN {
         assert_eq!(rendered[0][k], value(k), "left, file frame {k}");
         assert_eq!(rendered[1][k], -value(k), "right, file frame {k}");

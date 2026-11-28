@@ -15,7 +15,7 @@
 use std::path::PathBuf;
 
 use tutti_buffers::{ChannelLayout, ChannelSet, Placement as ChannelPlacement};
-use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut};
+use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Planes, PlanesMut, Wave};
 use tutti_codec::{Chain, Converter, Kept, Landed};
 use tutti_dsp::FftFloat;
 use tutti_graph::TapReader;
@@ -34,8 +34,7 @@ use crate::render::{
 use crate::sink_target::DynSink;
 use crate::spill::{Spill, SpillBudget};
 use crate::{
-    ConfigError, Done, Feed, Job, Outputs, RenderError, RenderGraph, Rendered, Result, Unmeasured,
-    Written,
+    ConfigError, Done, Feed, Job, Outputs, RenderError, RenderGraph, Result, Unmeasured, Written,
 };
 
 /// A tap an output reads: the reader, and the planes one block of its lanes
@@ -89,10 +88,10 @@ struct FileLane<F: FftFloat> {
     sink: Sink<F>,
 }
 
-/// A buffer output of the pass: planes appended in memory.
+/// A buffer output of the pass: frames appended in memory.
 struct BufferLane<F: FftFloat> {
     lane: Lane<F>,
-    planes: Vec<Vec<F>>,
+    wave: Wave<F>,
 }
 
 /// A sink output of the pass: the caller's sink, which takes the gated frames at the
@@ -224,7 +223,7 @@ pub(crate) fn render_outputs<F: FftFloat>(
                 }
                 for buffer in &mut buffers {
                     if let Some(block) = buffer.lane.block(graph_planes, n, &window)? {
-                        crate::planar::append(block, &mut buffer.planes)?;
+                        buffer.wave.append(block)?;
                     }
                 }
                 for out in &mut sinks {
@@ -248,7 +247,7 @@ pub(crate) fn render_outputs<F: FftFloat>(
 
         finish(files, buffers, sinks, job, lost, control)
     })?;
-    Ok(done.map(|(files, buffers)| stamp.done(files, buffers)))
+    Ok(done.map(|(files, buffers, lost)| stamp.done(files, buffers, lost)))
 }
 
 /// What the outputs are refused for before any of them is opened: no outputs, a
@@ -434,8 +433,8 @@ fn open_lanes<F: FftFloat>(
             main_output,
             max_block,
         )?;
-        let planes = reserve_planes(plan, lane.layout)?;
-        buffers.push(BufferLane { lane, planes });
+        let wave = reserve_wave(plan, set, target.placement(), job.rate())?;
+        buffers.push(BufferLane { lane, wave });
     }
     let mut sinks = Vec::with_capacity(sink_outputs.len());
     for Placed { position, output } in sink_outputs {
@@ -499,28 +498,23 @@ fn open_lane<F: FftFloat>(
     })
 }
 
-/// Empty planes with room for what the plan keeps.
+/// An empty wave of `set` with room for what the plan keeps.
 ///
 /// Reserved fallibly: the duration is the caller's, and an hour of 7.1.4 (or a
-/// typo) is a plain `Err` here where `with_capacity` would abort the process.
-/// (`vec![Vec::with_capacity(n); ch]` would clone ONE empty Vec `ch` times,
-/// and a clone does not carry capacity.)
-fn reserve_planes<F: Float>(plan: &RenderPlan, layout: ChannelLayout) -> Result<Vec<Vec<F>>> {
-    let too_large = || RenderError::RenderTooLarge {
-        frames: plan.output_length,
-        channels: layout,
-    };
-    let ch = usize::from(layout.count());
-    let mut planes: Vec<Vec<F>> = Vec::new();
-    planes.try_reserve_exact(ch).map_err(|_| too_large())?;
-    for _ in 0..ch {
-        let mut plane = Vec::new();
-        plane
-            .try_reserve_exact(plan.output_length.get())
-            .map_err(|_| too_large())?;
-        planes.push(plane);
-    }
-    Ok(planes)
+/// typo) is a plain `Err` here where a plain `reserve` would abort the process.
+fn reserve_wave<F: Float>(
+    plan: &RenderPlan,
+    set: ChannelSet,
+    placement: ChannelPlacement,
+    rate: SampleRate,
+) -> Result<Wave<F>> {
+    let mut wave = Wave::with_placement(set, placement, rate);
+    wave.try_reserve(plan.output_length)
+        .map_err(|_| RenderError::RenderTooLarge {
+            frames: plan.output_length,
+            channels: set.width(),
+        })?;
+    Ok(wave)
 }
 
 /// Drains the `n` frames the block just rendered from a tap's rings into its
@@ -556,7 +550,7 @@ fn finish<F: FftFloat>(
     job: &Job,
     lost: u64,
     control: &mut Control<'_>,
-) -> Result<Outcome<(Vec<Written>, Vec<Rendered<F>>)>> {
+) -> Result<Outcome<(Vec<Written>, Vec<Wave<F>>, u64)>> {
     let rate = job.rate();
     let mut chosen: Vec<Option<Chosen>> = vec![None; files.len()];
     let waiting: Vec<usize> = (0..files.len())
@@ -672,10 +666,7 @@ fn finish<F: FftFloat>(
     }
 
     // Finalizing.
-    let rendered: Vec<Rendered<F>> = buffers
-        .into_iter()
-        .map(|b| Rendered::from_render(b.planes, rate, lost))
-        .collect();
+    let waves: Vec<Wave<F>> = buffers.into_iter().map(|b| b.wave).collect();
     let mut pending: Vec<PendingFile<F>> = Vec::with_capacity(files.len());
     let mut spill_left: Vec<Option<PathBuf>> = vec![None; files.len()];
     let placements: Vec<ChannelPlacement> = files.iter().map(|f| f.lane.placement).collect();
@@ -721,7 +712,7 @@ fn finish<F: FftFloat>(
             w
         })
         .collect();
-    Ok(Outcome::Finished((written, rendered)))
+    Ok(Outcome::Finished((written, waves, lost)))
 }
 
 fn waiting_of<F: FftFloat>(file: &FileLane<F>) -> &Waiting<F> {
