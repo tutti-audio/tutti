@@ -323,11 +323,17 @@ fn a_streamed_voice_config_lists_its_values_and_compares_its_structure() {
     let (_second_streamer, second, second_voice) = stream_over(&path, 2.0);
 
     let moved = |voice, stream| {
-        VoiceNodeConfig::streaming(voice, stream, Amplitude::new(0.5))
-            .expect("streamed")
-            .speed(PlaybackRate::of(2.0))
-            .looped(loop_frames(1, 3, 0))
-            .direction(PlayDirection::Reverse)
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            Amplitude::new(0.5),
+            StretchFactor::UNITY,
+            Cents::new(0.0),
+        )
+        .expect("streamed")
+        .speed(PlaybackRate::of(2.0))
+        .looped(loop_frames(1, 3, 0))
+        .direction(PlayDirection::Reverse)
     };
     let base = moved(first_voice, first);
     let values = base

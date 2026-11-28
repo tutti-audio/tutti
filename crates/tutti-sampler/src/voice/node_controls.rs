@@ -16,10 +16,25 @@ use super::loop_span::Loop;
 use super::memory_source::VoiceWindow;
 use super::types::PlayDirection;
 use tutti_graph::ParamSet;
-use tutti_rt::{Mutex, Param, Publisher};
+use tutti_rt::{AtomicCell, Mutex, Param, Publisher};
 use tutti_units::{Amplitude, PlaybackRate, UnitParam};
 
 use super::command::GainError;
+
+/// Whether a streamed voice's node holds its stream's reader.
+///
+/// A config's stream has one reader. A node built while another holds it waits
+/// ([`Waiting`](Self::Waiting)), renders silence, and takes the reader between
+/// blocks once the holder is gone ([`Holding`](Self::Holding)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum StreamHold {
+    /// The node renders silence until the reader comes to it.
+    Waiting,
+    /// The node has the reader and plays the stream.
+    Holding,
+}
+tutti_rt::atomic_word!(StreamHold { Waiting, Holding });
 
 /// What a free-running voice's steering publishes: the play state.
 ///
@@ -199,6 +214,8 @@ pub struct VoiceNodeControls<F: SamplerFloat> {
     /// The stream that feeds a disk voice, whose loop and direction cells the
     /// controls' are.
     stream: Option<Arc<Mutex<StreamHandle<F>>>>,
+    /// Whether the node holds the stream's reader yet; the node's own writes.
+    hold: Option<Arc<AtomicCell<StreamHold>>>,
 }
 
 impl<F: SamplerFloat> VoiceNodeControls<F> {
@@ -207,12 +224,14 @@ impl<F: SamplerFloat> VoiceNodeControls<F> {
         gain: Param<Amplitude>,
         params: ParamSet,
         stream: Option<Arc<Mutex<StreamHandle<F>>>>,
+        hold: Option<Arc<AtomicCell<StreamHold>>>,
     ) -> Self {
         Self {
             cells,
             gain,
             params,
             stream,
+            hold,
         }
     }
 
@@ -284,6 +303,14 @@ impl<F: SamplerFloat> VoiceNodeControls<F> {
     #[must_use]
     pub fn status(&self) -> Option<StreamStatus> {
         self.stream.as_ref().map(|s| s.lock().status())
+    }
+
+    /// Whether a streamed voice's node holds its stream's reader: `Waiting` while
+    /// another node of the same config holds it, `Holding` once this one has it.
+    /// `None` for a voice with no stream, like [`status`](Self::status).
+    #[must_use]
+    pub fn stream_hold(&self) -> Option<StreamHold> {
+        self.hold.as_ref().map(|hold| hold.load())
     }
 
     /// Sets the voice's gain, from the node's next block on. A write to a

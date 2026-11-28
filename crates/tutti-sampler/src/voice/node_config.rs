@@ -5,12 +5,13 @@ use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{HostValues, Initials, NodeConfig, Shared};
-use tutti_rt::Mutex;
+use tutti_rt::{AtomicCell, Mutex};
 use tutti_units::{Amplitude, Cents, PlaybackRate, StretchFactor, UnitAddr, UnitParam};
 
 use super::command::GainError;
 use super::command::ask;
 use super::disk_voice::DiskVoice;
+use super::home::Home;
 use super::loop_span::Loop;
 use super::memory_source::MemorySource;
 use super::memory_source::{MemorySourceConfig, VoiceWindow};
@@ -18,7 +19,7 @@ use super::node::{
     DirectionKind, LoopingKind, SpeedKind, SteeringKind, VoiceNode, VoiceNodeError, WindowKind,
     apply_loop, apply_speed,
 };
-use super::node_controls::Steering;
+use super::node_controls::{Steering, StreamHold};
 use super::types::{PlayDirection, Playback, Voice, VoiceSource};
 use crate::SamplerFloat;
 use crate::streamer::StreamHandle;
@@ -53,12 +54,12 @@ impl Drive for Streamed {}
 pub(crate) enum Form<F: SamplerFloat> {
     /// A resident wave.
     Memory(MemorySourceConfig<F>),
-    /// A stream, read through its voice. The voice has one ring reader, so the
-    /// first node built from the config takes it live and a later one gets the
-    /// voice's template, which is silent. A stream is control-thread only (its
-    /// drop sends on a bounded queue), so a node hands it to its controls.
+    /// A stream, read through its voice. The voice has one ring reader, which
+    /// the config's [`Home`] keeps: a node takes it at build, or waits for it, and hands it back
+    /// when it drops. A stream is control-thread only (its drop sends on a
+    /// bounded queue), so a node hands it to its controls.
     Streamed {
-        voice: Shared<Mutex<DiskVoice<F>>>,
+        home: Shared<Mutex<Home<F>>>,
         stream: Shared<Mutex<StreamHandle<F>>>,
     },
 }
@@ -146,21 +147,31 @@ impl<F: SamplerFloat, D: Drive> VoiceNodeConfig<F, D> {
         self.play.direction = direction;
         self
     }
-
-    /// This config time-stretched by `stretch`.
-    #[must_use]
-    pub fn stretch(mut self, stretch: StretchFactor) -> Self {
-        self.play.stretch = stretch;
-        self
-    }
-
-    /// This config pitch-shifted by `pitch`.
-    #[must_use]
-    pub fn pitch(mut self, pitch: Cents) -> Self {
-        self.play.pitch = pitch;
-        self
-    }
 }
+
+/// The stretch and pitch options of a memory voice: a streamed voice's are
+/// arguments of its constructor, because they are part of its structure.
+macro_rules! stretch_options {
+    ($drive:ty) => {
+        impl<F: SamplerFloat> VoiceNodeConfig<F, $drive> {
+            /// This config time-stretched by `stretch`.
+            #[must_use]
+            pub fn stretch(mut self, stretch: StretchFactor) -> Self {
+                self.play.stretch = stretch;
+                self
+            }
+
+            /// This config pitch-shifted by `pitch`.
+            #[must_use]
+            pub fn pitch(mut self, pitch: Cents) -> Self {
+                self.play.pitch = pitch;
+                self
+            }
+        }
+    };
+}
+stretch_options!(Free);
+stretch_options!(Placed);
 
 /// The voice's own values, taken from `source`: its gain (checked), speed and loop.
 fn memory_voice<F: SamplerFloat>(
@@ -235,7 +246,9 @@ impl<F: SamplerFloat> VoiceNodeConfig<F, Streamed> {
     /// config to carry one, and a constructor is where it is checked. The stream
     /// is the config's identity: a clone of the config, with its values moved, is
     /// the same structure, and a config over another stream is another node.
-    /// `voice` is the one built from the stream's own reader.
+    /// `voice` is the one built from the stream's own reader. `stretch` and
+    /// `pitch` are arguments rather than options: they are structure, so a
+    /// config over one stream is always the same node.
     ///
     /// # Errors
     ///
@@ -246,17 +259,21 @@ impl<F: SamplerFloat> VoiceNodeConfig<F, Streamed> {
         voice: DiskVoice<F>,
         stream: StreamHandle<F>,
         gain: Amplitude,
+        stretch: StretchFactor,
+        pitch: Cents,
     ) -> Result<Self, VoiceNodeError> {
         GainError::check(gain)?;
         let channels = crate::voice_width(ChannelLayout::from_count(voice.width() as u16))?;
         Ok(Self::of(
             Form::Streamed {
-                voice: Shared::new(Mutex::new(voice)),
+                home: Shared::new(Mutex::new(Home::of(voice))),
                 stream: Shared::new(Mutex::new(stream)),
             },
             channels,
             Playback {
                 gain,
+                stretch,
+                pitch,
                 ..Playback::default()
             },
         ))
@@ -314,7 +331,7 @@ impl<F: SamplerFloat, D: Drive> NodeConfig<F> for VoiceNodeConfig<F, D> {
     fn initials(&self) -> Initials {
         let window = match &self.form {
             Form::Memory(source) => source.window_value(),
-            Form::Streamed { voice, .. } => Some(voice.lock().window()),
+            Form::Streamed { home, .. } => Some(home.lock().window),
         };
         let initials = Initials::new()
             .param(UnitAddr::first(UnitParam::Volume), self.play.gain.get())
@@ -352,18 +369,14 @@ impl<F: SamplerFloat, D: Drive> From<VoiceNodeConfig<F, D>> for VoiceNode<F> {
                 apply_loop(&mut voice, play.loop_);
                 Self::of_voice(voice, channels, steering)
             }
-            Form::Streamed { voice, stream } => {
-                // The live voice goes to the node, a template stays behind.
-                let mut disk = {
-                    let mut shared = voice.lock();
-                    let template = shared.clone();
-                    std::mem::replace(&mut *shared, template)
-                };
+            Form::Streamed { home, stream } => {
+                let (disk, seat) = Home::seat(home.arc());
                 {
                     let stream = stream.lock();
                     ask(stream.looping_cell(), play.loop_);
                     ask(stream.direction_cell(), play.direction);
                 }
+                let mut disk = disk;
                 disk.store_gain(play.gain);
                 disk.set_speed(play.speed);
                 let mut node = Self::of_voice(
@@ -375,6 +388,12 @@ impl<F: SamplerFloat, D: Drive> From<VoiceNodeConfig<F, D>> for VoiceNode<F> {
                     steering,
                 );
                 node.stream = Some(Arc::clone(stream.arc()));
+                node.hold = Some(Arc::new(AtomicCell::new(if seat.holds() == Some(true) {
+                    StreamHold::Holding
+                } else {
+                    StreamHold::Waiting
+                })));
+                node.seat = seat;
                 node
             }
         }

@@ -159,8 +159,14 @@ fn a_looped_disk_voice_repeats_the_span() {
     let (mut streamer, stream, reader) = streaming(dir.path());
     let voice = DiskVoice::from_reader(reader, window());
     let (mut node, handle) = controlled(VoiceNode::from(
-        VoiceNodeConfig::streaming(voice, stream, tutti_units::Amplitude::new(1.0))
-            .expect("a finite gain and a nonempty width"),
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            tutti_units::StretchFactor::UNITY,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
     ));
     handle
         .looping_cell()
@@ -168,6 +174,112 @@ fn a_looped_disk_voice_repeats_the_span() {
     let _ = streamer.step_until_idle(1_000);
     let got = render_with(&mut node, FRAMES);
     assert_frames("disk", &got, |n| looped_frame(n, 300, 700));
+}
+
+/// **A streamed config builds a live voice every time**: a node built from it
+/// takes the stream's one reader and hands it back when it drops, so the build
+/// after plays the ramp from the stream, not the silent template.
+#[test]
+fn a_streamed_config_builds_a_live_voice_after_its_node_drops() {
+    use tutti_graph::{HostValues, NodeConfig};
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let (mut streamer, stream, reader) = streaming(dir.path());
+    let config = VoiceNodeConfig::streaming(
+        DiskVoice::from_reader(reader, window()),
+        stream,
+        tutti_units::Amplitude::new(1.0),
+        tutti_units::StretchFactor::UNITY,
+        tutti_units::Cents::new(0.0),
+    )
+    .expect("a finite gain and a nonempty width");
+    for build in ["first", "second"] {
+        let mut node = VoiceNode::from(config.clone());
+        let _ = streamer.step_until_idle(1_000);
+        let got = render_with(&mut node, 400);
+        assert_frames(build, &got, |n| n);
+        drop(node);
+    }
+    let node = config.build(&HostValues::new());
+    drop(node);
+}
+
+/// A streamed config over the ramp, and the streamer that feeds it.
+fn streamed_config(
+    dir: &Path,
+) -> (
+    DiskStreamer<Manual<f32>, f32>,
+    VoiceNodeConfig<f32, tutti_sampler::Streamed>,
+) {
+    let (streamer, stream, reader) = streaming(dir);
+    let config = VoiceNodeConfig::streaming(
+        DiskVoice::from_reader(reader, window()),
+        stream,
+        tutti_units::Amplitude::new(1.0),
+        tutti_units::StretchFactor::UNITY,
+        tutti_units::Cents::new(0.0),
+    )
+    .expect("a finite gain and a nonempty width");
+    (streamer, config)
+}
+
+/// **A node built while another holds the stream's reader waits for it**: it
+/// renders silence and reads `Waiting`, takes the reader between blocks once the
+/// holder has dropped, and then plays the ramp and reads `Holding`.
+#[test]
+fn a_node_built_while_another_holds_the_reader_takes_it_when_that_one_drops() {
+    use tutti_sampler::StreamHold;
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let (mut streamer, config) = streamed_config(dir.path());
+    let (holder, holder_controls) = controlled(VoiceNode::from(config.clone()));
+    let (mut waiter, waiter_controls) = controlled(VoiceNode::from(config));
+    assert_eq!(holder_controls.stream_hold(), Some(StreamHold::Holding));
+    assert_eq!(waiter_controls.stream_hold(), Some(StreamHold::Waiting));
+    assert!(
+        render_with(&mut waiter, 128).iter().all(|&x| x == 0.0),
+        "the waiter is silent while the holder has the reader"
+    );
+    assert_eq!(waiter_controls.stream_hold(), Some(StreamHold::Waiting));
+
+    drop(holder);
+    let _ = streamer.step_until_idle(1_000);
+    assert_frames(
+        "the waiter once it holds",
+        &render_with(&mut waiter, 400),
+        |n| n,
+    );
+    assert_eq!(waiter_controls.stream_hold(), Some(StreamHold::Holding));
+}
+
+/// **A waiter that drops before it is served leaves the reader to the next
+/// build**: the holder's drop finds no waiter, so the reader goes home, and a
+/// third build plays the ramp.
+#[test]
+fn a_waiter_dropped_first_leaves_the_reader_to_the_next_build() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let (mut streamer, config) = streamed_config(dir.path());
+    let holder = VoiceNode::from(config.clone());
+    let waiter = VoiceNode::from(config.clone());
+    drop(waiter);
+    drop(holder);
+    let mut third = VoiceNode::from(config);
+    let _ = streamer.step_until_idle(1_000);
+    assert_frames("the third build", &render_with(&mut third, 400), |n| n);
+}
+
+/// **A waiter that drops after it was lent the reader, before it took it, passes
+/// the reader on**: the holder's drop lends it to the waiter, the waiter's drop
+/// recalls it, and a third build plays the ramp.
+#[test]
+fn a_waiter_dropped_after_it_was_lent_the_reader_passes_it_on() {
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let (mut streamer, config) = streamed_config(dir.path());
+    let holder = VoiceNode::from(config.clone());
+    let waiter = VoiceNode::from(config.clone());
+    drop(holder);
+    drop(waiter);
+    let mut third = VoiceNode::from(config);
+    let _ = streamer.step_until_idle(1_000);
+    assert_frames("the third build", &render_with(&mut third, 400), |n| n);
 }
 
 /// `frames` of `node`, prepared, from beat 0.

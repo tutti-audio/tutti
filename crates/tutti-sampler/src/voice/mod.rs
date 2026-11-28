@@ -31,6 +31,7 @@ mod live_read;
 mod offline_read;
 // The voice pool, one file per duty.
 pub(crate) mod command;
+mod home;
 pub(crate) mod node;
 mod node_config;
 pub(crate) mod node_controls;
@@ -71,7 +72,7 @@ pub use memory_source::{MemorySource, MemorySourceConfig, VoiceWindow};
 pub use node::{DirectionKind, LoopingKind, SpeedKind, VoiceNode, VoiceNodeError, WindowKind};
 /// The per-track multi-voice mixer. Documented on `pool`.
 pub use node_config::{Drive, Free, Placed, Streamed, VoiceNodeConfig};
-pub use node_controls::{FreeRunning, VoiceNodeControls};
+pub use node_controls::{FreeRunning, StreamHold, VoiceNodeControls};
 pub use pool::{PoolDrops, VoicePool};
 /// The voice vocabulary: what a voice is, which tier it reads from, and the
 /// control intent recorded for it. Documented on `types`.

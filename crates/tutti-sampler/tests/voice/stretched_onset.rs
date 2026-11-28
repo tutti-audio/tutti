@@ -265,9 +265,14 @@ fn a_disk_voice_whose_ring_has_not_caught_up_plays_on_time_and_counts_an_underru
     assert!(streamer.step_until_idle(1_000) < 1_000, "the ring primes");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(1.0)));
     let (node, handle) = tutti_sampler::testing::controlled(VoiceNode::from(
-        VoiceNodeConfig::streaming(voice, stream, tutti_units::Amplitude::new(1.0))
-            .expect("a finite gain and a nonempty width")
-            .stretch(StretchFactor::new(1.5)),
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            StretchFactor::new(1.5),
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
     ));
     let mut node = contract::prepared(node, SampleRate::of(SR), BLOCK);
     assert_eq!(node.shape().latency.samples(), tutti_units::Samples::new(0));

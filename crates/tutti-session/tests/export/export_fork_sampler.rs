@@ -229,8 +229,14 @@ fn disk_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
 /// A node over `voice`, which `stream` steers.
 fn disk_node_of(voice: DiskVoice<f32>, stream: StreamHandle<f32>) -> VoiceNode<f32> {
     VoiceNode::from(
-        VoiceNodeConfig::streaming(voice, stream, tutti_units::Amplitude::new(1.0))
-            .expect("a finite gain and a nonempty width"),
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            tutti_units::StretchFactor::UNITY,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
     )
 }
 

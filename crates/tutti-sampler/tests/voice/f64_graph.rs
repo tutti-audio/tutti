@@ -263,8 +263,14 @@ fn a_streamed_node_in_an_f64_graph_plays_the_files_values() {
     let (stream, reader) = wait_for_open(&mut streamer, opening).expect("the file opens");
     let voice = DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(0.0)));
     let node = VoiceNode::from(
-        VoiceNodeConfig::streaming(voice, stream, tutti_units::Amplitude::new(1.0))
-            .expect("a finite gain and a nonempty width"),
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            tutti_units::StretchFactor::UNITY,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
     );
     let (mut solo, ..) = Renderer::<f64>::alone(node, prepare());
     roll(&mut solo);

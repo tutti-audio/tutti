@@ -18,10 +18,11 @@ use tutti_buffers::MAX_CHANNELS;
 use super::clock::{BlockClock, Clock};
 use super::command::GainError;
 use super::disk_voice::VoiceHealth;
+use super::home::Seat;
 use super::loop_span::Loop;
 use super::memory_source::VoiceWindow;
 use super::node_controls::{
-    Cells, Driving, FreeRunning, Steering, SteeringCell, VoiceNodeControls,
+    Cells, Driving, FreeRunning, Steering, SteeringCell, StreamHold, VoiceNodeControls,
 };
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::stretched;
@@ -32,8 +33,8 @@ use tutti_graph::{
     Cx, ForkCause, ForkSource, Forked, HasPublished, IntoNode, Io, Node, NodeParts, ParamSet,
     Prepare, PublishedKind, RenderMode, Shape, Status,
 };
-use tutti_rt::{Mutex, Param, Publisher, Reader};
-use tutti_units::{Amplitude, PlaybackRate, Tail, UnitParam};
+use tutti_rt::{AtomicCell, Mutex, Param, Publisher, Reader};
+use tutti_units::{Amplitude, PlaybackRate, SampleRate, Tail, UnitParam};
 
 /// Why a [`VoiceNode`] cannot be built over a voice.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
@@ -149,6 +150,14 @@ pub struct VoiceNode<F: SamplerFloat> {
     /// hands it to the controls: a stream is control-thread only (its drop
     /// sends on a bounded queue), so the node never keeps one it plays with.
     pub(crate) stream: Option<Arc<Mutex<StreamHandle<F>>>>,
+    /// How a streamed node holds its voice, and where its reader returns when it
+    /// drops.
+    pub(crate) seat: Seat<F>,
+    /// Whether a streamed node holds its stream's reader yet: what the controls
+    /// read. The audio end writes it when it takes the reader.
+    pub(crate) hold: Option<Arc<AtomicCell<StreamHold>>>,
+    /// The rate and mode `prepare` gave, which a reader taken later is given.
+    render: Option<(SampleRate, RenderMode)>,
     /// The gain the controls write; read once per block.
     gain: Param<Amplitude>,
     /// The transport as the voice reads it, kept across blocks so a jump is
@@ -195,6 +204,9 @@ impl<F: SamplerFloat> VoiceNode<F> {
             speed: Publisher::new(play.speed).reader(),
             applied_speed: play.speed,
             stream: None,
+            seat: Seat::Detached,
+            hold: None,
+            render: None,
             gain,
             clock: Clock::new(),
             scratch: BlockScratch::new(UNPREPARED_FRAMES, channels.count() as usize),
@@ -255,8 +267,13 @@ impl<F: SamplerFloat> VoiceNode<F> {
             speed,
         };
         let params = self.param_set();
-        let controls =
-            VoiceNodeControls::new(cells, self.gain.handle(), params, self.stream.take());
+        let controls = VoiceNodeControls::new(
+            cells,
+            self.gain.handle(),
+            params,
+            self.stream.take(),
+            self.hold.clone(),
+        );
         (self, controls)
     }
 
@@ -328,6 +345,30 @@ impl<F: SamplerFloat> VoiceNode<F> {
         }
     }
 
+    /// A streamed node that waited for its reader takes it between blocks, and the
+    /// voice it takes is given what the template had been: the render rate, the
+    /// gain and speed, the window.
+    #[inline]
+    fn receive_reader(&mut self) {
+        let VoiceSource::Disk(disk) = &mut self.slot.voice.source else {
+            return;
+        };
+        if !self.seat.receive(disk) {
+            return;
+        }
+        if let Some((rate, mode)) = self.render {
+            disk.set_render(rate, mode);
+        }
+        disk.store_gain(self.slot.voice.play.gain);
+        disk.set_speed(self.slot.voice.play.speed);
+        if let Driven::Placed(_, window) = &self.driven {
+            disk.set_window(*window);
+        }
+        if let Some(hold) = &self.hold {
+            hold.store(StreamHold::Holding);
+        }
+    }
+
     /// Output width — the node's audio outputs.
     pub fn channels(&self) -> ChannelLayout {
         self.channels
@@ -386,6 +427,18 @@ impl<F: SamplerFloat> VoiceNode<F> {
     }
 }
 
+/// A node returns its stream's reader to the config it was built from. A node is
+/// dropped on the control side (the editor's collect, or a refused plan's built
+/// node), where the blocking `Mutex` is allowed.
+impl<F: SamplerFloat> Drop for VoiceNode<F> {
+    fn drop(&mut self) {
+        let seat = std::mem::replace(&mut self.seat, Seat::Detached);
+        if let VoiceSource::Disk(disk) = &mut self.slot.voice.source {
+            seat.release(disk);
+        }
+    }
+}
+
 // Hand-rolled: wraps a non-`Debug` `PlaybackSlot`. Print the wrapped `Voice`
 // (which is `Debug`) and leave the resident stretch DSP out.
 impl<F: SamplerFloat> std::fmt::Debug for VoiceNode<F> {
@@ -421,6 +474,7 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
         self.scratch
             .resize(p.max_block().get(), self.channels.count() as usize);
         let sample_rate = p.sample_rate();
+        self.render = Some((sample_rate, p.render_mode()));
         self.slot
             .voice
             .source
@@ -428,6 +482,7 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
     }
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
+        self.receive_reader();
         self.drain_commands(
             self.declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
                 .last_frame(),
@@ -759,9 +814,14 @@ mod tests {
                 crate::testing::wait_for_open(&mut streamer, opening).expect("opens");
             let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
             VoiceNode::from(
-                VoiceNodeConfig::streaming(voice, stream, Amplitude::new(1.0))
-                    .expect("a finite gain and a nonempty width")
-                    .stretch(stretch),
+                VoiceNodeConfig::streaming(
+                    voice,
+                    stream,
+                    Amplitude::new(1.0),
+                    stretch,
+                    tutti_units::Cents::new(0.0),
+                )
+                .expect("a finite gain and a nonempty width"),
             )
             .shape()
             .latency
@@ -794,8 +854,14 @@ mod tests {
         let voice = crate::DiskVoice::from_reader(reader, crate::VoiceWindow::default());
 
         let (node, controls) = VoiceNode::from(
-            VoiceNodeConfig::streaming(voice, stream, Amplitude::new(1.0))
-                .expect("a finite gain and a nonempty width"),
+            VoiceNodeConfig::streaming(
+                voice,
+                stream,
+                Amplitude::new(1.0),
+                tutti_units::StretchFactor::UNITY,
+                tutti_units::Cents::new(0.0),
+            )
+            .expect("a finite gain and a nonempty width"),
         )
         .controlled();
         let second = controls.clone();

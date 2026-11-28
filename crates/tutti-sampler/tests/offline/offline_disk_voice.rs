@@ -242,8 +242,14 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
     } = rig;
     let voice = live_voice(reader, 2.0);
     let node = VoiceNode::from(
-        VoiceNodeConfig::streaming(voice.clone(), stream, tutti_units::Amplitude::new(1.0))
-            .expect("a finite gain and a nonempty width"),
+        VoiceNodeConfig::streaming(
+            voice.clone(),
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            tutti_units::StretchFactor::UNITY,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
     );
 
     let mut node_fork = fork_unprepared(node);
@@ -881,10 +887,15 @@ fn a_stretched_fork_sounds_from_the_frame_its_beat_falls_on() {
         } = rig;
         let voice = live_voice(reader, 1.0);
         let node = VoiceNode::from(
-            VoiceNodeConfig::streaming(voice, stream, tutti_units::Amplitude::new(1.0))
-                .expect("a finite gain and a nonempty width")
-                .speed(tutti_units::PlaybackRate::of(speed))
-                .stretch(tutti_units::StretchFactor::new(1.5)),
+            VoiceNodeConfig::streaming(
+                voice,
+                stream,
+                tutti_units::Amplitude::new(1.0),
+                tutti_units::StretchFactor::new(1.5),
+                tutti_units::Cents::new(0.0),
+            )
+            .expect("a finite gain and a nonempty width")
+            .speed(tutti_units::PlaybackRate::of(speed)),
         );
         let mut copy = fork_unprepared(node);
         copy.node.prepare(&offline_prepare(SampleRate::of(SR)));

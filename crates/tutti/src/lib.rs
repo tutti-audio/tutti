@@ -680,8 +680,8 @@ pub mod codec {
 pub mod sampler {
     pub use tutti_sampler::{
         Block, FreeRunning, GUARD_FRAMES, OpenError, PlayDirection, RefusedStreamStart,
-        SamplerFloat, StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader,
-        StreamStart, StreamStatus, VoiceNodeControls,
+        SamplerFloat, StreamFailure, StreamFile, StreamHandle, StreamHold, StreamId, StreamPhase,
+        StreamReader, StreamStart, StreamStatus, VoiceNodeControls,
     };
     pub use tutti_sampler::{DirectionKind, LoopingKind, SpeedKind, WindowKind};
     // A file's probe needs a decoder.

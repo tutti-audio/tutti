@@ -20,6 +20,7 @@ enum voice::node::LoopingKind
 enum voice::node::SpeedKind
 enum voice::node::VoiceNodeError
 enum voice::node::WindowKind
+enum voice::node_controls::StreamHold
 enum voice::types::PlayDirection
 enum voice::types::VoiceSource
 fn clip::Clip::at
@@ -171,12 +172,10 @@ fn voice::node::VoiceNode::voice
 fn voice::node_config::VoiceNodeConfig::direction
 fn voice::node_config::VoiceNodeConfig::free
 fn voice::node_config::VoiceNodeConfig::looped
-fn voice::node_config::VoiceNodeConfig::pitch
 fn voice::node_config::VoiceNodeConfig::placed
 fn voice::node_config::VoiceNodeConfig::speed
 fn voice::node_config::VoiceNodeConfig::stopped
 fn voice::node_config::VoiceNodeConfig::streaming
-fn voice::node_config::VoiceNodeConfig::stretch
 fn voice::node_config::VoiceNodeConfig::window
 fn voice::node_controls::FreeRunning::is_playing
 fn voice::node_controls::FreeRunning::play
@@ -189,6 +188,7 @@ fn voice::node_controls::VoiceNodeControls::set_gain
 fn voice::node_controls::VoiceNodeControls::speed_cell
 fn voice::node_controls::VoiceNodeControls::status
 fn voice::node_controls::VoiceNodeControls::steering
+fn voice::node_controls::VoiceNodeControls::stream_hold
 fn voice::node_controls::VoiceNodeControls::window_cell
 fn voice::pool::VoicePool::channels
 fn voice::pool::VoicePool::clear_voices

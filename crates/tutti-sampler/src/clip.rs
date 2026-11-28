@@ -7,7 +7,7 @@ use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{HasParam, HasPublished, IntoNode, NodeParts, PublishedKind};
-use tutti_units::{Amplitude, Beat, PlaybackRate};
+use tutti_units::{Amplitude, Beat, Cents, PlaybackRate, StretchFactor};
 
 use crate::streamer::{StreamHandle, StreamReader};
 use crate::{
@@ -205,7 +205,7 @@ impl<F: SamplerFloat> Clip<F> {
             }
             Tier::Streamed { reader, stream } => {
                 let voice = DiskVoice::from_reader(*reader, window);
-                let config = VoiceNodeConfig::streaming(voice, stream, gain)
+                let config = VoiceNodeConfig::streaming(voice, stream, gain, StretchFactor::UNITY, Cents::new(0.0))
                     .expect("a clip's gain is checked at the call that sets it, and its width when it was opened")
                     .speed(speed);
                 VoiceNode::from(looped(config, loop_))
