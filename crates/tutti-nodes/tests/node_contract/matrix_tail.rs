@@ -800,10 +800,17 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::from(
-        tutti_nodes::ConvolverConfig::new(
+        tutti_nodes::ConvolverConfig::matrix(
             tutti_buffers::ChannelTopology::STEREO,
-            tutti_nodes::IrLayout::TrueStereo,
-            std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(&[ll, lr, rl, rr])),
+            tutti_nodes::MatrixLayout::TrueStereo,
+            std::sync::Arc::new(
+                tutti_dsp::MatrixResponses::new(
+                    tutti_buffers::ChannelLayout::STEREO,
+                    tutti_buffers::ChannelLayout::STEREO,
+                    &[ll, lr, rl, rr],
+                )
+                .expect("four responses"),
+            ),
         )
         .expect("four responses on a stereo pair")
         .block_size(block_size),
@@ -817,10 +824,9 @@ fn ambisonic_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sa
     irs: &[tutti_buffers::Mono<'_, S>],
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
-    tutti_nodes::ConvolverConfig::new(
-        output,
-        tutti_nodes::IrLayout::Ambisonic(input),
-        std::sync::Arc::new(tutti_nodes::ImpulseResponses::new(irs)),
-    )
-    .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
+    let layout = tutti_nodes::MatrixLayout::Ambisonic(input);
+    let responses =
+        tutti_dsp::MatrixResponses::new(layout.input(output).width(), output.width(), irs)?;
+    tutti_nodes::ConvolverConfig::matrix(output, layout, std::sync::Arc::new(responses))
+        .map(|config| tutti_nodes::ConvolverNode::from(config.block_size(block_size)))
 }

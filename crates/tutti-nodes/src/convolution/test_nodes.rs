@@ -1,12 +1,14 @@
 //! Test constructors: one `ConvolverConfig` per layout, at the buses a test names.
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, Mono, Sample};
-use tutti_dsp::{FftFloat, Lerp};
+use tutti_dsp::{FftFloat, Lerp, MatrixResponses};
 use tutti_units::Samples;
 
 use tutti_graph::Shared;
 
-use super::{ConvolverConfig, ConvolverError, ConvolverNode, ImpulseResponses, IrLayout};
+use super::{
+    ConvolverConfig, ConvolverError, ConvolverNode, ImpulseResponses, IrLayout, MatrixLayout,
+};
 
 /// A config of `layout` over `irs` at `output`, for `block_size`.
 fn config<S: Sample>(
@@ -16,6 +18,18 @@ fn config<S: Sample>(
     block_size: Samples,
 ) -> Result<ConvolverConfig<S>, ConvolverError> {
     ConvolverConfig::new(output, layout, Shared::new(ImpulseResponses::new(irs)))
+        .map(|config| config.block_size(block_size))
+}
+
+/// A matrix config of `layout` over `irs` at `output`, for `block_size`.
+fn matrix_config<S: Sample>(
+    output: ChannelTopology,
+    layout: MatrixLayout,
+    irs: &[Mono<'_, S>],
+    block_size: Samples,
+) -> Result<ConvolverConfig<S>, ConvolverError> {
+    let responses = MatrixResponses::new(layout.input(output).width(), output.width(), irs)?;
+    ConvolverConfig::matrix(output, layout, Shared::new(responses))
         .map(|config| config.block_size(block_size))
 }
 
@@ -84,9 +98,9 @@ pub(crate) fn true_stereo_node<F: FftFloat + Lerp, S: Sample>(
     block_size: Samples,
 ) -> ConvolverNode<F> {
     ConvolverNode::from(
-        config(
+        matrix_config(
             ChannelTopology::STEREO,
-            IrLayout::TrueStereo,
+            MatrixLayout::TrueStereo,
             &[ll, lr, rl, rr],
             block_size,
         )
@@ -101,5 +115,5 @@ pub(crate) fn ambisonic_node<F: FftFloat + Lerp, S: Sample>(
     irs: &[Mono<'_, S>],
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
-    config(output, IrLayout::Ambisonic(input), irs, block_size).map(ConvolverNode::from)
+    matrix_config(output, MatrixLayout::Ambisonic(input), irs, block_size).map(ConvolverNode::from)
 }
