@@ -106,7 +106,8 @@ pub enum PresetError {
     /// This plugin cannot do that with presets: it has no preset route, the
     /// format has no such operation (CLAP enumerates nothing; VST2, VST3 and AU
     /// load no file), or the format addresses this id shape but the host has no
-    /// route for it here (a VST3 list no parameter selects in).
+    /// route for it here (a VST3 list no parameter selects in, or whose program
+    /// parameter the host may not write).
     #[error("this plugin does not support that preset operation")]
     Unsupported,
     /// The id has the shape the format addresses, but no listed preset has it:

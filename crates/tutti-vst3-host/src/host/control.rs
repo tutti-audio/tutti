@@ -522,9 +522,9 @@ impl Control for Vst3Loaded {
 
     fn load_preset(&mut self, main: MainThreadMarker, id: &PresetId) -> Result<(), PresetError> {
         let (param, value) = self.program_write(main, id)?;
-        // A refused write leaves what is carried as it was.
+        // A program parameter the host may not write is no route; the plugin is not asked.
         self.parameter_writable(main, param)
-            .map_err(|_| PresetError::Refused)?;
+            .map_err(|_| PresetError::Unsupported)?;
         self.select_program(main, param, value)
     }
 

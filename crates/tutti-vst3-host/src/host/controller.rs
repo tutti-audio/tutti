@@ -259,7 +259,7 @@ impl Wraps for Vst3Controller {
         let (param, value) = loaded.program_write(main, id)?;
         loaded
             .parameter_writable(main, param)
-            .map_err(|_| PresetError::Refused)?;
+            .map_err(|_| PresetError::Unsupported)?;
         self.before_restore(main);
         let selected = self.loaded_mut().select_program(main, param, value);
         if selected.is_ok() {
