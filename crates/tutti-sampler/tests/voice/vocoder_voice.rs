@@ -14,10 +14,9 @@ use tutti_buffers::{ChannelLayout, Interleaved, Planes, Wave};
 use tutti_dsp::{ColaGeometry, HopSize, PhaseVocoder, StftGeometry, WindowLength};
 use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition, contract};
 use tutti_music::{FrameClock, LoopRange};
-use tutti_sampler::testing::MockTransport;
+use tutti_sampler::testing::{MockTransport, voice_node};
 use tutti_sampler::{
-    MemorySource, MemorySourceConfig, Playback, SlotId, VoiceNode, VoicePool, VoicePoolHandle,
-    VoiceWindow,
+    MemorySource, MemorySourceConfig, Playback, SlotId, VoicePool, VoicePoolHandle, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, Cents, Frame, SampleRate, Samples, StretchFactor};
 
@@ -42,17 +41,19 @@ fn sine(f: f64, amplitude: f64, phase: f64) -> impl Fn(usize) -> f64 {
     move |i| amplitude * (TAU * f * i as f64 / SR + phase).sin()
 }
 
-fn source(wave: &Arc<Wave>) -> MemorySource<f32> {
-    source_from(wave, 0.0)
+fn source(wave: &Arc<Wave>) -> MemorySourceConfig<f32> {
+    source_config_from(wave, 0.0)
 }
 
 /// `wave` placed from beat `start`.
+fn source_config_from(wave: &Arc<Wave>, start: f64) -> MemorySourceConfig<f32> {
+    MemorySourceConfig::new(Arc::clone(wave), wave.layout())
+        .expect("a placeable wave")
+        .window(VoiceWindow::from(Beat::new(start)))
+}
+
 fn source_from(wave: &Arc<Wave>, start: f64) -> MemorySource<f32> {
-    MemorySource::from(
-        MemorySourceConfig::new(Arc::clone(wave), wave.layout())
-            .expect("a placeable wave")
-            .window(VoiceWindow::from(Beat::new(start))),
-    )
+    MemorySource::from(source_config_from(wave, start))
 }
 
 /// `wave` placed at beat 0 in a pool, stretched by `stretch` and shifted by
@@ -326,15 +327,14 @@ fn a_stretching_memory_voice_declares_no_latency() {
         (1.0, 700.0),
         (1.5, -1200.0),
     ] {
-        let node = VoiceNode::new(
+        let node = voice_node(
             source(&clip),
             Playback {
                 stretch: StretchFactor::new(stretch),
                 pitch: Cents::new(cents),
                 ..Default::default()
             },
-        )
-        .expect("a finite gain and a nonempty width");
+        );
         assert_eq!(
             node.shape().latency.samples(),
             Samples::new(0),
@@ -394,14 +394,13 @@ fn an_onset_lands_at_its_timeline_frame_through_a_node() {
         }
     };
     let clip = wave(30_000, &[&tone_from, &tone_from]);
-    let node = VoiceNode::new(
+    let node = voice_node(
         source(&clip),
         Playback {
             stretch: StretchFactor::new(1.5),
             ..Default::default()
         },
-    )
-    .expect("a finite gain and a nonempty width");
+    );
     let mut node = contract::prepared(node, SampleRate::of(SR), BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let mut out = Vec::new();
@@ -699,7 +698,7 @@ fn render_looped(
     handle
         .add(
             SlotId(1),
-            source(wave),
+            source_from(wave, 0.0),
             Playback {
                 stretch: StretchFactor::new(1.5),
                 ..Default::default()

@@ -41,8 +41,8 @@ use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{Editor, Executor, ForkTarget, Prepare, TransportPosition, Unforkable};
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::testing::{MockTransport, block, free_source};
-use tutti_sampler::{MemorySource, Playback, VoiceNode, VoiceWindow};
+use tutti_sampler::testing::{MockTransport, block, source_config, voice_node};
+use tutti_sampler::{MemorySourceConfig, Playback, VoiceNode, VoiceWindow};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -57,14 +57,16 @@ fn flat_wave(len: usize) -> Arc<Wave> {
 }
 
 /// A voice placed on the transport at `[start, start + 1)`.
-fn voice_at(start: f64) -> MemorySource<f32> {
-    free_source(flat_wave(48_000))
-        .placed_at(VoiceWindow::span(Beat::new(start), BeatDuration::new(1.0)))
+fn voice_at(start: f64) -> MemorySourceConfig<f32> {
+    source_config(
+        flat_wave(48_000),
+        ChannelLayout::MONO,
+        Some(VoiceWindow::span(Beat::new(start), BeatDuration::new(1.0))),
+    )
 }
 
 fn node_at(start: f64) -> VoiceNode<f32> {
-    VoiceNode::with_channels(voice_at(start), Playback::default(), ChannelLayout::MONO)
-        .expect("a finite gain and a nonempty width")
+    voice_node(voice_at(start), Playback::default())
 }
 
 /// Peak over a 64-frame block of `node` under a transport rolling at `beat`
@@ -324,9 +326,14 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
     const LEN: usize = 1_024;
     let samples: Vec<f32> = (0..LEN).map(|i| i as f32 / LEN as f32).collect();
     let wave = Arc::new(Wave::from_mono(SampleRate::SR_48K, Mono::new(&samples)));
-    let source = free_source(wave).placed_at(VoiceWindow::from(Beat::new(0.0)));
-    let node = VoiceNode::with_channels(source, Playback::default(), ChannelLayout::MONO)
-        .expect("a finite gain and a nonempty width");
+    let node = voice_node(
+        source_config(
+            wave,
+            ChannelLayout::MONO,
+            Some(VoiceWindow::from(Beat::new(0.0))),
+        ),
+        Playback::default(),
+    );
     let (ed, _exec, handle) = graph_with(node);
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(256)));
     let (_before_ed, mut before) = ed.fork(ForkTarget::MainOutput, prepare).expect("forks");

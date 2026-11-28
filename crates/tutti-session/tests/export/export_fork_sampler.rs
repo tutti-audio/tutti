@@ -22,10 +22,10 @@ use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_sampler::testing::{placed_source, wait_for_open};
+use tutti_sampler::testing::{placed_config, placed_source, voice_node, wait_for_open};
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Manual, Playback, StreamHandle, StreamReader, StreamStart, VoiceNode,
-    VoiceWindow,
+    VoiceNodeConfig, VoiceWindow,
 };
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Range, Session, Stem, StemKey,
@@ -228,8 +228,16 @@ fn disk_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
 
 /// A node over `voice`, which `stream` steers.
 fn disk_node_of(voice: DiskVoice<f32>, stream: StreamHandle<f32>) -> VoiceNode<f32> {
-    VoiceNode::streaming(voice, stream, Playback::default())
-        .expect("a finite gain and a nonempty width")
+    VoiceNode::from(
+        VoiceNodeConfig::streaming(
+            voice,
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            tutti_units::StretchFactor::UNITY,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
+    )
 }
 
 /// **A disk-streamed clip exports its file, from the frame its beat falls
@@ -260,11 +268,10 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
             wave.append(Interleaved::new(&[value(i), -value(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let memory = VoiceNode::new(
-            placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(3.0))),
+        let memory = voice_node(
+            placed_config(Arc::new(wave), VoiceWindow::from(Beat::new(3.0))),
             Playback::default(),
-        )
-        .expect("a finite gain and a nonempty width");
+        );
         let graph = session.graph();
         let bare = graph.add(bare);
         graph.connect(bare, MainOutput).unwrap();

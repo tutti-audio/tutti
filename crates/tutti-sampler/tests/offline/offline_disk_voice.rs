@@ -15,7 +15,7 @@ use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::{loop_frames, placed_source};
+use tutti_sampler::testing::{loop_frames, placed_config, voice_node};
 
 use std::cell::Cell;
 use std::path::Path;
@@ -29,8 +29,8 @@ use tutti_music::{FrameClock, LoopRange};
 use tutti_platform::Asset;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Loop, Manual, Playback, StreamHandle, StreamReader, StreamStart,
-    VoiceNode,
+    DiskStreamer, DiskVoice, Loop, Manual, MemorySource, Playback, StreamHandle, StreamReader,
+    StreamStart, VoiceNode, VoiceNodeConfig,
 };
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
@@ -241,8 +241,16 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
         stream,
     } = rig;
     let voice = live_voice(reader, 2.0);
-    let node = VoiceNode::streaming(voice.clone(), stream, Playback::default())
-        .expect("a finite gain and a nonempty width");
+    let node = VoiceNode::from(
+        VoiceNodeConfig::streaming(
+            voice.clone(),
+            stream,
+            tutti_units::Amplitude::new(1.0),
+            tutti_units::StretchFactor::UNITY,
+            tutti_units::Cents::new(0.0),
+        )
+        .expect("a finite gain and a nonempty width"),
+    );
 
     let mut node_fork = fork_unprepared(node);
     node_fork.node.prepare(&offline_prepare(SampleRate::of(SR)));
@@ -800,22 +808,21 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
                 .unwrap();
         }
         let clock = clock_at(SR);
-        let mut source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)));
-        source.set_speed(tutti_units::PlaybackRate::of(case.speed));
-        source.set_loop(case.loop_);
+        let config = placed_config(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)));
         let mut memory: Box<dyn Node> = if case.reverse {
-            Box::new(
-                VoiceNode::with_channels(
-                    source,
-                    Playback {
-                        direction: tutti_sampler::PlayDirection::Reverse,
-                        ..Playback::default()
-                    },
-                    2u16,
-                )
-                .expect("a finite gain and a nonempty width"),
-            )
+            Box::new(voice_node(
+                config,
+                Playback {
+                    speed: tutti_units::PlaybackRate::of(case.speed),
+                    loop_: case.loop_,
+                    direction: tutti_sampler::PlayDirection::Reverse,
+                    ..Playback::default()
+                },
+            ))
         } else {
+            let mut source = MemorySource::from(config);
+            source.set_speed(tutti_units::PlaybackRate::of(case.speed));
+            source.set_loop(case.loop_);
             Box::new(source)
         };
         memory.prepare(&Prepare::new(
@@ -879,16 +886,17 @@ fn a_stretched_fork_sounds_from_the_frame_its_beat_falls_on() {
             stream,
         } = rig;
         let voice = live_voice(reader, 1.0);
-        let node = VoiceNode::streaming(
-            voice,
-            stream,
-            Playback {
-                speed: tutti_units::PlaybackRate::of(speed),
-                stretch: tutti_units::StretchFactor::new(1.5),
-                ..Playback::default()
-            },
-        )
-        .expect("a finite gain and a nonempty width");
+        let node = VoiceNode::from(
+            VoiceNodeConfig::streaming(
+                voice,
+                stream,
+                tutti_units::Amplitude::new(1.0),
+                tutti_units::StretchFactor::new(1.5),
+                tutti_units::Cents::new(0.0),
+            )
+            .expect("a finite gain and a nonempty width")
+            .speed(tutti_units::PlaybackRate::of(speed)),
+        );
         let mut copy = fork_unprepared(node);
         copy.node.prepare(&offline_prepare(SampleRate::of(SR)));
         let [l, _] = render(&mut *copy.node, &clock_at(SR), 24_000 + 20_000);

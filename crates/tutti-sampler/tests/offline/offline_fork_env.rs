@@ -14,7 +14,7 @@
 //! somewhere else.
 
 use tutti_graph::testing::WireDeclared;
-use tutti_sampler::testing::placed_source;
+use tutti_sampler::testing::{placed_source, source_config, voice_node};
 
 use tutti_buffers::Mono;
 use tutti_graph::EdgeId;
@@ -49,6 +49,18 @@ fn ramp_wave() -> Arc<Wave> {
 
 fn placed() -> MemorySource<f32> {
     placed_source(ramp_wave(), VoiceWindow::from(Beat::new(0.0)))
+}
+
+/// [`placed`] as a node `channels` wide.
+fn placed_node(channels: ChannelLayout) -> VoiceNode<f32> {
+    voice_node(
+        source_config(
+            ramp_wave(),
+            channels,
+            Some(VoiceWindow::from(Beat::new(0.0))),
+        ),
+        Playback::default(),
+    )
 }
 
 fn prepare() -> Prepare {
@@ -126,11 +138,7 @@ fn a_forked_pool_steals_no_commands_from_the_live_one() {
 /// transport, renders exact silence.
 #[test]
 fn a_forked_voice_node_reads_its_renders_transport_not_the_live_one() {
-    let (ed, mut exec, _handle) = graph(
-        VoiceNode::with_channels(placed(), Playback::default(), ChannelLayout::STEREO)
-            .expect("a finite gain and a nonempty width"),
-        2,
-    );
+    let (ed, mut exec, _handle) = graph(placed_node(ChannelLayout::STEREO), 2);
     let mut forked = fork(&ed);
     let live_peak = peak(&mut exec, 2, rolling());
     let forked_peak = peak(&mut forked, 2, stopped());
@@ -226,12 +234,7 @@ impl Node for Pass {
 #[test]
 fn a_voice_behind_another_node_is_forked_too() {
     let (mut ed, mut exec) = Editor::new(prepare());
-    ed.insert(
-        NodeKey(1),
-        "voice",
-        VoiceNode::with_channels(placed(), Playback::default(), ChannelLayout::MONO)
-            .expect("a finite gain and a nonempty width"),
-    );
+    ed.insert(NodeKey(1), "voice", placed_node(ChannelLayout::MONO));
     ed.insert(NodeKey(2), "pass", ForkByClone(Pass));
     ed.connect_edge(EdgeId::into_port(
         tutti_graph::InputPort::new(NodeKey(2), 0),
