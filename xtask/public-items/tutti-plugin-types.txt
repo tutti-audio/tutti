@@ -76,6 +76,7 @@ enum format::PluginFormat
 enum format::PluginId
 enum format::PluginIdError
 enum format::serde_form::Raw
+enum host::Flushed
 enum invalidation::PluginInvalidation
 enum invalidation::PluginRefresh
 enum invalidation::ResyncClass

@@ -847,6 +847,38 @@ mod tests {
         assert_ne!(before, save_state_bytes(&mut s));
     }
 
+    /// **A flush of a `REQUIRES_PROCESS` write is answered `Held`, and so is every
+    /// flush after it until a block took the write**: the plugin is active, so
+    /// the write waits for `process`. An empty flush must not read as applied
+    /// while one is kept; after the block it does.
+    #[test]
+    #[cfg(feature = "clap")]
+    fn a_requires_process_flush_is_held_until_a_block_takes_it() {
+        use tutti_plugin_ipc::ApplyOutcome;
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
+        let (mut s, mut shm) = load_clap(FloatWidth::F32);
+        let outcome = |s: &mut Rig, request: AudioRequest| match s
+            .handle_audio(request)
+            .unwrap()
+            .expect("answered")
+        {
+            AudioReply::ParametersApplied { outcome, .. } => outcome,
+            other => panic!("not a flush's answer: {other:?}"),
+        };
+        let manual = tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+        assert_eq!(
+            outcome(&mut s, apply_parameter(manual, 1.0)),
+            ApplyOutcome::Held
+        );
+        let empty = || AudioRequest::ApplyParameters {
+            id: tutti_plugin_ipc::ReqId::new(2),
+            param_changes: ParameterChanges::reserved(0, 1),
+        };
+        assert_eq!(outcome(&mut s, empty()), ApplyOutcome::Held, "still kept");
+        assert!(run_silent_block(&mut s, &mut shm, 1, 64));
+        assert_eq!(outcome(&mut s, empty()), ApplyOutcome::Applied, "taken");
+    }
+
     /// Every request a host can send before a plugin is loaded must be
     /// *answered* — with an absent value, an empty list, or a refusal, but
     /// never with silence. The host blocks on a reply frame for each of the

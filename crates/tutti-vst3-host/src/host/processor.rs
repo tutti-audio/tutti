@@ -996,11 +996,15 @@ impl Processor for ProcessorAny {
     }
 
     /// `process` with no audio ([`Vst3Processor::flush_changes`]).
-    fn flush_parameters(&mut self, changes: &ParameterChanges) -> PluginResult<()> {
+    fn flush_parameters(
+        &mut self,
+        changes: &ParameterChanges,
+    ) -> PluginResult<tutti_plugin_types::Flushed> {
         match self {
             Self::F32(p) => p.flush_changes(changes),
             Self::F64(p) => p.flush_changes(changes),
         }
+        .map(|()| tutti_plugin_types::Flushed::Applied)
         .map_err(|_| PluginError::Block("the plugin refused a parameter flush"))
     }
 

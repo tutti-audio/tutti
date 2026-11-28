@@ -25,8 +25,6 @@ pub(crate) struct ParamTable {
     /// Each parameter's bounds and steppedness, sorted by id, and whether the
     /// plugin reported a nonzero `params.count()`.
     ranges: RangeTable,
-    /// `CLAP_PARAM_REQUIRES_PROCESS` of each entry of `ranges.ranges`.
-    requires_process: Vec<bool>,
     /// Every parameter in the shared vocabulary, in the plugin's order.
     listed: Vec<ParameterInfo>,
 }
@@ -42,6 +40,7 @@ impl ParamBounds {
             max: info.max_value,
             stepped: info.flags.contains(ClapParamFlags::STEPPED),
             read_only: info.flags.contains(ClapParamFlags::READONLY),
+            requires_process: info.flags.contains(ClapParamFlags::REQUIRES_PROCESS),
         }
     }
 }
@@ -57,26 +56,17 @@ impl ParamTable {
             };
             infos.push(ClapParamInfo::from(info));
         }
-        let mut declared: Vec<(ParamBounds, bool)> = infos
-            .iter()
-            .map(|p| {
-                (
-                    ParamBounds::declared(p),
-                    p.flags.contains(ClapParamFlags::REQUIRES_PROCESS),
-                )
-            })
-            .collect();
-        declared.sort_by_key(|(bounds, _)| bounds.id);
+        let mut declared: Vec<ParamBounds> = infos.iter().map(ParamBounds::declared).collect();
+        declared.sort_by_key(|bounds| bounds.id);
         Self {
             ranges: RangeTable {
-                ranges: declared.iter().map(|&(bounds, _)| bounds).collect(),
+                ranges: declared,
                 // The plugin's own count, not the length of the table: they
                 // differ exactly when the enumeration truncated at a hole,
                 // which `add_param_changes` has to tell apart from a plugin
                 // with no parameters.
                 claims: count > 0,
             },
-            requires_process: declared.iter().map(|&(_, requires)| requires).collect(),
             listed: infos.into_iter().map(project_param_info).collect(),
         }
     }
@@ -100,10 +90,7 @@ impl ParamTable {
     /// Whether `id` carries `CLAP_PARAM_REQUIRES_PROCESS`; `false` for an
     /// unknown id.
     pub(crate) fn requires_process(&self, id: ParamId) -> bool {
-        self.ranges
-            .ranges
-            .binary_search_by_key(&id, |b| b.id)
-            .is_ok_and(|i| self.requires_process[i])
+        self.bounds(id).is_some_and(|b| b.requires_process)
     }
 
     /// Every parameter in the shared vocabulary, in the plugin's order.

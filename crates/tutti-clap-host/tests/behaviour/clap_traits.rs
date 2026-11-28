@@ -20,8 +20,8 @@ use tutti_clap_test_plugin::{
 };
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
-    Control, Controller, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare, PresetId,
-    ProcessContext, ProcessOutput, Processor, SampleRate, Samples, Widths, Wraps,
+    Control, Controller, Flushed, Loaded, MaxBlock, PluginError, PluginIo, PluginTail, Prepare,
+    PresetId, ProcessContext, ProcessOutput, Processor, SampleRate, Samples, Widths, Wraps,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -433,6 +433,144 @@ fn a_controller_write_is_pending_until_a_block_took_it() {
     );
     render(&mut processor, FloatWidth::F32).expect("block");
     assert!(Control::pending(&mut controller).is_empty());
+}
+
+/// **A flushed write of a `REQUIRES_PROCESS` parameter waits for the next
+/// block, and a save states it pending until then**: the plugin is active, so
+/// CLAP wants the value in `process`, never in `params.flush`. A write of any
+/// other parameter in the same flush is applied at the flush: holding one does
+/// not hold the others.
+#[test]
+fn a_flushed_requires_process_write_waits_for_the_next_block() {
+    use tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let (cutoff, manual) = (
+        ParamId::new(probe_params()[0].id),
+        ParamId::new(MANUAL_PARAM_ID),
+    );
+    controller
+        .set_parameter(main_thread(), manual, Normalized::of(1.0))
+        .expect("a declared, writable parameter");
+    controller
+        .set_parameter(main_thread(), cutoff, Normalized::of(0.25))
+        .expect("a declared, writable parameter");
+
+    let none = tutti_plugin_types::ParameterChanges::reserved(0, 1);
+    // Keeping a value allocates nothing: the room is fixed at activation.
+    assert_eq!(
+        assert_no_alloc(|| processor.flush_parameters(&none)).ok(),
+        Some(Flushed::Held)
+    );
+    assert_eq!(
+        peek_param(cutoff.get()),
+        Some(350.0),
+        "the other is applied"
+    );
+    assert_eq!(peek_param(MANUAL_PARAM_ID), Some(0.0), "kept for the block");
+    assert_eq!(
+        Control::pending(&mut controller).len(),
+        2,
+        "one mark cannot cover the one the plugin has and not the other"
+    );
+
+    render(&mut processor, FloatWidth::F32).expect("a block");
+    assert_eq!(peek_param(MANUAL_PARAM_ID), Some(1.0), "taken by the block");
+    assert!(Control::pending(&mut controller).is_empty());
+}
+
+/// **A host change of a `REQUIRES_PROCESS` parameter in a flush waits too, and
+/// a newer write of the parameter replaces it.**
+#[test]
+fn a_flushed_host_change_of_a_requires_process_parameter_waits_and_is_replaced() {
+    use tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let manual = ParamId::new(MANUAL_PARAM_ID);
+    let mut changes = tutti_plugin_types::ParameterChanges::reserved(1, 1);
+    assert!(changes.add_change(manual, at_frame(0), unit_value(1.0)));
+    assert_eq!(
+        processor.flush_parameters(&changes).ok(),
+        Some(Flushed::Held),
+        "kept"
+    );
+    assert_eq!(peek_param(MANUAL_PARAM_ID), Some(0.0), "kept for the block");
+
+    controller
+        .set_parameter(main_thread(), manual, Normalized::of(0.0))
+        .expect("a declared, writable parameter");
+    render(&mut processor, FloatWidth::F32).expect("a block");
+    assert_eq!(
+        peek_param(MANUAL_PARAM_ID),
+        Some(0.0),
+        "the newer write is the block's, the kept value is not sent over it"
+    );
+}
+
+/// **A kept write from before a reset is never sent after it**: the reset ends
+/// the epoch the value was checked against, so the flush that follows holds
+/// nothing and the block delivers nothing.
+#[test]
+fn a_kept_write_from_before_a_reset_is_never_sent() {
+    use tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    let manual = ParamId::new(MANUAL_PARAM_ID);
+    controller
+        .set_parameter(main_thread(), manual, Normalized::of(1.0))
+        .expect("a declared, writable parameter");
+    let none = tutti_plugin_types::ParameterChanges::reserved(0, 1);
+    assert_eq!(processor.flush_parameters(&none).ok(), Some(Flushed::Held));
+
+    Wraps::before_restore(&mut controller, main_thread());
+    assert_eq!(
+        processor.flush_parameters(&none).ok(),
+        Some(Flushed::Applied),
+        "a reset ended the epoch the kept write was checked against"
+    );
+    render(&mut processor, FloatWidth::F32).expect("a block");
+    assert_eq!(peek_param(MANUAL_PARAM_ID), Some(0.0), "never sent");
+}
+
+/// **A write kept for the next block survives a rejoin**: it is applied to the
+/// plugin deactivated, like the writes the slots hold.
+#[test]
+fn a_kept_write_survives_a_rejoin() {
+    use tutti_clap_test_plugin::params_state::MANUAL_PARAM_ID;
+    let probe = Probe::acquire();
+    let (mut processor, mut controller) = probe
+        .load()
+        .activate(main_thread(), prepare())
+        .expect("activates");
+    controller
+        .set_parameter(
+            main_thread(),
+            ParamId::new(MANUAL_PARAM_ID),
+            Normalized::of(1.0),
+        )
+        .expect("a declared, writable parameter");
+    assert_eq!(
+        processor
+            .flush_parameters(&tutti_plugin_types::ParameterChanges::reserved(0, 1))
+            .ok(),
+        Some(Flushed::Held)
+    );
+    let _loaded = ClapLoaded::deactivate(main_thread(), processor, controller)
+        .unwrap_or_else(|_| panic!("rejoins"));
+    assert_eq!(
+        peek_param(MANUAL_PARAM_ID),
+        Some(1.0),
+        "applied by the rejoin"
+    );
 }
 
 /// **A state load makes the writes queued before it stale**: they were written

@@ -38,9 +38,10 @@
 //!    - `set_parameter` is fire-and-forget, and a write refused by a full
 //!      command queue is dropped — neither the live plugin nor the state
 //!      ever has it;
-//!    - CLAP skips a direct write to a `REQUIRES_PROCESS` parameter while the
-//!      plugin is processing (it can only arrive through a process call), so
-//!      until the next block delivers it, the state is the old value;
+//!    - CLAP never flushes a `REQUIRES_PROCESS` parameter while the plugin is
+//!      active (it can only arrive through a process call, so a flush keeps
+//!      it for the next block), so until a block delivers it the state is the
+//!      old value, and the save states the write pending;
 //!    - VST3's host write goes to the edit controller, and a component whose
 //!      `getState` does not reflect controller-side values saves without it
 //!      until the processor has seen the change.
