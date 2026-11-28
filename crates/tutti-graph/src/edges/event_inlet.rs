@@ -87,6 +87,7 @@
 //! the waiting list: a note-off waiting must still arrive.
 
 use std::num::NonZeroU32;
+use std::sync::Weak;
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{
@@ -96,6 +97,7 @@ use tutti_rt::{
 use tutti_ump::Ump;
 use tutti_units::{At, Frame, Losses, Moment, SampleRate};
 
+use super::alive::Alive;
 use crate::RenderMode;
 use crate::event::types::Event;
 use crate::node::bus::OutEvents;
@@ -162,6 +164,7 @@ struct Waiting {
 #[derive(Clone, Debug)]
 pub struct InletCounts {
     totals: Tally<Losses>,
+    writer: Weak<()>,
 }
 
 impl InletCounts {
@@ -173,6 +176,13 @@ impl InletCounts {
     #[must_use]
     pub fn losses(&self) -> Losses {
         self.totals.get()
+    }
+
+    /// Whether the inlet's [`EventInletWriter`] has been dropped: no producer
+    /// is left to fill the ring, and a push through it was never to be.
+    #[must_use]
+    pub fn writer_gone(&self) -> bool {
+        self.writer.strong_count() == 0
     }
 }
 
@@ -187,6 +197,8 @@ pub struct EventInletWriter {
     totals: Tally<Losses>,
     /// This writer's adds to `totals`: the pushes the ring refused.
     losses: TallyWriter<Losses>,
+    /// This writer's presence, which [`InletCounts::writer_gone`] reads.
+    alive: Alive,
 }
 
 impl std::fmt::Debug for EventInletWriter {
@@ -271,6 +283,7 @@ impl EventInletWriter {
     pub fn counts(&self) -> InletCounts {
         InletCounts {
             totals: self.totals.clone(),
+            writer: self.alive.watch(),
         }
     }
 }
@@ -419,6 +432,7 @@ impl EventInletNode {
             clock: clock.reader(),
             totals: totals.clone(),
             losses: totals.writer(),
+            alive: Alive::default(),
         };
         let node = Self {
             port: Self::OUT,
@@ -630,6 +644,20 @@ mod tests {
     use tutti_fixtures::{RangeContract, check_range_contract};
 
     use super::*;
+
+    /// **The counts see the writer drop**: a view taken from the writer reads
+    /// the producer present while it lives and gone once it is dropped, and
+    /// the node's own drop does not read as the writer's.
+    #[test]
+    fn the_counts_say_when_the_writer_is_dropped() {
+        let (node, writer) = EventInletNode::pair(EventCapacity::of(4));
+        let counts = writer.counts();
+        assert!(!counts.writer_gone());
+        drop(node);
+        assert!(!counts.writer_gone());
+        drop(writer);
+        assert!(counts.writer_gone());
+    }
 
     /// `EventCapacity` has the range-checked shape: `new` refuses
     /// 0 and never clamps, `TryFrom` agrees and carries the refused raw, `of`

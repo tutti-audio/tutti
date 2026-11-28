@@ -10,11 +10,12 @@ use tutti_graph::{
 };
 use tutti_units::Samples;
 
+use super::instrument::Parts;
 use super::wire::{KeptWire, Ports, Resolved};
 use super::{Fate, Kept, PatchError, Planned};
 use crate::key::BusEnd;
-use crate::patch::WireId;
-use crate::{AppKey, BusInputPort, ConnectError, Graph};
+use crate::patch::{Built, WireEnds, WireId};
+use crate::{AppKey, BusInputPort, ConnectError, EventInputPort, Graph, OutputPort};
 
 /// Refuses what the declared nodes and wires cannot make, with nothing changed,
 /// and names the edges leaving the graph that would close a cycle with them.
@@ -24,7 +25,8 @@ pub(super) fn check<K: AppKey, F: Float>(
     wires: &BTreeMap<WireId<K>, KeptWire>,
     kept: &Kept<K, F>,
 ) -> Result<Cuts, PatchError<K>> {
-    self::wires(graph, planned, wires)
+    ports(planned)
+        .and_then(|()| self::wires(graph, planned, wires))
         .and_then(|()| feedback(graph, planned, wires, kept))
         .and_then(|()| acyclic(graph, planned, wires, kept))
 }
@@ -75,6 +77,37 @@ fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
         .retain(|feed| !bus_gone(&feed.source));
 }
 
+/// Refuses an instrument whose node lacks the ports the session wires: an
+/// event input for its queue and the two outputs of its main pair.
+fn ports<K: AppKey, F: Float>(planned: &Planned<K, F>) -> Result<(), PatchError<K>> {
+    for p in &planned.nodes {
+        let (Fate::Add(built) | Fate::Readd(built) | Fate::Swap(built)) = &p.fate else {
+            continue;
+        };
+        let Some(main) = built.main else {
+            continue;
+        };
+        if built.shape.event_input(0).is_none() {
+            return Err(PatchError::Wire {
+                ends: WireEnds::Event(p.key.clone(), 0, p.key.clone(), 0),
+                cause: ConnectError::NoSuchEventIn(EventInputPort::new(p.id, 0)),
+            });
+        }
+        let outputs = usize::from(built.shape.audio_out().count());
+        if let Some(port) = main
+            .map(usize::from)
+            .into_iter()
+            .find(|&port| port >= outputs)
+        {
+            return Err(PatchError::Wire {
+                ends: WireEnds::Channel(p.key.clone(), port, p.key.clone(), 0),
+                cause: ConnectError::NoSuchOutPort(OutputPort::new(p.id, port)),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Refuses a wire the declared nodes cannot make, with nothing changed.
 fn wires<K: AppKey, F: Float>(
     graph: &Graph<F>,
@@ -85,7 +118,17 @@ fn wires<K: AppKey, F: Float>(
     let mut buses = Vec::new();
     let mut bus_ends = Vec::new();
     for id in wires.keys() {
-        let resolved = Resolved::of(id, |key| planned.at[key]);
+        // An instrument takes events: its audio is its node's own.
+        let into_instrument = id.sink().filter(|to| {
+            planned.strips.contains_key(*to) && !matches!(id.ends, WireEnds::Event(..))
+        });
+        if let Some(to) = into_instrument {
+            return Err(PatchError::Wire {
+                ends: id.ends.clone(),
+                cause: ConnectError::NotAnInput(planned.at[to]),
+            });
+        }
+        let resolved = Resolved::of(id, |key, role| planned.of(key, role));
         resolved
             .check(graph, pending)
             .map_err(|cause| PatchError::Wire {
@@ -124,7 +167,7 @@ fn feedback<K: AppKey, F: Float>(
             .flatten()
             .all(|key| kept.nodes.contains_key(key));
         if held {
-            let resolved = Resolved::of(id, |key| kept.nodes[key].node);
+            let resolved = Resolved::of(id, |key, role| kept.at(key, role));
             leaving.extend(
                 Ports::of(resolved, graph, None)
                     .into_iter()
@@ -143,7 +186,7 @@ fn feedback<K: AppKey, F: Float>(
                 max_block,
             });
         }
-        let resolved = Resolved::of(id, |key| planned.at[key]);
+        let resolved = Resolved::of(id, |key, role| planned.of(key, role));
         for ports in Ports::of(resolved, graph, pending) {
             let twice = declared
                 .insert(ports, id.delay)
@@ -179,23 +222,45 @@ fn acyclic<K: AppKey, F: Float>(
     let mut spec = graph.whole_spec();
     // The nodes this patch takes out are not in the graph it makes, nor
     // are the edges into or out of them, hand-made ones included.
-    let gone: BTreeSet<NodeKey> = kept
+    let leaving = kept
         .nodes
-        .iter()
-        .filter(|(key, _)| !planned.at.contains_key(*key))
-        .map(|(_, stored)| stored.node)
+        .keys()
+        .filter(|key| !planned.at.contains_key(*key))
         .chain(
             planned
                 .nodes
                 .iter()
                 .filter(|p| matches!(p.fate, Fate::Readd(_)))
-                .filter_map(|p| kept.nodes.get(&p.key).map(|stored| stored.node)),
-        )
+                .map(|p| &p.key),
+        );
+    let gone: BTreeSet<NodeKey> = leaving
+        .filter_map(|key| kept.nodes.get(key).map(|stored| (key, stored.node)))
+        .flat_map(|(key, node)| {
+            let parts = kept.instruments.get(key).into_iter().flat_map(Parts::nodes);
+            std::iter::once(node).chain(parts)
+        })
         .collect();
     forget_nodes(&mut spec, &gone);
     for (&node, shape) in &planned.shapes {
         let declared = NodeSpec::new("declared", shape.audio_in(), shape.audio_out());
         spec.topology.nodes.insert(node, declared);
+    }
+    // A new instrument's strip reads its node's main pair.
+    for p in &planned.nodes {
+        if let (
+            Fate::Add(Built {
+                main: Some(main), ..
+            })
+            | Fate::Readd(Built {
+                main: Some(main), ..
+            }),
+            Some(parts),
+        ) = (&p.fate, &p.parts)
+        {
+            for wire in parts.audio(p.id, *main) {
+                wire.in_spec(&mut spec, graph, pending, true);
+            }
+        }
     }
     let (mut leaving, mut leaving_buses) = graph.fading_edges();
     for id in kept.wires.keys().filter(|id| !wires.contains_key(*id)) {
@@ -206,7 +271,7 @@ fn acyclic<K: AppKey, F: Float>(
         if !held {
             continue;
         }
-        let resolved = Resolved::of(id, |key| kept.nodes[key].node);
+        let resolved = Resolved::of(id, |key, role| kept.at(key, role));
         match resolved {
             // An event edge is never faded: it goes at once.
             Resolved::Event(..) => {
@@ -229,7 +294,7 @@ fn acyclic<K: AppKey, F: Float>(
     let named: Vec<_> = wires
         .keys()
         .map(|id| {
-            let resolved = Resolved::of(id, |key| planned.at[key]);
+            let resolved = Resolved::of(id, |key, role| planned.of(key, role));
             // A declared wire is not leaving, whatever the graph fades.
             for ports in Ports::of(resolved, graph, pending) {
                 if let Ports::Audio(edge) = ports

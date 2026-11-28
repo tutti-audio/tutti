@@ -1,6 +1,9 @@
 //! The declarations of a patch: the nodes an app declares by its own keys.
 //!
 //! - [`NodeDecl`] names one node: an app key and the config it is built from.
+//! - [`InstrumentDecl`] names one played instrument: a node with its event queue
+//!   and bus strip, whose keys [`Session::take_keys`](crate::Session::take_keys)
+//!   lends.
 //! - The wires between declared nodes are parts too, made by `connect` on a
 //!   [`WireStart`](crate::WireStart); [`WireEnds`] names one.
 //! - [`Section`] names a subtree of the patch by an app key and the value it is
@@ -20,7 +23,7 @@ use std::fmt;
 
 use thiserror::Error;
 use tutti_graph::{Fade, HostValues, Initials, NodeKey, Shape};
-use tutti_units::Samples;
+use tutti_units::{Amplitude, Samples};
 
 mod wire;
 
@@ -93,6 +96,99 @@ impl<K: fmt::Debug, C> fmt::Debug for NodeDecl<K, C> {
         f.debug_struct("NodeDecl")
             .field("key", &self.key)
             .field("fading", &self.fading)
+            .finish_non_exhaustive()
+    }
+}
+
+/// One played instrument of a patch: the app's key for it, the config its node
+/// is built from, and the event queue and bus strip the session makes beside
+/// it.
+///
+/// The node is declared as a [`NodeDecl`] declares one, and has two parts of its
+/// own that carry no app key: the queue its [keys](crate::Session::take_keys)
+/// fill, wired to its event input, and a strip after its main output pair. A key
+/// that changes between a `NodeDecl` and an `InstrumentDecl` removes the old node
+/// and its parts and adds the new ones; another structure swaps the node and
+/// keeps the parts, and other values are written. A patch without the key
+/// removes all three.
+///
+/// A wire that names the key leaves from the strip: a [`Mention`](crate::Mention)
+/// or `&InstrumentDecl` is the strip's main bus, and
+/// [`event_input`](Self::event_input) is the instrument's own event input,
+/// beside the queue. The instrument's audio is not an end: a wire into it is
+/// refused ([`PatchError::Wire`](crate::PatchError::Wire)).
+#[cfg(feature = "midi")]
+#[must_use = "a declaration is part of a patch only once `Session::patch` takes it"]
+pub struct InstrumentDecl<K, C> {
+    key: K,
+    config: C,
+    fading: Fading,
+    gain: Amplitude,
+}
+
+#[cfg(feature = "midi")]
+impl<K, C> InstrumentDecl<K, C> {
+    /// The instrument of `config` under `key`, its strip at unity, swapped and
+    /// removed over the graph's declick.
+    pub fn new(key: K, config: C) -> Self {
+        Self {
+            key,
+            config,
+            fading: Fading::default(),
+            gain: Amplitude::UNITY,
+        }
+    }
+
+    /// The key the instrument is declared under.
+    #[must_use]
+    pub fn key(&self) -> &K {
+        &self.key
+    }
+
+    /// The declaration this makes: the node's config held with the strip's
+    /// volume and `build`, the target's way to build the node with its main
+    /// pair.
+    pub(crate) fn declaration<G>(self, build: fn(&C, &HostValues) -> Built) -> (K, Declaration<G>)
+    where
+        G: Place<C>,
+        C: Send + 'static,
+    {
+        let held = Held {
+            config: self.config,
+            played: Some(Played {
+                gain: self.gain,
+                build,
+            }),
+        };
+        let declaration = Declaration {
+            config: Box::new(held),
+            fading: self.fading,
+        };
+        (self.key, declaration)
+    }
+
+    /// Swaps and removes the instrument at the next block boundary with no
+    /// fade, as [`NodeDecl::unfaded`] does.
+    pub fn unfaded(mut self) -> Self {
+        self.fading = Fading::Cut;
+        self
+    }
+
+    /// The strip's volume when the instrument is declared: a value, so a patch
+    /// that declares another writes it to the running strip.
+    pub fn initial_gain(mut self, gain: Amplitude) -> Self {
+        self.gain = gain;
+        self
+    }
+}
+
+#[cfg(feature = "midi")]
+impl<K: fmt::Debug, C> fmt::Debug for InstrumentDecl<K, C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InstrumentDecl")
+            .field("key", &self.key)
+            .field("fading", &self.fading)
+            .field("gain", &self.gain)
             .finish_non_exhaustive()
     }
 }
@@ -191,6 +287,8 @@ pub trait PatchTarget {
 pub(crate) struct Built {
     pub(crate) node: Box<dyn Any + Send>,
     pub(crate) shape: Shape,
+    /// The pair of outputs an instrument plays by; `None` for a plain node.
+    pub(crate) main: Option<[u16; 2]>,
 }
 
 /// That a [`PatchTarget`] places nodes built from the config `C`, at the float the
@@ -224,6 +322,8 @@ pub(crate) trait Declared<G: PatchTarget>: Send {
     /// for its values. `false` for a config of another type.
     fn same_structure(&self, other: &dyn Declared<G>) -> bool;
     fn initials(&self) -> Initials;
+    /// The strip volume of an instrument declaration; `None` for a plain node.
+    fn played(&self) -> Option<Amplitude>;
     /// The node this config makes, built once.
     fn build(&self, host: &HostValues) -> Built;
     /// `built`, this config's node, placed in `target` under `id`.
@@ -238,7 +338,26 @@ pub(crate) trait Declared<G: PatchTarget>: Send {
     ) -> Result<(), G::Refused>;
 }
 
-struct Held<C>(C);
+/// A config held as declared: a plain node's, or an instrument's with what
+/// makes it one.
+struct Held<C> {
+    config: C,
+    played: Option<Played<C>>,
+}
+
+/// An instrument declaration's part of a held config: its strip's volume, and
+/// the target's way to build the node with its main pair.
+#[cfg_attr(
+    not(feature = "midi"),
+    allow(
+        dead_code,
+        reason = "only an instrument declaration, behind `midi`, makes one"
+    )
+)]
+struct Played<C> {
+    gain: Amplitude,
+    build: fn(&C, &HostValues) -> Built,
+}
 
 impl<G, C> Declared<G> for Held<C>
 where
@@ -261,15 +380,22 @@ where
         other
             .as_any()
             .downcast_ref::<Self>()
-            .is_some_and(|other| G::same_structure(&self.0, &other.0))
+            .is_some_and(|other| G::same_structure(&self.config, &other.config))
     }
 
     fn initials(&self) -> Initials {
-        G::initials(&self.0)
+        G::initials(&self.config)
+    }
+
+    fn played(&self) -> Option<Amplitude> {
+        self.played.as_ref().map(|played| played.gain)
     }
 
     fn build(&self, host: &HostValues) -> Built {
-        G::build(&self.0, host)
+        match &self.played {
+            Some(played) => (played.build)(&self.config, host),
+            None => G::build(&self.config, host),
+        }
     }
 
     fn add(&self, target: &mut G, id: NodeKey, built: Built) {
@@ -383,7 +509,10 @@ where
         patch.nodes.push((
             self.key,
             Declaration {
-                config: Box::new(Held(self.config)),
+                config: Box::new(Held {
+                    config: self.config,
+                    played: None,
+                }),
                 fading: self.fading,
             },
         ));

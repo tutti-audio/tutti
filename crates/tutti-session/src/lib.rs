@@ -325,6 +325,8 @@ use hang::HangDetector;
 pub use hang::HangPolicy;
 #[cfg(feature = "midi-hardware")]
 pub use midi_hardware::{MidiPolicy, MidiPolicyError};
+#[cfg(feature = "midi")]
+pub use patch::InstrumentDecl;
 pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchTarget, Section, WireEnds};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
@@ -343,12 +345,12 @@ pub use recovery::{
 };
 #[cfg(feature = "sampler")]
 pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, SamplerError};
-#[cfg(feature = "midi")]
-pub use session::MidiNodes;
 pub use session::{
     AppKey, MainOutputTopologyStatus, PHASES, PatchError, Patched, Phase, PhaseCx, Session,
     SessionEvent,
 };
+#[cfg(feature = "midi")]
+pub use session::{LeaseError, MidiNodes};
 #[cfg(all(feature = "analyze", feature = "sampler"))]
 pub use signal_windows::windows_from_signal;
 #[cfg(feature = "device")]

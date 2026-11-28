@@ -256,6 +256,7 @@ fn edges::event_inlet::EventInletWriter::push
 fn edges::event_inlet::EventInletWriter::push_all
 fn edges::event_inlet::EventInletWriter::vacant
 fn edges::event_inlet::InletCounts::losses
+fn edges::event_inlet::InletCounts::writer_gone
 fn edges::event_tap::EventTapOptions::align
 fn edges::event_tap::EventTapOptions::new
 fn edges::event_tap::EventTapReader::available
