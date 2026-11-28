@@ -10,6 +10,7 @@
 
 use crate::editor::EditorError;
 use crate::load_stage::LoadStage;
+use crate::server_error::ServerError;
 
 /// Failure produced by a plugin-instance capability trait method.
 ///
@@ -95,23 +96,45 @@ pub enum Delivered {
 
 /// Why a preset call did not do what it was asked.
 ///
-/// Three answers a bare `Option<bool>` kept in one value: the plugin has no
-/// route to presets, it was asked and refused, or it is gone.
-#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// What a load answers, one value per cause: the plugin cannot address the id,
+/// does not list it, was asked and refused, or is gone; the bridge adds a full
+/// queue and a missed deadline. The plugin's own answers cross the wire as they
+/// are.
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum PresetError {
-    /// This plugin cannot do that with presets: it has no preset route, or the
+    /// This plugin cannot do that with presets: it has no preset route, the
     /// format has no such operation (CLAP enumerates nothing; VST2, VST3 and AU
-    /// load no file).
+    /// load no file), or the format addresses this id shape but the host has no
+    /// route for it here (a VST3 list no parameter selects in, or whose program
+    /// parameter the host may not write).
     #[error("this plugin does not support that preset operation")]
     Unsupported,
-    /// The plugin was asked and declined (an id it does not know, a file it
-    /// cannot read). Leave the selection where it was.
+    /// The id has the shape the format addresses, but no listed preset has it:
+    /// a VST2 program index outside `[0, numPrograms)` (`effSetProgram`), a VST3
+    /// program in a list the plugin does not have or past its `programCount`
+    /// (`IUnitInfo::getProgramListInfo`), an AU number outside
+    /// `kAudioUnitProperty_FactoryPresets` (the AU host lists factory presets
+    /// only; user presets are not listed). The plugin was not asked.
+    #[error("no listed preset has that id")]
+    Unlisted,
+    /// The plugin was asked about a preset it could address and declined (a
+    /// file it cannot read, a program selection its controller rejects). Leave
+    /// the selection where it was.
     #[error("the plugin refused the preset")]
     Refused,
     /// The plugin is gone, so nothing was asked.
     #[error("the plugin is lost")]
     Lost,
+    /// Out of process only: the plugin server answered an error in place of the
+    /// plugin's answer, so the server, not the plugin, failed the request.
+    #[error("the plugin server failed the preset request: {0}")]
+    Server(ServerError),
+    /// Out of process only: the plugin server answered with a reply of another
+    /// kind, so the peer broke the protocol.
+    #[error("the plugin server answered the preset request with an unexpected reply")]
+    UnexpectedReply,
     /// The request could not be queued: the bridge's command queue is full. The
     /// plugin was not asked, so a retry is reasonable.
     #[error("the plugin bridge is busy; the request was not sent")]

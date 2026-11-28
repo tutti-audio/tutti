@@ -856,8 +856,9 @@ fn a_program_switch_is_bracketed_in_order() {
     reset_switches(&path);
 
     let mut instance = Active::load(&path, SAMPLE_RATE, BLOCK).expect("probe should load");
-    assert!(
+    assert_eq!(
         instance.loaded_mut().set_program(main_thread(), 1),
+        Ok(()),
         "program 1 is in range"
     );
 
@@ -890,12 +891,15 @@ fn a_program_switch_raises_a_values_rescan() {
         asked
     };
     let _ = taken(&mut instance);
-    assert!(!instance.loaded_mut().set_program(main_thread(), 999));
+    assert_eq!(
+        instance.loaded_mut().set_program(main_thread(), 999),
+        Err(tutti_plugin_types::PresetError::Unlisted)
+    );
     assert!(
         !taken(&mut instance).contains(&Request::RescanParams(RescanScope::Values)),
         "a refused switch moved nothing"
     );
-    assert!(instance.loaded_mut().set_program(main_thread(), 1));
+    assert_eq!(instance.loaded_mut().set_program(main_thread(), 1), Ok(()));
     assert!(taken(&mut instance).contains(&Request::RescanParams(RescanScope::Values)));
 
     drop(instance);
@@ -904,7 +908,7 @@ fn a_program_switch_raises_a_values_rescan() {
 
 /// An out-of-range program dispatches nothing at all.
 ///
-/// Not merely "returns false": a rejected switch must not open a bracket it
+/// Not merely "refuses": a rejected switch must not open a bracket it
 /// never closes around a change that never happened. An empty trace is the
 /// assertion.
 #[test]
@@ -914,12 +918,14 @@ fn an_out_of_range_program_dispatches_nothing() {
     reset_switches(&path);
 
     let mut instance = Active::load(&path, SAMPLE_RATE, BLOCK).expect("probe should load");
-    assert!(
-        !instance.loaded_mut().set_program(main_thread(), 999),
+    assert_eq!(
+        instance.loaded_mut().set_program(main_thread(), 999),
+        Err(tutti_plugin_types::PresetError::Unlisted),
         "999 is past numPrograms"
     );
-    assert!(
-        !instance.loaded_mut().set_program(main_thread(), -1),
+    assert_eq!(
+        instance.loaded_mut().set_program(main_thread(), -1),
+        Err(tutti_plugin_types::PresetError::Unlisted),
         "a negative index is not a program"
     );
 

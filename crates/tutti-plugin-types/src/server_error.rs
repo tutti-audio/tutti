@@ -10,7 +10,7 @@ use crate::LoadStage;
 /// The wire carries the arm, so a host reads what failed (the stage a load
 /// reached, the sizes a state disagreed on) without parsing text. The `reason`
 /// fields are the plugin's or the loader's own words, shown and never parsed.
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
 pub enum ServerError {

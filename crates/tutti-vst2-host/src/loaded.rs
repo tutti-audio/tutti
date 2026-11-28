@@ -624,12 +624,20 @@ impl Vst2Loaded {
     /// `audioMasterAutomate` edit. This host has that callback wired and
     /// draining, so an unbracketed switch really does flood it.
     ///
-    /// Returns `false` for an out-of-range index without dispatching anything.
     /// VST2 gives no confirmation that an in-range change took — `effProgramChange`
-    /// returns nothing — so `true` means "dispatched", not "the plugin moved".
-    pub fn set_program(&mut self, main: MainThreadMarker, index: i32) -> bool {
+    /// returns nothing — so `Ok` means "dispatched", not "the plugin moved".
+    ///
+    /// # Errors
+    ///
+    /// [`PresetError::Unlisted`](tutti_plugin_types::PresetError::Unlisted) for an index outside `[0, numPrograms)`,
+    /// without dispatching anything.
+    pub fn set_program(
+        &mut self,
+        main: MainThreadMarker,
+        index: i32,
+    ) -> std::result::Result<(), tutti_plugin_types::PresetError> {
         if index < 0 || index >= self.instance.read_num_programs() {
-            return false;
+            return Err(tutti_plugin_types::PresetError::Unlisted);
         }
         self.instance
             .with_preset_bracket(main, |instance| instance.change_preset(main, index));
@@ -639,7 +647,7 @@ impl Vst2Loaded {
         // asks for them to be read again.
         let _ = tutti_plugin_types::Request::RescanParams(tutti_plugin_types::RescanScope::Values)
             .raise(self.host.requests());
-        true
+        Ok(())
     }
 
     /// Returns the plugin's current answer for its MIDI channel counts.

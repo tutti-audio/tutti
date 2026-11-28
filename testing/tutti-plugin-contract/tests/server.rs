@@ -102,6 +102,16 @@ fn through_server<F: Format>(path: PathBuf) {
         spec::PluginLearn::MovesAux => assert_eq!(learn, Ok(())),
     }
 
+    // A load the plugin cannot take answers the spec's variant, as in process.
+    for id in spec::unlisted_ids(F::SURFACE.preset_ids) {
+        assert_eq!(
+            handle.load_preset(main, &id),
+            std::task::Poll::Ready(Err(F::SURFACE.unlisted_preset)),
+            "{}: the answer to the unlisted {id:?}, across the boundary",
+            F::NAME
+        );
+    }
+
     // The conversion is the format's, asked across the boundary: each figure is
     // the spec's for the format (`spec::Tone`), never a line the client draws.
     let tone = F::SURFACE.tone;

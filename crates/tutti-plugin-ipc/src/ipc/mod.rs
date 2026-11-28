@@ -673,11 +673,16 @@ impl Ipc {
         origin.reopen(self.link.rate(), state)
     }
 
-    /// Loads the preset `id` into this plugin: `false` when it refused it. No
-    /// main thread: the served control is thread-agnostic. A served fork
-    /// restores with this, then [`load_state`](Self::load_state), after the
-    /// server has loaded the state and activated the plugin at launch.
-    pub fn load_preset(&self, id: &PresetId) -> bool {
+    /// Loads the preset `id` into this plugin, answering what the served
+    /// control answered. No main thread: the served control is thread-agnostic.
+    /// A served fork restores with this, then [`load_state`](Self::load_state),
+    /// after the server has loaded the state and activated the plugin at launch.
+    ///
+    /// # Errors
+    ///
+    /// The plugin's own [`PresetError`](tutti_plugin_types::PresetError), or
+    /// `Lost`, `Busy` or `Stalled` when the bridge has no answer.
+    pub fn load_preset(&self, id: &PresetId) -> Result<(), tutti_plugin_types::PresetError> {
         self.link.bridge.audio().load_preset(id.clone())
     }
 

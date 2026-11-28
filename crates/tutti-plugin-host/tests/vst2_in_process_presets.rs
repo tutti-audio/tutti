@@ -98,18 +98,20 @@ fn a_listed_preset_loads_the_program_it_names() {
     );
 }
 
-/// An id from another format is refused rather than coerced.
+/// An id from another format is `Unsupported` rather than coerced, and an index
+/// the plugin does not list is `Unlisted`.
 ///
 /// `Program` and `Location` name nothing in VST2's index space. Refusing is the
 /// point: coercing either into an index — by taking the `index` field, say —
 /// would load a real program that the caller never asked for, which is silent
-/// and worse than a `false`.
+/// and worse than an error. A `Number` past `numPrograms` is VST2's own shape, so
+/// it is not unsupported but unlisted.
 #[test]
-fn an_id_from_another_format_is_refused() {
+fn an_id_from_another_format_is_unsupported_and_an_index_past_the_list_is_unlisted() {
     let _guard = PROBE_LOCK.lock();
     let handle = load_handle(&[("TUTTI_VST2_PROBE_PROGRAMS", "3")]);
 
-    // `Refused`, not "not Ok": a lost route answers another error, which would
+    // The variant, not "not Ok": a lost route answers another error, which would
     // otherwise read as a refusal and pass this test rather than fail it.
     let before = handle.current_preset(main_thread());
 
@@ -121,7 +123,7 @@ fn an_id_from_another_format_is_refused() {
                 index: 1
             }
         ),
-        std::task::Poll::Ready(Err(PresetError::Refused)),
+        std::task::Poll::Ready(Err(PresetError::Unsupported)),
         "a VST3 program id addresses no VST2 program"
     );
     assert_eq!(
@@ -129,8 +131,14 @@ fn an_id_from_another_format_is_refused() {
             main_thread(),
             &PresetId::Location(PathBuf::from("/x.clap-preset"))
         ),
-        std::task::Poll::Ready(Err(PresetError::Refused)),
+        std::task::Poll::Ready(Err(PresetError::Unsupported)),
         "a CLAP preset path addresses no VST2 program"
+    );
+
+    assert_eq!(
+        handle.load_preset(main_thread(), &PresetId::Number(3)),
+        std::task::Poll::Ready(Err(PresetError::Unlisted)),
+        "the probe has programs 0 to 2"
     );
 
     assert_eq!(

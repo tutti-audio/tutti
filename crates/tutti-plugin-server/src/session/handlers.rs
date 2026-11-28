@@ -16,8 +16,8 @@ use tutti_plugin_ipc::{
     SetSampleRate, SetTrackInfo, SetupSharedMemory, Shutdown, StageState, Stop, Wiring, Working,
 };
 use tutti_plugin_types::{
-    MAX_STATE_BYTES, MidiMapApplied, ParameterQueue, PluginLearnError, PluginRef, ServerError,
-    StateError,
+    MAX_STATE_BYTES, MidiMapApplied, ParameterQueue, PluginLearnError, PluginRef, PresetError,
+    ServerError, StateError,
 };
 
 impl Handle<LoadPlugin> for Session {
@@ -284,12 +284,12 @@ impl Handle<LoadPreset> for Session {
         LoadPreset { id }: LoadPreset,
     ) -> Result<PresetLoaded, ServerError> {
         self.forget_informs();
-        let ok = self
-            .plugin
-            .as_mut()
-            .is_some_and(|p| p.plugin_mut().load_preset(cx.main, &id));
+        let result = match self.plugin.as_mut() {
+            Some(plugin) => plugin.plugin_mut().load_preset(cx.main, &id),
+            None => Err(PresetError::Lost),
+        };
         self.forget_informs();
-        Ok(PresetLoaded { ok })
+        Ok(PresetLoaded { result })
     }
 }
 
