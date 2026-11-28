@@ -276,6 +276,7 @@ fn graph::Graph::node_outputs
 fn graph::Graph::node_tail
 fn graph::Graph::open_event_inlet
 fn graph::Graph::outputs
+fn graph::Graph::reopen_event_inlet
 fn graph::Graph::replace
 fn graph::Graph::replace_plugin
 fn graph::Graph::set_feed

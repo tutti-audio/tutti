@@ -217,7 +217,7 @@ struct PlannedNode<K, F: Float> {
     fate: Fate,
     id: NodeKey,
     /// The queue and strip an instrument's new node gets.
-    parts: Option<NewParts<F>>,
+    parts: Option<NewParts>,
 }
 
 /// A patch's declarations planned: the shapes of the nodes it builds, and the
@@ -532,7 +532,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 planned.shapes.insert(id, built.shape);
             }
             let new_parts = matches!(fate, Fate::Add(_) | Fate::Readd(_))
-                .then(|| declaration.config.played().map(NewParts::new))
+                .then(|| declaration.config.played().map(NewParts::new::<C::Float>))
                 .flatten();
             // A kept key's node keeps its queue and strip.
             let kept_strip = matches!(fate, Fate::Values | Fate::Swap(_))

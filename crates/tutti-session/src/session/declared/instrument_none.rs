@@ -3,7 +3,6 @@
 //! module's twin when the feature is on.
 
 use std::convert::Infallible;
-use std::marker::PhantomData;
 
 use tutti_buffers::Float;
 use tutti_graph::{NodeKey, Shape};
@@ -32,10 +31,14 @@ impl Parts {
 }
 
 /// No declaration makes parts.
-pub(super) struct NewParts<F: Float>(Infallible, PhantomData<F>);
+pub(super) struct NewParts(Infallible);
 
-impl<F: Float> NewParts<F> {
-    pub(super) fn new(_: Amplitude) -> Self {
+impl NewParts {
+    #[allow(
+        clippy::extra_unused_type_parameters,
+        reason = "the call names the graph's float, as the `midi` twin's does"
+    )]
+    pub(super) fn new<F: Float>(_: Amplitude) -> Self {
         unreachable!("a declaration is an instrument only with the `midi` feature")
     }
 
@@ -59,7 +62,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         _: K,
         _: NodeKey,
         _: [u16; 2],
-        new: NewParts<C::Float>,
+        new: NewParts,
     ) {
         match new.0 {}
     }

@@ -5,7 +5,7 @@
 
 use thiserror::Error;
 use tutti_buffers::{ChannelTopology, Float};
-use tutti_graph::{EventInletNode, EventInletWriter, InletCounts, NodeKey, Shape};
+use tutti_graph::{HostValues, InletCounts, NodeKey, Shape};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
 use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_ump::MidiGroup;
@@ -13,8 +13,8 @@ use tutti_units::Amplitude;
 
 use super::Kept;
 use super::wire::Resolved;
-use crate::graph::Split;
-use crate::patch::Fading;
+use crate::Graph;
+use crate::patch::{Built, Fading, Place};
 use crate::{AnyAssign, AppKey, Clock, EventInputPort, Key, OutputPort, ReplaceRefused, Session};
 
 /// Who plays an instrument: its keys wait in the session until taken, and a
@@ -54,26 +54,20 @@ impl Parts {
     }
 }
 
-/// The parts a declaration makes new, built once in the plan.
-pub(super) struct NewParts<F: Float> {
-    queue: NodeKey,
-    inlet: EventInletNode,
-    writer: EventInletWriter,
+/// The parts a declaration makes new: the strip, built once in the plan. The
+/// queue is opened where the node is placed.
+pub(super) struct NewParts {
     strip: NodeKey,
-    split: Split<BusStripNode, F>,
+    built: Built,
 }
 
-impl<F: Float> NewParts<F> {
-    /// A queue and a stereo strip at `gain`, with keys no node holds.
-    pub(super) fn new(gain: Amplitude) -> Self {
-        let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
+impl NewParts {
+    /// A stereo strip at `gain`, under a key no node holds.
+    pub(super) fn new<F: Float>(gain: Amplitude) -> Self {
         let config = BusStripConfig::new(ChannelTopology::STEREO).volume(gain);
         Self {
-            queue: NodeKey::fresh(),
-            inlet,
-            writer,
             strip: NodeKey::fresh(),
-            split: Split::of(BusStripNode::from(config)),
+            built: <Graph<F> as Place<BusStripConfig>>::build(&config, &HostValues::new()),
         }
     }
 
@@ -84,7 +78,7 @@ impl<F: Float> NewParts<F> {
     /// The strip's shape, which the wires named after the instrument are
     /// checked against.
     pub(super) fn shape(&self) -> Shape {
-        self.split.shape()
+        self.built.shape
     }
 
     /// The wires from `node`'s main pair into the strip.
@@ -161,9 +155,9 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         }
         // The keys were dropped: a new queue takes the old one's place, wired
         // as it was.
-        let (inlet, writer) = EventInletNode::pair(LIVE_INLET_CAPACITY);
-        self.graph
-            .replace_split(parts.queue, Split::of(inlet), None)
+        let writer = self
+            .graph
+            .reopen_event_inlet(Key::new(parts.queue), LIVE_INLET_CAPACITY)
             .map_err(|refused| LeaseError::Replace(key.clone(), refused))?;
         parts.writer = writer.counts();
         Ok(MidiKeys::new(writer, MidiGroup::FIRST))
@@ -178,24 +172,18 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         key: K,
         node: NodeKey,
         main: [u16; 2],
-        new: NewParts<C::Float>,
+        new: NewParts,
     ) {
-        let NewParts {
-            queue,
-            inlet,
-            writer,
-            strip,
-            split,
-        } = new;
+        let NewParts { strip, built } = new;
+        let (queue, writer) = self.graph.open_event_inlet(LIVE_INLET_CAPACITY);
         let writer_view = writer.counts();
-        self.graph.add_split(queue, Split::of(inlet));
-        self.graph.add_split(strip, split);
-        let queue_out = Key::<EventInletNode>::new(queue).event_output(0);
+        <Graph<C::Float> as Place<BusStripConfig>>::add(&mut self.graph, strip, built);
+        let queue_out = queue.event_output(0);
         self.graph
             .add_event_edge(queue_out, EventInputPort::new(node, 0), None)
             .expect("an instrument's event input was checked in the plan");
         let parts = Parts {
-            queue,
+            queue: queue.erase(),
             strip,
             main,
             keys: Lease::Held(MidiKeys::new(writer, MidiGroup::FIRST)),

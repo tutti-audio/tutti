@@ -1102,6 +1102,26 @@ impl<F: Float> Graph<F> {
         (self.add(node), writer)
     }
 
+    /// Replaces the event inlet at `inlet` with a new one of `capacity`, wired
+    /// as the old one was, and returns the new inlet's writer. The old inlet's
+    /// writer is disconnected: a push through it reports
+    /// [`PushError::Disconnected`](tutti_rt::PushError::Disconnected) once the
+    /// old node has left the graph.
+    ///
+    /// # Errors
+    ///
+    /// [`ReplaceRefused`] as [`replace`](Self::replace): the graph is poisoned
+    /// or the inlet is not in it; nothing changes.
+    pub fn reopen_event_inlet(
+        &mut self,
+        inlet: Key<EventInletNode>,
+        capacity: EventCapacity,
+    ) -> Result<EventInletWriter, ReplaceRefused> {
+        let (node, writer) = EventInletNode::pair(capacity);
+        self.replace(inlet, Replacement::new(node))?;
+        Ok(writer)
+    }
+
     /// The table the node's params are addressed in: the session's value
     /// state shares it.
     pub(crate) fn value_table(&self) -> Arc<ValueTable> {
