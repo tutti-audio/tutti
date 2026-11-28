@@ -94,10 +94,6 @@ use crate::{
 /// by default.
 pub const LIVE_MAX_BLOCK: MaxBlock = MaxBlock::of(Samples::new(1024));
 
-/// The spec `kind` of a hosted plugin.
-#[cfg(feature = "plugin")]
-const PLUGIN_KIND: &str = "tutti-session:plugin";
-
 /// A node to swap in at a key, and the fade it swaps in over:
 /// [`Graph::replace`]'s argument, and `Graph::replace_plugin`'s (feature
 /// `plugin`) with a `Box<PluginClient>`.
@@ -982,7 +978,7 @@ impl<F: Float> Graph<F> {
 
     /// Puts `split` in the editor under `id`, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half.
-    pub(crate) fn place<N: IntoNode<F>>(
+    fn place<N: IntoNode<F>>(
         &mut self,
         id: NodeKey,
         split: Split<N, F>,
@@ -1178,7 +1174,6 @@ impl Graph {
         &mut self,
         client: Box<tutti_plugin::PluginClient>,
     ) -> (Key<crate::AnyPlugin>, tutti_plugin::catalog::PluginRebinder) {
-        let node = NodeKey::fresh();
         let hosted = crate::plugin::HostedPlugin::served(
             client.handle(),
             client.plugin().clone(),
@@ -1188,10 +1183,7 @@ impl Graph {
         let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
-        // A fresh key has no wiring recorded, so nothing is unwired.
-        let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
-        self.nodes.insert(node, Entry { controls: None });
-        self.note_pass(node);
+        let node = self.add_split(NodeKey::fresh(), Split::of(bound)).erase();
         self.plugins.insert(node, hosted);
         self.provide_plugin(node);
         self.write_own_bypass(node);
