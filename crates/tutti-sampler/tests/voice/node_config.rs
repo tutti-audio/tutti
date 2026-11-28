@@ -174,7 +174,7 @@ fn assert_initials_are_the_built_nodes(
 }
 
 /// A file's stream: its handle and the live voice over it, at `beat`.
-fn stream_over(
+pub(super) fn stream_over(
     path: &std::path::Path,
     beat: f64,
 ) -> (

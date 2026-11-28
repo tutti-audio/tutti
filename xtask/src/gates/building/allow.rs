@@ -494,6 +494,24 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a play's gain is finite (no single value's type holds it) and the stream's voice is a width the sampler runs: the voice's channel count is a runtime value",
     ),
     ty(
+        "crates/tutti-sampler/src/voice/table.rs",
+        "VoicePoolConfig::new",
+        CTOR,
+        "the width is a runtime channel layout the sampler must be able to run a voice at (`voice_width`): no single value's type holds it",
+    ),
+    ty(
+        "crates/tutti-sampler/src/voice/table.rs",
+        "VoicePoolConfig::row",
+        &[Rule::ChainResult],
+        "a row's key is free and the rows still fit the voices: both depend on the rows already added, which no one argument's type holds",
+    ),
+    ty(
+        "crates/tutti-sampler/src/voice/table.rs",
+        "VoicePoolConfig::voices",
+        &[Rule::ChainResult],
+        "the voices must cover the rows already added: a check over the config's state, which the count's type cannot carry",
+    ),
+    ty(
         "crates/tutti-sampler/",
         "DiskStreamer::manual",
         CTOR,

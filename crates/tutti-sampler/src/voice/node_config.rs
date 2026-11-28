@@ -20,6 +20,7 @@ use super::node::{
     apply_loop, apply_speed,
 };
 use super::node_controls::{Steering, StreamHold};
+use super::slot::stretch_wanted;
 use super::types::{PlayDirection, Playback, Voice, VoiceSource};
 use crate::SamplerFloat;
 use crate::streamer::StreamHandle;
@@ -125,6 +126,16 @@ impl<F: SamplerFloat, D: Drive> VoiceNodeConfig<F, D> {
             steering: Steering::default(),
             drive: PhantomData,
         }
+    }
+
+    /// This config with its stretch and pitch at their defaults, and the
+    /// stretch and pitch it asked for when they ask for a vocoder: what a
+    /// pool's row keeps apart.
+    pub(crate) fn split_stretch(mut self) -> (Self, Option<(StretchFactor, Cents)>) {
+        let stretch = stretch_wanted(&self.play).then_some((self.play.stretch, self.play.pitch));
+        self.play.stretch = StretchFactor::UNITY;
+        self.play.pitch = Cents::new(0.0);
+        (self, stretch)
     }
 
     /// This config at varispeed `speed`.

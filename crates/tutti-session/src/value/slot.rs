@@ -69,6 +69,9 @@ pub enum SlotId {
     /// A sampler voice's varispeed.
     #[cfg(feature = "sampler")]
     Speed(NodeKey),
+    /// The voices of a sampler pool.
+    #[cfg(feature = "sampler")]
+    VoiceTable(NodeKey),
     /// How a modulation route maps its source's value onto its span.
     RoutePolarity(ShapeKey),
     /// The law that shapes a modulation route's value.
@@ -140,7 +143,11 @@ impl SlotId {
             #[cfg(feature = "midi")]
             Self::MpeMode | Self::ClipEvents(_) | Self::Harmony(_) => true,
             #[cfg(feature = "sampler")]
-            Self::Window(_) | Self::Looping(_) | Self::Direction(_) | Self::Speed(_) => true,
+            Self::Window(_)
+            | Self::Looping(_)
+            | Self::Direction(_)
+            | Self::Speed(_)
+            | Self::VoiceTable(_) => true,
         }
     }
 
@@ -157,7 +164,8 @@ impl SlotId {
             Self::Window(node)
             | Self::Looping(node)
             | Self::Direction(node)
-            | Self::Speed(node) => Some(node),
+            | Self::Speed(node)
+            | Self::VoiceTable(node) => Some(node),
             #[cfg(feature = "midi-hardware")]
             Self::Mpe11((node, _)) => Some(node),
             #[cfg(feature = "plugin")]
@@ -1034,6 +1042,18 @@ macro_rules! published_kinds {
             answer = answer.or_else(|| {
                 type $kind = tutti_sampler::SpeedKind;
                 let $id: fn(NodeKey) -> SlotId = SlotId::Speed;
+                (|| $body)()
+            });
+            // A pool's voices, at each float a session runs in: one slot, the
+            // value type of the kind the node published.
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::VoiceTableKind<f32>;
+                let $id: fn(NodeKey) -> SlotId = SlotId::VoiceTable;
+                (|| $body)()
+            });
+            answer = answer.or_else(|| {
+                type $kind = tutti_sampler::VoiceTableKind<f64>;
+                let $id: fn(NodeKey) -> SlotId = SlotId::VoiceTable;
                 (|| $body)()
             });
         }
