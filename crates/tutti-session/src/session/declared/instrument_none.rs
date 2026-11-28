@@ -9,8 +9,8 @@ use tutti_units::Amplitude;
 
 use super::Kept;
 use super::wire::Resolved;
-use crate::SessionFloat;
 use crate::patch::Fading;
+use crate::patch::PatchFloat;
 use crate::{AnyAssign, AppKey, Clock, Session};
 
 /// No instrument has parts.
@@ -38,7 +38,7 @@ impl NewParts {
         clippy::extra_unused_type_parameters,
         reason = "the call names the graph's float, as the `midi` twin's does"
     )]
-    pub(super) fn new<F: SessionFloat>(_: Amplitude) -> Self {
+    pub(super) fn new<F: PatchFloat>(_: Amplitude) -> Self {
         unreachable!("a declaration is an instrument only with the `midi` feature")
     }
 

@@ -12,14 +12,14 @@ use tutti_units::Samples;
 use super::instrument::Parts;
 use super::wire::{KeptWire, Ports, Resolved};
 use super::{Kept, PatchError, Planned};
-use crate::SessionFloat;
 use crate::key::BusEnd;
+use crate::patch::PatchFloat;
 use crate::patch::{WireEnds, WireId};
 use crate::{AppKey, BusInputPort, ConnectError, EventInputPort, Graph, OutputPort};
 
 /// Refuses what the declared nodes and wires cannot make, with nothing changed,
 /// and names the edges leaving the graph that would close a cycle with them.
-pub(super) fn check<K: AppKey, F: SessionFloat>(
+pub(super) fn check<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,
@@ -79,7 +79,7 @@ fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
 
 /// Refuses an instrument whose node lacks the ports the session wires: an
 /// event input for its queue and the two outputs of its main pair.
-fn ports<K: AppKey, F: SessionFloat>(planned: &Planned<K, F>) -> Result<(), PatchError<K>> {
+fn ports<K: AppKey, F: PatchFloat>(planned: &Planned<K, F>) -> Result<(), PatchError<K>> {
     for p in &planned.nodes {
         let Some(built) = p.plan.built() else {
             continue;
@@ -109,7 +109,7 @@ fn ports<K: AppKey, F: SessionFloat>(planned: &Planned<K, F>) -> Result<(), Patc
 }
 
 /// Refuses a wire the declared nodes cannot make, with nothing changed.
-fn wires<K: AppKey, F: SessionFloat>(
+fn wires<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,
@@ -151,7 +151,7 @@ fn wires<K: AppKey, F: SessionFloat>(
 
 /// Refuses a feedback wire the graph would not compile, and a wire that
 /// puts a second edge on ports that hold one, with nothing changed.
-fn feedback<K: AppKey, F: SessionFloat>(
+fn feedback<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,
@@ -212,7 +212,7 @@ fn feedback<K: AppKey, F: SessionFloat>(
 /// search. An edge that leaves (dropped by this patch, or still fading)
 /// and closes a cycle is cut; a cycle left through live wires is the
 /// patch's.
-fn acyclic<K: AppKey, F: SessionFloat>(
+fn acyclic<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,

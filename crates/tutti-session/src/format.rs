@@ -7,13 +7,7 @@ use crate::{AppKey, Clock, PhaseCx, Session, SessionEvent};
 
 /// The steps of an update that depend on the session's float format: the
 /// ones that serve and land the hosted plugins, which are `f32` at their FFI.
-pub trait Sealed: tutti_rt::RingFloat {
-    /// What a plugin node is declared as in a patch over a graph of this
-    /// float: the held plugin for `f32`, an empty type for `f64`.
-    #[doc(hidden)]
-    #[cfg(feature = "plugin")]
-    type DeclaredPlugin: crate::patch::HoldsPlugin + Send;
-
+pub trait Sealed: tutti_rt::RingFloat + crate::patch::PatchFloat {
     /// Serves the hosted plugins in `Phase::Plugins`: only an `f32` session
     /// hosts plugins, so an `f64` one has nobody to serve.
     #[doc(hidden)]
@@ -34,7 +28,7 @@ pub trait Sealed: tutti_rt::RingFloat {
     #[cfg(feature = "plugin")]
     fn install_declared<K: AppKey, C: Clock<Float = Self>>(
         session: &mut Session<K, C>,
-        declared: &Self::DeclaredPlugin,
+        declared: &<Self as crate::patch::PatchFloat>::Plugin,
     ) -> crate::Key<crate::AnyPlugin>;
 
     /// Swaps the plugin at `node` for the declared one, as `install_declared`
@@ -48,7 +42,7 @@ pub trait Sealed: tutti_rt::RingFloat {
     fn swap_declared<K: AppKey, C: Clock<Float = Self>>(
         session: &mut Session<K, C>,
         node: tutti_graph::NodeKey,
-        declared: &Self::DeclaredPlugin,
+        declared: &<Self as crate::patch::PatchFloat>::Plugin,
     ) -> Result<(), crate::ReplaceRefused>;
 
     /// A builder's opener, which serves both floats, as the opener of this one.
@@ -58,9 +52,6 @@ pub trait Sealed: tutti_rt::RingFloat {
 }
 
 impl Sealed for f32 {
-    #[cfg(feature = "plugin")]
-    type DeclaredPlugin = crate::patch::PluginHeld;
-
     #[cfg(feature = "capture")]
     fn upcast_opener(opener: Box<dyn crate::input::Openers>) -> Box<dyn crate::InputOpener<f32>> {
         opener
@@ -105,9 +96,6 @@ impl Sealed for f32 {
 }
 
 impl Sealed for f64 {
-    #[cfg(feature = "plugin")]
-    type DeclaredPlugin = std::convert::Infallible;
-
     #[cfg(feature = "capture")]
     fn upcast_opener(opener: Box<dyn crate::input::Openers>) -> Box<dyn crate::InputOpener<f64>> {
         opener

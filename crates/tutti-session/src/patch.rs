@@ -290,6 +290,26 @@ pub trait PatchTarget {
     type Plugin: HoldsPlugin + Send;
 }
 
+/// The float a declared graph runs at, and what a plugin node is declared as
+/// at it: the held plugin for `f32`, whose formats are `f32` at their FFI, and
+/// an empty type for `f64`, so an `f64` patch cannot hold a plugin.
+#[doc(hidden)]
+pub trait PatchFloat: tutti_buffers::Float {
+    /// What a plugin node is declared as at this float.
+    #[cfg(feature = "plugin")]
+    type Plugin: HoldsPlugin + Send;
+}
+
+impl PatchFloat for f32 {
+    #[cfg(feature = "plugin")]
+    type Plugin = PluginHeld;
+}
+
+impl PatchFloat for f64 {
+    #[cfg(feature = "plugin")]
+    type Plugin = std::convert::Infallible;
+}
+
 /// A plugin as a declaration holds it. An empty type implements it for a graph
 /// that hosts no plugin, so a plugin arm over that graph is never entered.
 #[doc(hidden)]
@@ -550,7 +570,7 @@ impl<K> PluginDecl<K> {
     }
 
     /// The declaration this makes.
-    pub(crate) fn declaration(self) -> (K, Declaration<crate::Graph<f32>>) {
+    pub(crate) fn declaration<G: PatchTarget<Plugin = PluginHeld>>(self) -> (K, Declaration<G>) {
         let held = PluginHeld {
             loaded: self.loaded,
             initials: self.initials,

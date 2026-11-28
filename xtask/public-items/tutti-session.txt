@@ -987,6 +987,7 @@ struct patch::Declarations
 struct patch::InstrumentDecl
 struct patch::NodeDecl
 struct patch::PluginDecl
+struct patch::PluginHeld
 struct patch::Sealed
 struct patch::Section
 struct peer::PeerResourceId
@@ -1118,7 +1119,9 @@ trait key::Wire
 trait key::sealed::Sealed
 trait modulation::Ranged
 trait modulation::ranged::Sealed
+trait patch::HoldsPlugin
 trait patch::IntoPatch
+trait patch::PatchFloat
 trait patch::PatchTarget
 trait peer::Peer
 trait peer::Resource

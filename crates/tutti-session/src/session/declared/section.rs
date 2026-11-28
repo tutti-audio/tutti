@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use super::wire::Resolved;
 use super::{Kept, PatchError, Patched};
-use crate::SessionFloat;
 #[cfg(feature = "plugin")]
 use crate::patch::HoldsPlugin;
+use crate::patch::PatchFloat;
 use crate::patch::{
     Body, Declaration, Declarations, Deps, PendingSection, WireDecl, WireEnds, WireId,
 };
@@ -41,7 +41,7 @@ fn subtree<'a, K: Ord>(
     found
 }
 
-impl<K: Ord + Clone, F: SessionFloat> Kept<K, F> {
+impl<K: Ord + Clone, F: PatchFloat> Kept<K, F> {
     /// Replaces the section records: the carried subtrees keep theirs, the
     /// evaluated sections get theirs (in the order they ran, so a section's
     /// inner ones are judged first), and a section the patch does not declare
@@ -84,7 +84,7 @@ impl<K: Ord + Clone, F: SessionFloat> Kept<K, F> {
 
 /// A patch's parts with its sections decided: the parts of the sections that
 /// ran joined to the patch's own, and the sections carried whole.
-pub(super) struct Decided<K, F: SessionFloat> {
+pub(super) struct Decided<K, F: PatchFloat> {
     /// The declarations, each with what it does to its key's node.
     pub(super) nodes: Vec<(K, Declaration<Graph<F>>, Kind)>,
     pub(super) wires: Vec<WireDecl<K>>,
@@ -107,7 +107,7 @@ pub(super) struct Decided<K, F: SessionFloat> {
     declared_at: BTreeMap<K, usize>,
 }
 
-impl<K: AppKey, F: SessionFloat> Decided<K, F> {
+impl<K: AppKey, F: PatchFloat> Decided<K, F> {
     fn new(patch: Declarations<K, Graph<F>>, judge: &Judge<'_, K, F>) -> Self {
         let nodes: Vec<_> = patch
             .nodes
@@ -170,7 +170,7 @@ pub(super) enum Kind {
 }
 
 /// What `declaration` does to the node under `key`, with nothing built.
-pub(super) fn kind<F: SessionFloat, K: AppKey>(
+pub(super) fn kind<F: PatchFloat, K: AppKey>(
     graph: &Graph<F>,
     kept: &Kept<K, F>,
     key: &K,
@@ -207,13 +207,13 @@ pub(super) fn kind<F: SessionFloat, K: AppKey>(
 }
 
 /// What the last patch kept, and the graph a patch is judged against.
-struct Judge<'a, K, F: SessionFloat> {
+struct Judge<'a, K, F: PatchFloat> {
     kept: &'a Kept<K, F>,
     graph: &'a Graph<F>,
 }
 
 /// Decides each section of `patch` against what the last patch kept.
-pub(super) fn decide<K: AppKey, F: SessionFloat>(
+pub(super) fn decide<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     kept: &Kept<K, F>,
     patch: Declarations<K, Graph<F>>,
@@ -221,7 +221,7 @@ pub(super) fn decide<K: AppKey, F: SessionFloat>(
     Judge { kept, graph }.judge(patch)
 }
 
-impl<K: AppKey, F: SessionFloat> Judge<'_, K, F> {
+impl<K: AppKey, F: PatchFloat> Judge<'_, K, F> {
     /// Decides each section of `patch`: carried whole, or run with the parts it
     /// declares joining the patch. A section is carried only while the keys it
     /// mentions stand, and running one can make another's keys fall, so the

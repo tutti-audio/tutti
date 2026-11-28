@@ -17,13 +17,11 @@ use crate::graph::Split;
 #[cfg(feature = "plugin")]
 use crate::patch::HoldsPlugin;
 use crate::patch::{
-    Body, Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place,
-    WireDecl, WireEnds, WireId,
+    Body, Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchFloat, PatchTarget,
+    Place, WireDecl, WireEnds, WireId,
 };
 use crate::value::{declared_param, declared_published, declared_setting};
-use crate::{
-    AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session, SessionFloat,
-};
+use crate::{AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session};
 
 mod check;
 #[cfg(feature = "midi")]
@@ -46,13 +44,13 @@ use wire::{KeptWire, Resolved, Role};
 
 /// The session's graph is where declarations go: a config is built at the
 /// graph's float.
-impl<F: SessionFloat> PatchTarget for Graph<F> {
+impl<F: PatchFloat> PatchTarget for Graph<F> {
     type Refused = ReplaceRefused;
     #[cfg(feature = "plugin")]
-    type Plugin = <F as crate::format::Sealed>::DeclaredPlugin;
+    type Plugin = F::Plugin;
 }
 
-impl<F: SessionFloat, C> Place<C> for Graph<F>
+impl<F: PatchFloat, C> Place<C> for Graph<F>
 where
     C: NodeConfig<F>,
     C::Node: IntoNode<F, Controls: Send + 'static>,
@@ -96,7 +94,7 @@ where
 
 /// The node `config` builds, with the main pair it names.
 #[cfg(feature = "midi")]
-fn build_instrument<F: SessionFloat, C>(config: &C, host: &HostValues) -> Built
+fn build_instrument<F: PatchFloat, C>(config: &C, host: &HostValues) -> Built
 where
     C: NodeConfig<F>,
     C::Node: InstrumentNode<F> + IntoNode<F, Controls: Send + 'static>,
@@ -114,7 +112,7 @@ where
 
 /// A declared instrument is part of a patch over the session's graph.
 #[cfg(feature = "midi")]
-impl<K, F: SessionFloat, C> IntoPatch<K, Graph<F>> for crate::InstrumentDecl<K, C>
+impl<K, F: PatchFloat, C> IntoPatch<K, Graph<F>> for crate::InstrumentDecl<K, C>
 where
     C: NodeConfig<F>,
     C::Node: InstrumentNode<F> + IntoNode<F, Controls: Send + 'static>,
@@ -125,7 +123,7 @@ where
 }
 
 /// The node `C` built, out of its erased form.
-fn split_of<C, F: SessionFloat>(built: Built) -> Split<C::Node, F>
+fn split_of<C, F: PatchFloat>(built: Built) -> Split<C::Node, F>
 where
     C: NodeConfig<F>,
     C::Node: IntoNode<F, Controls: Send + 'static>,
@@ -224,7 +222,7 @@ pub struct Patched<K> {
 
 /// One declaration with what the plan decided: its fate, and the key its node
 /// has (a new key for a new node).
-struct PlannedNode<K, F: SessionFloat, P = Plan> {
+struct PlannedNode<K, F: PatchFloat, P = Plan> {
     key: K,
     declaration: Declaration<Graph<F>>,
     plan: P,
@@ -235,7 +233,7 @@ struct PlannedNode<K, F: SessionFloat, P = Plan> {
 
 /// A patch's declarations planned: the shapes of the nodes it builds, and the
 /// node each key names once it is applied.
-struct Planned<K, F: SessionFloat> {
+struct Planned<K, F: PatchFloat> {
     nodes: Vec<PlannedNode<K, F>>,
     shapes: Shapes,
     at: BTreeMap<K, NodeKey>,
@@ -243,7 +241,7 @@ struct Planned<K, F: SessionFloat> {
     strips: BTreeMap<K, NodeKey>,
 }
 
-impl<K: Ord, F: SessionFloat> Planned<K, F> {
+impl<K: Ord, F: PatchFloat> Planned<K, F> {
     /// The node `key` names at a wire's end.
     fn of(&self, key: &K, role: Role) -> NodeKey {
         match (role, self.strips.get(key)) {
@@ -254,13 +252,13 @@ impl<K: Ord, F: SessionFloat> Planned<K, F> {
 }
 
 /// What a patch declared of one key, and the node it made.
-pub(crate) struct Stored<F: SessionFloat> {
+pub(crate) struct Stored<F: PatchFloat> {
     pub(crate) node: NodeKey,
     pub(crate) declaration: Declaration<Graph<F>>,
 }
 
 /// The declarations of the last patch, by app key. Control side only.
-pub(crate) struct Kept<K, F: SessionFloat> {
+pub(crate) struct Kept<K, F: PatchFloat> {
     nodes: BTreeMap<K, Stored<F>>,
     /// The wires the last patch made, by their ends and delay.
     wires: BTreeMap<WireId<K>, KeptWire>,
@@ -271,7 +269,7 @@ pub(crate) struct Kept<K, F: SessionFloat> {
     instruments: BTreeMap<K, Parts>,
 }
 
-impl<K: Ord, F: SessionFloat> Kept<K, F> {
+impl<K: Ord, F: PatchFloat> Kept<K, F> {
     /// The node `key` names at a wire's end.
     fn at(&self, key: &K, role: Role) -> NodeKey {
         match (role, self.instruments.get(key)) {
@@ -281,7 +279,7 @@ impl<K: Ord, F: SessionFloat> Kept<K, F> {
     }
 }
 
-impl<K, F: SessionFloat> Default for Kept<K, F> {
+impl<K, F: PatchFloat> Default for Kept<K, F> {
     fn default() -> Self {
         Self {
             instruments: BTreeMap::new(),
@@ -393,7 +391,7 @@ impl Plan {
     }
 }
 
-impl<K: fmt::Debug, F: SessionFloat> fmt::Debug for Kept<K, F> {
+impl<K: fmt::Debug, F: PatchFloat> fmt::Debug for Kept<K, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map()
             .entries(self.nodes.iter().map(|(key, s)| (key, s.node)))
@@ -403,7 +401,7 @@ impl<K: fmt::Debug, F: SessionFloat> fmt::Debug for Kept<K, F> {
 
 /// The assignments of what `new` gives that `old` did not give or gave
 /// another value, to the node at `node`, of the node type `owner`.
-fn declared_writes<F: SessionFloat>(
+fn declared_writes<F: PatchFloat>(
     graph: &Graph<F>,
     node: NodeKey,
     owner: TypeId,
