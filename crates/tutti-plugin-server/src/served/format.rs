@@ -50,35 +50,14 @@ pub(crate) trait ServerSide: OutOfProcess + InProcess {
             control.take_requests(main, out);
         }
     }
-
-    /// Delivers the writes the Processor has not drained, so a state save sees
-    /// them: the server serves requests on the thread that renders, so without
-    /// this a save right after a write would read the old value until the next
-    /// block. The default retries what a full edit ring refused, which is all a
-    /// format that applies a write at once needs. Returns how many of the writes
-    /// the plugin refused.
-    fn settle_edits(lifecycle: &mut Lifecycle<Self>, main: MainThreadMarker) -> u64 {
-        if let Some(control) = lifecycle.control() {
-            control.flush_edits(main);
-        }
-        0
-    }
 }
 
 #[cfg(feature = "clap")]
 pub(in crate::served) mod clap {
     use tutti_clap_host::ClapLoaded;
-    use tutti_plugin_types::{Control, Lifecycle, MainThreadMarker, Request, Seat};
+    use tutti_plugin_types::{Lifecycle, MainThreadMarker, Request};
 
     use super::ServerSide;
-
-    /// How many of the plugin's answers to one-way writes are refusals.
-    fn refusals<E>(answers: impl IntoIterator<Item = Result<(), E>>) -> u64 {
-        answers
-            .into_iter()
-            .map(|answer| u64::from(answer.is_err()))
-            .sum()
-    }
 
     /// The pool this process serves `clap.thread-pool` requests on, built the
     /// first time a plugin that implements the extension loads; `None` on a
@@ -145,12 +124,6 @@ pub(in crate::served) mod clap {
         Option<std::sync::Arc<tutti_graph::WorkerPool>>,
     > = std::sync::OnceLock::new();
 
-    /// Whether a pending write may be flushed out of band: not when the parameter
-    /// requires `process` and the plugin is processing.
-    pub(in crate::served) fn flush_out_of_band(requires_process: bool, processing: bool) -> bool {
-        !(requires_process && processing)
-    }
-
     impl ServerSide for ClapLoaded {
         fn adopt(&mut self) {
             if self.supports_thread_pool() {
@@ -172,70 +145,6 @@ pub(in crate::served) mod clap {
                 Lifecycle::Active { controller, .. } => controller.loaded_mut().take_raised(out),
                 Lifecycle::Poisoned => {}
             }
-        }
-
-        /// Each is applied through an out-of-band `params.flush`, except that a
-        /// parameter flagged `REQUIRES_PROCESS` is never flushed while the plugin
-        /// is processing (CLAP wants it in event order, in a block): it goes back
-        /// to the queue. Only what was pending is flushed, at the moment it is
-        /// asked for, so a value the plugin or its editor has since moved is not
-        /// re-asserted by every write.
-        fn settle_edits(lifecycle: &mut Lifecycle<Self>, main: MainThreadMarker) -> u64 {
-            if let Some(control) = lifecycle.control() {
-                control.flush_edits(main);
-            }
-            let mut pending = Vec::new();
-            let processing = match lifecycle {
-                Lifecycle::Active {
-                    seat: Seat::Held(processor),
-                    ..
-                } => {
-                    processor.take_edits(&mut pending);
-                    processor.is_processing()
-                }
-                _ => return 0,
-            };
-            // A write the plugin refuses is not written and is counted: the
-            // wire has no reply to carry the error.
-            refusals(pending.into_iter().filter_map(|(id, value)| {
-                let requires = match &*lifecycle {
-                    Lifecycle::Active { controller, .. } => {
-                        controller.loaded().param_requires_process(main, id)
-                    }
-                    _ => false,
-                };
-                if flush_out_of_band(requires, processing) {
-                    match lifecycle {
-                        Lifecycle::Active { controller, .. } => Some(Control::set_parameter(
-                            controller.loaded_mut(),
-                            main,
-                            id,
-                            value,
-                        )),
-                        _ => None,
-                    }
-                } else {
-                    lifecycle
-                        .control()
-                        .map(|control| control.set_parameter(main, id, value))
-                }
-            }))
-        }
-    }
-    #[cfg(test)]
-    mod tests {
-        use super::refusals;
-
-        /// **Each write the plugin answered with an error is counted, and no
-        /// other**: a flush of three writes of which two were refused is two.
-        #[test]
-        fn a_flush_counts_the_writes_the_plugin_refused() {
-            assert_eq!(
-                refusals([Ok(()), Err("read-only"), Ok(()), Err("unknown")]),
-                2
-            );
-            assert_eq!(refusals::<()>([Ok(()), Ok(())]), 0);
-            assert_eq!(refusals::<()>([]), 0);
         }
     }
 }

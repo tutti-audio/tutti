@@ -20,6 +20,7 @@ use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
+use tutti_rt::Generation;
 
 /// Owned snapshot of the plugin's per-block output. Returned for
 /// non-RT consumers (tests, offline render) via
@@ -343,6 +344,8 @@ impl ClapProcessor {
                 input_events.add_param_changes(param_changes, &table.ranges, table.claims);
             }
         }
+        // The writes this block's drain took, published once the call returns.
+        let drained = self.drain.swept();
         if !note_expressions.is_empty() {
             self.scratch
                 .input_events
@@ -369,7 +372,7 @@ impl ClapProcessor {
 
         self.scratch.output_events.clear();
 
-        self.do_process(audio, num_samples, transport)
+        self.do_process(audio, num_samples, transport, drained)
     }
 
     /// Delivers `changes` between blocks with `clap.params.flush`, the
@@ -390,6 +393,7 @@ impl ClapProcessor {
             }
         }
         self.scratch.input_events.sort_by_time();
+        let drained = self.drain.swept();
         let AudioScratch {
             input_events,
             output_events,
@@ -397,7 +401,7 @@ impl ClapProcessor {
         } = &mut *self.scratch;
         let flushed = self.audio_side.params_flush(&*input_events, output_events);
         if flushed {
-            self.drain.publish_applied();
+            self.drain.publish_applied(drained);
             // What the plugin said while it took them (its own edits and
             // gestures) goes where a block's goes: to the Controller's reports.
             self.report_edits();
@@ -414,6 +418,7 @@ impl ClapProcessor {
         audio: Planar<'_, '_>,
         num_samples: u32,
         transport: Option<&TransportInfo>,
+        drained: Generation,
     ) -> Result<ProcessOutputRef<'_>> {
         let clap_transport = transport.map(build_clap_transport);
         let steady_time = self.scratch.steady_time;
@@ -442,7 +447,7 @@ impl ClapProcessor {
         // The plugin has the values the drain took once its call returned: a
         // call that never reached the plugin leaves them to the next one.
         if matches!(outcome, Ok(_) | Err(ProcessError::PluginReturnedError)) {
-            self.drain.publish_applied();
+            self.drain.publish_applied(drained);
         }
 
         let status = match outcome {
