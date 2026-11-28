@@ -12,15 +12,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Float, Wave};
 use tutti_graph::{
-    Cx, FadeLaw, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
-    param_parts,
+    Cx, FadeLaw, HostValues, Initials, IntoNode, Io, Node, NodeConfig, NodeParts, ParamNode,
+    ParamSet, Prepare, Shape, Shared, Status, param_parts,
 };
 use tutti_rt::{Param, Param64};
-use tutti_units::UnitParam;
 use tutti_units::{
     Amplitude, Beat, BeatDuration, PlaybackRate, ReadRate, SamplePosition, SampleRate, Samples,
     SrcRatio, StretchFactor, Tail,
 };
+use tutti_units::{UnitAddr, UnitParam};
 
 use super::clock::{BlockClock, Clock};
 use super::command::GainError;
@@ -77,46 +77,139 @@ impl Default for VoiceWindow {
     }
 }
 
-/// Configuration for building a [`MemorySource`], passed to
-/// [`MemorySource::with_config`]. Matches tutti's config-struct constructor
-/// convention (`PolySynth::from(SynthConfig)`, `OfflineTimeline::new(..)`).
+/// What a [`MemorySource`] is made from: the decoded wave, the width it is placed
+/// into, and what differs from the defaults: [`gain`](Self::gain),
+/// [`speed`](Self::speed), [`looped`](Self::looped) and [`window`](Self::window).
+/// Convert it with `MemorySource::from`, which cannot fail: [`new`](Self::new) has
+/// checked the wave against the width.
 ///
-/// `Default` yields the same audible baseline as [`MemorySource::new`]: unity
-/// gain, normal speed, one-shot, free-running. It is hand-written (not
-/// derived) because the newtypes default to zero — a derived default would ship
-/// silent (`gain = 0`) and frozen (`speed = 0`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct MemorySourceConfig {
-    /// Linear output gain, applied as one scalar to every channel.
-    /// `Amplitude::new(1.0)` is unity — the `Default` value, and not the
-    /// newtype's own zero default, which would ship silent.
-    pub gain: Amplitude,
-    /// Varispeed. Bounded by [`PlaybackRate`]'s own constructor;
-    /// [`PlaybackRate::UNITY`] is normal speed and the `Default`. Composes with
-    /// the sample-rate conversion through
-    /// [`PlaybackRate::read_rate`](tutti_units::PlaybackRate::read_rate), never
-    /// by a bare multiply.
-    pub speed: PlaybackRate,
-    /// The loop; `None` plays once.
-    pub loop_: Option<Loop>,
-    /// The window of the timeline the source plays, read against the
-    /// transport from each block's `Env`. `None` leaves it free-running
-    /// (audition / one-shot).
-    pub placement: Option<VoiceWindow>,
-    /// Output width. Defaults to stereo — see [`MemorySource::channels`] for why
-    /// this is declared rather than taken from the wave.
-    pub channels: ChannelLayout,
+/// The defaults are the audible baseline: unity gain, normal speed, one-shot,
+/// free-running.
+///
+/// The gain is the node's param ([`UnitParam::Volume`]): a change of it is a write
+/// to the running node. Everything else is structure, and the wave is compared by
+/// identity ([`Shared`]).
+///
+/// ```
+/// use std::sync::Arc;
+/// use tutti_buffers::ChannelLayout;
+/// use tutti_sampler::{MemorySource, MemorySourceConfig, Wave};
+/// use tutti_units::{Amplitude, SampleRate};
+///
+/// let wave = Wave::<f32>::new(2, SampleRate::SR_48K);
+/// let config = MemorySourceConfig::new(Arc::new(wave), ChannelLayout::STEREO)
+///     .expect("a stereo wave places")
+///     .gain(Amplitude::new(0.5));
+/// let source = MemorySource::from(config);
+/// ```
+#[derive(Clone, PartialEq)]
+pub struct MemorySourceConfig<F: Float> {
+    pub(crate) wave: Shared<Wave<F>>,
+    pub(crate) channels: ChannelLayout,
+    /// Where the wave's channels go in a frame of `channels`: what `new` checked.
+    place: Place<F>,
+    gain: Amplitude,
+    speed: PlaybackRate,
+    loop_: Option<Loop>,
+    window: Option<VoiceWindow>,
 }
 
-impl Default for MemorySourceConfig {
-    fn default() -> Self {
-        Self {
+impl<F: Float> MemorySourceConfig<F> {
+    /// A config over `wave`, placed into `channels` wide, at unity gain and normal
+    /// speed, playing once and free-running. An `Arc` is shared rather than copied.
+    ///
+    /// The width is the node's audio outputs, declared here rather than taken from the
+    /// wave: a node whose arity followed its content would re-arity itself in the
+    /// graph the moment a wider file was loaded, and edges are wired against its
+    /// shape. The wave's own channels are placed into it by the wave's
+    /// [`topology`](Wave::topology) (a mono wave is the centre or the front pair).
+    /// Control side: it builds the fold from the wave's topology to the width.
+    ///
+    /// # Errors
+    ///
+    /// [`PlaceError`] for a wave with a channel no speaker names (a second LFE, a wide
+    /// or high speaker), or one the frame has no place for, and for a width the
+    /// sampler cannot run a voice at ([`voice_width`](crate::voice_width)).
+    pub fn new(
+        wave: impl Into<Shared<Wave<F>>>,
+        channels: impl Into<ChannelLayout>,
+    ) -> Result<Self, PlaceError> {
+        let wave = wave.into();
+        let channels = crate::voice_width(channels.into())?;
+        let place = Place::for_wave(&wave, channels)?;
+        Ok(Self {
+            wave,
+            channels,
+            place,
             gain: Amplitude::new(1.0),
             speed: PlaybackRate::UNITY,
             loop_: None,
-            placement: None,
-            channels: ChannelLayout::STEREO,
-        }
+            window: None,
+        })
+    }
+
+    /// This config at linear output `gain`, applied as one scalar to every channel.
+    #[must_use]
+    pub fn gain(mut self, gain: Amplitude) -> Self {
+        self.gain = gain;
+        self
+    }
+
+    /// This config at varispeed `speed`. It composes with the sample-rate conversion
+    /// through [`PlaybackRate::read_rate`], never by a bare multiply.
+    #[must_use]
+    pub fn speed(mut self, speed: PlaybackRate) -> Self {
+        self.speed = speed;
+        self
+    }
+
+    /// This config looping over `looped`, with its crossfade.
+    #[must_use]
+    pub fn looped(mut self, looped: Loop) -> Self {
+        self.loop_ = Some(looped);
+        self
+    }
+
+    /// This config playing the window of the timeline `window`, read against the
+    /// transport from each block's `Env`.
+    #[must_use]
+    pub fn window(mut self, window: VoiceWindow) -> Self {
+        self.window = Some(window);
+        self
+    }
+}
+
+// Hand-written: a `Wave` is not `Debug`. Prints the wave's length and the options.
+impl<F: Float> std::fmt::Debug for MemorySourceConfig<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemorySourceConfig")
+            .field("wave_frames", &self.wave.len())
+            .field("channels", &self.channels)
+            .field("gain", &self.gain)
+            .field("speed", &self.speed)
+            .field("loop", &self.loop_)
+            .field("window", &self.window)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A source's config is its structure and the starting value of its gain; a change of
+/// the gain is a write to the running source, any other field builds a new one.
+impl<F: Float> NodeConfig<F> for MemorySourceConfig<F> {
+    type Node = MemorySource<F>;
+
+    fn build(&self, _: &HostValues) -> MemorySource<F> {
+        MemorySource::from(self.clone())
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        let mut with_other_values = self.clone();
+        with_other_values.gain = other.gain;
+        with_other_values == *other
+    }
+
+    fn initials(&self) -> Initials {
+        Initials::new().param(UnitAddr::first(UnitParam::Volume), self.gain.get())
     }
 }
 
@@ -283,105 +376,41 @@ impl<F: Float> Clone for MemorySource<F> {
     }
 }
 
-impl<F: Float> MemorySource<F> {
-    /// A stereo sampler over `wave`.
-    ///
-    /// Stays stereo even for a wider wave — see [`channels`](Self::channels).
-    /// Use [`with_channels`](Self::with_channels) to declare a different width.
-    ///
-    /// # Errors
-    ///
-    /// As [`with_channels`](Self::with_channels).
-    pub fn new(wave: Arc<Wave<F>>) -> Result<Self, PlaceError> {
-        Self::with_channels(wave, ChannelLayout::STEREO)
-    }
-
-    /// A `channels`-wide sampler over `wave`, refusing a wave that cannot be
-    /// placed.
-    ///
-    /// The wave's own channels are placed into this width by
-    /// `read_frame`'s channel policy (mono is the
-    /// centre or the front pair, anything else by its
-    /// [`topology`](Wave::topology)). Control side: it builds the fold from
-    /// the wave's topology to the source's width.
-    ///
-    /// # Errors
-    ///
-    /// [`PlaceError`] for a wave with a channel no speaker names (a second
-    /// LFE, a wide or high speaker), or one the frame has no place for, and
-    /// for a width the sampler cannot run a voice at
-    /// ([`voice_width`](crate::voice_width)).
-    pub fn with_channels(
-        wave: Arc<Wave<F>>,
-        channels: impl Into<ChannelLayout>,
-    ) -> Result<Self, PlaceError> {
-        let channels = crate::voice_width(channels.into())?;
-        let channel_place = Place::for_wave(&wave, channels)?;
-        let sample_rate = wave.sample_rate();
-        Ok(Self {
-            wave,
+/// A source over the config's wave, playing from its start.
+///
+/// The config's `new` has checked the wave against the width, so this cannot fail. A
+/// `loop_` loops with its crossfade (via [`set_loop`](MemorySource::set_loop)).
+impl<F: Float> From<MemorySourceConfig<F>> for MemorySource<F> {
+    fn from(config: MemorySourceConfig<F>) -> Self {
+        let sample_rate = config.wave.sample_rate();
+        let mut source = Self {
+            wave: Arc::clone(config.wave.arc()),
             position: Param64::new(SamplePosition::new(0.0)),
             playing: AtomicBool::new(true),
-            gain: Param::new(Amplitude::new(1.0)),
+            gain: Param::new(config.gain),
             driven_gain: None,
-            speed: PlaybackRate::UNITY,
+            speed: config.speed,
             sample_rate,
             src_ratio: SrcRatio::UNITY,
             loop_: None,
-            placement: None,
+            placement: config.window,
             looped: AtomicBool::new(false),
             clock: Clock::new(),
-            channels,
-            channel_place,
+            channels: config.channels,
+            channel_place: config.place,
             positions: Vec::new(),
             gather: Gather::empty(),
             tail: Vec::new(),
-        })
+        };
+        source.set_loop(config.loop_);
+        source
     }
+}
 
+impl<F: Float> MemorySource<F> {
     /// Output width — the node's audio outputs.
     pub fn channels(&self) -> ChannelLayout {
         self.channels
-    }
-
-    /// Creates a source from an explicit [`MemorySourceConfig`] — the canonical
-    /// configurable constructor, matching tutti's `X::new(XConfig)` convention.
-    ///
-    /// A `loop_` loops with its crossfade (via [`set_loop`](Self::set_loop)).
-    ///
-    /// # Errors
-    ///
-    /// As [`with_channels`](Self::with_channels).
-    pub fn with_config(wave: Arc<Wave<F>>, config: MemorySourceConfig) -> Result<Self, PlaceError> {
-        let mut unit = Self {
-            gain: Param::new(config.gain),
-            speed: config.speed,
-            placement: config.placement,
-            ..Self::with_channels(wave, config.channels)?
-        };
-        unit.set_loop(config.loop_);
-        Ok(unit)
-    }
-
-    /// Convenience constructor for the common placed voice: on the
-    /// transport at `window`, everything else default.
-    ///
-    /// Equivalent to `with_config(wave, MemorySourceConfig { placement:
-    /// Some(window), ..Default::default() })`, and it exists because it reads better
-    /// at the timeline call sites — the same reason tutti-polysynth keeps
-    /// convenience constructors alongside its config one.
-    ///
-    /// # Errors
-    ///
-    /// As [`with_channels`](Self::with_channels).
-    pub fn placed(wave: Arc<Wave<F>>, window: VoiceWindow) -> Result<Self, PlaceError> {
-        Self::with_config(
-            wave,
-            MemorySourceConfig {
-                placement: Some(window),
-                ..Default::default()
-            },
-        )
     }
 
     /// Places the source on the transport at `window`, or moves its window.

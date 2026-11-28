@@ -14,6 +14,7 @@
 //! somewhere else.
 
 use tutti_graph::testing::WireDeclared;
+use tutti_sampler::testing::placed_source;
 
 use tutti_buffers::Mono;
 use tutti_graph::EdgeId;
@@ -47,7 +48,7 @@ fn ramp_wave() -> Arc<Wave> {
 }
 
 fn placed() -> MemorySource<f32> {
-    MemorySource::placed(ramp_wave(), VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave")
+    placed_source(ramp_wave(), VoiceWindow::from(Beat::new(0.0)))
 }
 
 fn prepare() -> Prepare {

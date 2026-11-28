@@ -66,7 +66,8 @@
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::{Prepare, Renderer};
 //! use tutti_buffers::Interleaved;
-//! use tutti_sampler::{MemorySource, Wave};
+//! use tutti_buffers::ChannelLayout;
+//! use tutti_sampler::{MemorySource, MemorySourceConfig, Wave};
 //!
 //! // 100 stereo frames; `append` takes one frame, not one sample.
 //! let mut wave = Wave::new(2, SampleRate::SR_44K1);
@@ -75,7 +76,9 @@
 //! }
 //!
 //! // Free-running (not placed on the transport), so it plays once started.
-//! let source = MemorySource::new(Arc::new(wave)).expect("a stereo wave places");
+//! let config = MemorySourceConfig::new(Arc::new(wave), ChannelLayout::STEREO)
+//!     .expect("a stereo wave places");
+//! let source = MemorySource::from(config);
 //! source.play();
 //!
 //! // No audio input: the voice is the source. Stereo out.
@@ -185,7 +188,7 @@ pub(crate) fn nonempty(layout: tutti_buffers::ChannelLayout) -> tutti_buffers::C
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-// The resident buffer every voice constructor takes (`MemorySource::new`,
+// The resident buffer every voice constructor takes (`MemorySourceConfig::new`,
 // `Voice`'s memory tier) is a `tutti-buffers` type. Re-exported so a consumer building
 // a voice needs no direct `tutti-buffers` dependency.
 pub use tutti_buffers::Wave;

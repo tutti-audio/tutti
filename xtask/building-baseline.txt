@@ -196,10 +196,6 @@ tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::str
 tutti-sampler  node-ctor  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_channels
 tutti-sampler  ctor-result  crates/tutti-sampler/src/clip.rs::Clip::new
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/loop_span.rs::Loop::new
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::new
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::placed
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_channels
-tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/memory_source.rs::MemorySource::with_config
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/node.rs::VoiceNode::new
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/node.rs::VoiceNode::streaming
 tutti-sampler  ctor-result  crates/tutti-sampler/src/voice/node.rs::VoiceNode::with_channels
@@ -287,7 +283,6 @@ tutti-plugin-ipc  pub-field-config  crates/tutti-plugin-ipc/src/config/audio.rs:
 tutti-plugin-types  pub-field-config  crates/tutti-plugin-types/src/measured.rs::ProbeConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/config.rs::BufferConfig
 tutti-sampler  pub-field-config  crates/tutti-sampler/src/streamer/mod.rs::DiskStreamerConfig
-tutti-sampler  pub-field-config  crates/tutti-sampler/src/voice/memory_source.rs::MemorySourceConfig
 tutti-session  pub-field-config  crates/tutti-session/src/input.rs::InputConfig
 tutti-timeline  pub-field-config  crates/tutti-timeline/src/offline.rs::OfflineTimelineConfig
 tutti-voicing  pub-field-config  crates/tutti-voicing/src/voicing.rs::VoiceConfig

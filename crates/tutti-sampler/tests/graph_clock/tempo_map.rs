@@ -29,6 +29,7 @@
 //! largest source frame read here).
 
 use tutti_graph::testing::WireDeclared;
+use tutti_sampler::testing::{free_source, placed_source};
 
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
@@ -43,7 +44,7 @@ use tutti_engine::Engine;
 use tutti_graph::{
     Editor, NodeKey, OutputPort, PortSource, Prepare, TransportChanges, TransportPosition,
 };
-use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
+use tutti_sampler::{Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{MotionCommand, Transport};
 use tutti_units::{Beat, BeatDuration, Bpm, Cents, SampleRate, Samples, StretchFactor};
@@ -132,14 +133,13 @@ fn render(
     ));
     match voice {
         Some((start, duration)) => {
-            let source = MemorySource::placed(
+            let source = placed_source(
                 wave,
                 match duration {
                     Some(d) => VoiceWindow::span(Beat::new(start), BeatDuration::new(d)),
                     None => VoiceWindow::from(Beat::new(start)),
                 },
-            )
-            .expect("a placeable wave");
+            );
             let mut pool = VoicePool::new();
             pool.insert(SlotId(1), source, Playback::default())
                 .expect("a finite gain and a nonempty width");
@@ -148,7 +148,7 @@ fn render(
         // Free-running: a node of its own, from its first frame, at its own
         // speed, on no window.
         None => {
-            let source = MemorySource::new(wave).expect("a placeable wave");
+            let source = free_source(wave);
             source.trigger();
             ed.insert(NodeKey(1), "voice", source);
         }
@@ -288,8 +288,7 @@ fn a_block_lent_no_map_places_a_clip_by_the_transports_tempo() {
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
-        .expect("a placeable wave");
+    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)));
     let mut pool = VoicePool::new();
     pool.insert(SlotId(1), source, Playback::default())
         .expect("a finite gain and a nonempty width");
@@ -380,8 +379,7 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
-    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
-        .expect("a placeable wave");
+    let source = placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)));
     let pool = VoicePool::new();
     // The handle the insert hands back is the pool's live one.
     let handle = ed.insert(NodeKey(1), "voice", pool).controls;

@@ -15,10 +15,10 @@ use std::sync::Arc;
 
 use tutti_buffers::{Interleaved, Planes, Wave};
 use tutti_graph::contract;
-use tutti_sampler::testing::{MockTransport, wait_for_open};
+use tutti_sampler::testing::{MockTransport, placed_source, wait_for_open};
 use tutti_sampler::{
-    DiskStreamer, DiskVoice, Manual, MemorySource, Playback, SlotId, StepOutcome, StreamHandle,
-    StreamStart, VoicePool, VoicePoolHandle, VoiceWindow,
+    DiskStreamer, DiskVoice, Manual, Playback, SlotId, StepOutcome, StreamHandle, StreamStart,
+    VoicePool, VoicePoolHandle, VoiceWindow,
 };
 use tutti_units::{
     Beat, BeatDuration, Bpm, Cents, PlaybackRate, SamplePosition, SampleRate, StretchFactor,
@@ -118,8 +118,7 @@ fn a_memory_voice_sounds_from_the_frame_its_beat_falls_on() {
         handle
             .add(
                 SlotId(1),
-                MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
-                    .expect("a placeable wave"),
+                placed_source(Arc::new(wave), VoiceWindow::from(Beat::new(1.0))),
                 play(speed),
             )
             .expect("the command queue has room in a test");
@@ -190,11 +189,10 @@ fn a_voice_that_leaves_its_window_and_re_enters_sounds_from_the_re_entry_frame()
     handle
         .add(
             SlotId(1),
-            MemorySource::placed(
+            placed_source(
                 Arc::new(wave),
                 VoiceWindow::span(Beat::new(0.0), BeatDuration::new(0.25)),
-            )
-            .expect("a placeable wave"),
+            ),
             play(1.0),
         )
         .expect("the command queue has room in a test");

@@ -48,15 +48,11 @@ fn source(wave: &Arc<Wave>) -> MemorySource<f32> {
 
 /// `wave` placed from beat `start`.
 fn source_from(wave: &Arc<Wave>, start: f64) -> MemorySource<f32> {
-    MemorySource::with_config(
-        Arc::clone(wave),
-        MemorySourceConfig {
-            placement: Some(VoiceWindow::from(Beat::new(start))),
-            channels: wave.layout(),
-            ..Default::default()
-        },
+    MemorySource::from(
+        MemorySourceConfig::new(Arc::clone(wave), wave.layout())
+            .expect("a placeable wave")
+            .window(VoiceWindow::from(Beat::new(start))),
     )
-    .expect("a placeable wave")
 }
 
 /// `wave` placed at beat 0 in a pool, stretched by `stretch` and shifted by
