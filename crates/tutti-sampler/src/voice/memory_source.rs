@@ -79,7 +79,7 @@ impl Default for VoiceWindow {
 
 /// Configuration for building a [`MemorySource`], passed to
 /// [`MemorySource::with_config`]. Matches tutti's config-struct constructor
-/// convention (`PolySynth::new(SynthConfig)`, `OfflineTimeline::new(..)`).
+/// convention (`PolySynth::from(SynthConfig)`, `OfflineTimeline::new(..)`).
 ///
 /// `Default` yields the same audible baseline as [`MemorySource::new`]: unity
 /// gain, normal speed, one-shot, free-running. It is hand-written (not

@@ -48,7 +48,7 @@ fn synth_at(unison: bool, detune: f64, volume: tutti_units::Amplitude) -> PolySy
             attack: Seconds::new(0.0),
             ..Default::default()
         });
-    PolySynth::<f32>::new(if unison {
+    PolySynth::<f32>::from(if unison {
         config.unison(
             UnisonConfig::new()
                 .voice_count(UnisonVoices::of(3))

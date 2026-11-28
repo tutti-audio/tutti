@@ -35,7 +35,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// A polyphonic subtractive synthesizer: a MIDI-driven voice allocator over a
 /// SIMD voice bank.
 ///
-/// Construct one from a [`SynthConfig`] with [`PolySynth::new`]. It is generic over
+/// Construct one from a [`SynthConfig`] with `PolySynth::from`. It is generic over
 /// the float it renders in (`f32` or `f64`: its voice bank runs `f32x8` or `f64x4`
 /// lanes) and, for either, a graph node (`tutti_graph::Node<F>`) with no audio input, stereo output and
 /// one MIDI event input; each event is applied on its own frame. Inserting it
@@ -63,7 +63,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// use tutti_graph::{Prepare, Renderer};
 /// use tutti_polysynth::{FilterType, LadderSaturation, OscillatorType, PolySynth, SynthConfig};
 ///
-/// let synth = PolySynth::<f32>::new(
+/// let synth = PolySynth::<f32>::from(
 ///     SynthConfig::new()
 ///         .oscillator(OscillatorType::Saw)
 ///         .polyphony(NonZeroUsize::new(8).unwrap())
@@ -118,17 +118,18 @@ impl<F: SynthFloat> PolySynth<F> {
     /// The rate a synth renders at until its graph prepares it: 44.1 kHz. The
     /// rate is the graph's, not the config's (`Node::prepare`).
     pub const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
+}
 
-    /// Creates a synth from a [`SynthConfig`], usually written as `SynthConfig::new()`
-    /// plus the options that differ: `SynthConfig::new().oscillator(OscillatorType::Saw)`.
+impl<F: SynthFloat> From<SynthConfig> for PolySynth<F> {
+    /// A synth from a [`SynthConfig`], usually written as `SynthConfig::new()` plus the
+    /// options that differ: `SynthConfig::new().oscillator(OscillatorType::Saw)`.
     ///
     /// Every voice, and every unison sub-voice within it, is built here, so
     /// this allocates in proportion to `polyphony * unison.voice_count` and
     /// belongs off the audio thread. There is no upper bound on the polyphony:
     /// every voice is built up front, so it is a memory and CPU budget, not a
     /// real-time risk.
-    #[must_use]
-    pub fn new(config: SynthConfig) -> Self {
+    fn from(config: SynthConfig) -> Self {
         let polyphony = config.polyphony.get();
         let allocator_config = SynthVoicesConfig::new()
             .max_voices(config.polyphony)
@@ -172,7 +173,9 @@ impl<F: SynthFloat> PolySynth<F> {
             finished_indices: Vec::with_capacity(polyphony),
         }
     }
+}
 
+impl<F: SynthFloat> PolySynth<F> {
     fn build_bank(
         config: &SynthConfig,
         sample_rate: SampleRate,
