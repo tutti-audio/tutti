@@ -61,7 +61,31 @@ impl Session {
     where
         F: FnMut(Result<(Option<Instant>, Ump), Error>) + Send + 'static,
     {
-        Connection::open(&self.session, self.clock, endpoint_id, None, on_message)
+        Connection::open(
+            &self.session,
+            self.clock,
+            endpoint_id,
+            None,
+            Some(on_message),
+        )
+    }
+
+    /// Opens a connection to the endpoint with device id `endpoint_id` that only sends: no
+    /// handler is registered, so nothing reads what the endpoint sends. The API has no flag
+    /// for a connection that the service does not deliver to; the service delivers, and the
+    /// API's event, with no handler, drops it.
+    ///
+    /// # Errors
+    ///
+    /// As [`connect`](Self::connect).
+    pub fn connect_send_only(&self, endpoint_id: &str) -> Result<Connection, Error> {
+        Connection::open::<fn(Result<(Option<Instant>, Ump), Error>)>(
+            &self.session,
+            self.clock,
+            endpoint_id,
+            None,
+            None,
+        )
     }
 
     /// Closes the session and its connections.

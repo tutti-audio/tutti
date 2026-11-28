@@ -6,11 +6,13 @@ mod clock;
 mod connection;
 mod endpoint;
 mod error;
+mod properties;
 mod session;
 mod virtual_device;
 mod watcher;
 
 pub use crate::checks::declared::{Block, DeclaredField, Refusal};
+pub use crate::checks::read::Declared;
 use clock::Clock;
 pub use connection::Connection;
 pub use endpoint::{Endpoint, Loopback, endpoints, ensure_service_available};

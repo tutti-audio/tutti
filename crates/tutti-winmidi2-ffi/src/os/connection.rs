@@ -29,20 +29,22 @@ pub struct Connection {
     clock: Clock,
     /// The connection's id, which the session disconnects it by.
     id: windows_core::GUID,
-    /// The token of the registered message handler.
-    token: i64,
+    /// The token of the registered message handler, `None` for a connection that receives
+    /// into none.
+    token: Option<i64>,
     closed: AtomicBool,
 }
 
 impl Connection {
-    /// Creates the connection, adds `plugin` if there is one, registers the handler, then
-    /// opens it: the service sends nothing before the open, and takes a plugin before it.
+    /// Creates the connection, adds `plugin` if there is one, registers the handler if there
+    /// is one, then opens it: the service sends nothing before the open, and takes a plugin
+    /// before it. Without a handler nothing reads what the endpoint sends.
     pub(super) fn open<F>(
         session: &MidiSession,
         clock: Clock,
         endpoint_id: &str,
         plugin: Option<&IMidiEndpointMessageProcessingPlugin>,
-        on_message: F,
+        on_message: Option<F>,
     ) -> Result<Self, Error>
     where
         F: FnMut(Result<(Option<Instant>, Ump), Error>) + Send + 'static,
@@ -79,30 +81,16 @@ impl Connection {
                 }
             }
         }
-        let handler = Mutex::new(on_message);
-        let received = TypedEventHandler::<
-            IMidiMessageReceivedEventSource,
-            MidiMessageReceivedEventArgs,
-        >::new(move |_, args: Ref<MidiMessageReceivedEventArgs>| {
-            if let Some(args) = args.as_ref() {
-                contained(|| deliver(&handler, clock, args));
-            } else {
-                contained(|| {
-                    let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
-                    (*handler)(Err(Error::Refused {
-                        call: "message arguments",
-                    }));
-                });
-            }
-            Ok(())
-        });
-        let token = match connection.MessageReceived(&received) {
-            Ok(token) => token,
-            Err(e) => {
-                // The registration's error is the one to report.
-                disconnect(session, id);
-                return Err(super::error::call("MessageReceived")(e));
-            }
+        let token = match on_message {
+            Some(on_message) => match register(&connection, clock, on_message) {
+                Ok(token) => Some(token),
+                Err(e) => {
+                    // The registration's error is the one to report.
+                    disconnect(session, id);
+                    return Err(e);
+                }
+            },
+            None => None,
         };
         // From here a drop closes it, so a failed open undoes the registration.
         let this = Self {
@@ -127,7 +115,7 @@ impl Connection {
     /// # Errors
     ///
     /// `Error::Closed` for a closed connection, `Error::Timestamp` for an `at` that is not
-    /// a timestamp, `Error::BufferFull` when the service cannot take the message now and
+    /// a timestamp, `Error::TooFarAhead` for one the service does not yet schedule, `Error::BufferFull` when the service cannot take the message now and
     /// `Error::MessageRefused` for any other refusal.
     pub fn send(&self, at: Option<Instant>, ump: &Ump) -> Result<(), Error> {
         if self.closed.load(Ordering::Acquire) {
@@ -158,7 +146,7 @@ impl Connection {
         } else if result.contains(MidiSendMessageResults::BufferFull) {
             Err(Error::BufferFull)
         } else if result.contains(MidiSendMessageResults::TimestampOutOfRange) {
-            Err(Error::Timestamp)
+            Err(Error::TooFarAhead)
         } else {
             Err(Error::MessageRefused { bits: result.0 })
         }
@@ -174,9 +162,42 @@ impl Connection {
         // possibly after the session closed or the service went away, where there is nothing
         // left to undo and a failure must neither panic nor be reported. A handler whose removal
         // failed receives nothing once the session has disconnected the connection.
-        let _ = self.connection.RemoveMessageReceived(self.token);
+        if let Some(token) = self.token {
+            let _ = self.connection.RemoveMessageReceived(token);
+        }
         disconnect(&self.session, self.id);
     }
+}
+
+/// Registers `on_message` as the connection's message handler, and returns its token.
+fn register<F>(
+    connection: &MidiEndpointConnection,
+    clock: Clock,
+    on_message: F,
+) -> Result<i64, Error>
+where
+    F: FnMut(Result<(Option<Instant>, Ump), Error>) + Send + 'static,
+{
+    let handler = Mutex::new(on_message);
+    let received =
+        TypedEventHandler::<IMidiMessageReceivedEventSource, MidiMessageReceivedEventArgs>::new(
+            move |_, args: Ref<MidiMessageReceivedEventArgs>| {
+                if let Some(args) = args.as_ref() {
+                    contained(|| deliver(&handler, clock, args));
+                } else {
+                    contained(|| {
+                        let mut handler = handler.lock().unwrap_or_else(PoisonError::into_inner);
+                        (*handler)(Err(Error::Refused {
+                            call: "message arguments",
+                        }));
+                    });
+                }
+                Ok(())
+            },
+        );
+    connection
+        .MessageReceived(&received)
+        .map_err(super::error::call("MessageReceived"))
 }
 
 /// Has the session disconnect the connection `id`. A failure is dropped: it runs on the

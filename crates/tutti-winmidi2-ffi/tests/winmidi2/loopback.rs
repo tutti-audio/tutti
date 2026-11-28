@@ -2,6 +2,7 @@
 //! is sent to one arrives at the other.
 
 use std::sync::mpsc::{Receiver, channel};
+use std::time::Duration;
 
 use crate::deadline::{Deadline, HANG_GUARD};
 use tutti_platform::Instant;
@@ -19,12 +20,20 @@ fn loopback(which: Loopback) -> Endpoint {
         .unwrap_or_else(|| panic!("the service lists diagnostic loopback {which:?}"))
 }
 
+/// One message the receiving connection was handed: its timestamp, and the time the handler
+/// ran.
+struct Received {
+    stamp: Option<Instant>,
+    ump: Ump,
+    arrived: Instant,
+}
+
 /// A session with a connection that sends to `to` and one that receives what arrives at
 /// `from`'s partner: what is sent on `to` arrives on the other loopback.
 struct Pair {
     session: Session,
     sender: Connection,
-    received: Receiver<(Option<Instant>, Ump)>,
+    received: Receiver<Received>,
     // The receiving connection stays open for the test.
     _receiver: Connection,
 }
@@ -41,14 +50,18 @@ fn pair(send_to: Loopback) -> Pair {
         .connect(&receive_on.id, move |received| {
             // The test may have ended: a send to a dropped receiver is the end. A message
             // that cannot be read is no message, and the test then waits in vain for it.
-            if let Ok(received) = received {
-                let _ = tx.send(received);
+            if let Ok((stamp, ump)) = received {
+                let _ = tx.send(Received {
+                    stamp,
+                    ump,
+                    arrived: Instant::now(),
+                });
             }
         })
         .expect("a connection to the receiving loopback endpoint");
     let sender = session
-        .connect(&send_to.id, |_| {})
-        .expect("a connection to the sending loopback endpoint");
+        .connect_send_only(&send_to.id)
+        .expect("a send-only connection to the sending loopback endpoint");
     Pair {
         session,
         sender,
@@ -71,7 +84,7 @@ fn messages() -> Vec<Ump> {
     messages
 }
 
-fn receive_all(pair: &Pair, count: usize) -> Vec<(Option<Instant>, Ump)> {
+fn receive_all(pair: &Pair, count: usize) -> Vec<Received> {
     let deadline = Deadline::start();
     (0..count)
         .map(|n| {
@@ -92,7 +105,7 @@ fn every_word_arrives_unchanged_and_in_order(send_to: Loopback) {
     }
     let arrived: Vec<Ump> = receive_all(&pair, sent.len())
         .into_iter()
-        .map(|(_, ump)| ump)
+        .map(|received| received.ump)
         .collect();
     assert_eq!(arrived, sent);
     pair.session.close().expect("the session closes");
@@ -112,9 +125,11 @@ fn a_timestamp_is_no_earlier_than_the_send(send_to: Loopback) {
         })
         .collect();
     let arrived = receive_all(&pair, sent.len());
-    for ((ump, sent_at), (at, got)) in sent.iter().zip(&stamps).zip(&arrived) {
-        assert_eq!(got, ump);
-        let at = at.expect("a timestamp of the service's clock is an Instant");
+    for ((ump, sent_at), got) in sent.iter().zip(&stamps).zip(&arrived) {
+        assert_eq!(&got.ump, ump);
+        let at = got
+            .stamp
+            .expect("a timestamp of the service's clock is an Instant");
         assert!(at >= *sent_at, "{ump:?} arrived stamped before it was sent");
     }
 }
@@ -142,6 +157,50 @@ fn a_message_sent_to_a_arrives_stamped_no_earlier_than_its_send() {
 #[test]
 fn a_message_sent_to_b_arrives_stamped_no_earlier_than_its_send() {
     a_timestamp_is_no_earlier_than_the_send(Loopback::B);
+}
+
+/// How far ahead a scheduled message is sent: only a point the service must hold the message
+/// until, never a speed asserted.
+const AHEAD: Duration = Duration::from_millis(250);
+
+/// **A message sent at a future `Instant` is held by the service until then**: it arrives
+/// stamped no earlier than that instant, and its handler runs no earlier than it. A message
+/// the service delivered at once would run its handler `AHEAD` early.
+#[test]
+fn a_message_sent_ahead_does_not_arrive_before_its_time() {
+    let pair = pair(Loopback::A);
+    let ump = Ump([0x4090_3C00, 0x8000_0000, 0, 0]);
+    let at = Instant::now() + AHEAD;
+    pair.sender
+        .send(Some(at), &ump)
+        .expect("the service takes the message");
+    let [got] = receive_all(&pair, 1).try_into().ok().expect("one message");
+    assert_eq!(got.ump, ump);
+    let stamp = got
+        .stamp
+        .expect("a timestamp of the service's clock is an Instant");
+    assert!(stamp >= at, "stamped {AHEAD:?} ahead, before its time");
+    assert!(got.arrived >= at, "the message arrived before its time");
+}
+
+/// **A message sent at an `Instant` that has passed is sent at once**: the service takes it
+/// and delivers it, stamped with the time it was sent at and no later than it arrived.
+#[test]
+fn a_message_sent_at_a_past_instant_arrives() {
+    let pair = pair(Loopback::A);
+    let ump = Ump([0x4090_3C00, 0x8000_0000, 0, 0]);
+    let past = Instant::now()
+        .checked_sub(AHEAD)
+        .expect("the clock has run longer than the delay");
+    pair.sender
+        .send(Some(past), &ump)
+        .expect("the service takes the message");
+    let [got] = receive_all(&pair, 1).try_into().ok().expect("one message");
+    assert_eq!(got.ump, ump);
+    let stamp = got
+        .stamp
+        .expect("a timestamp of the service's clock is an Instant");
+    assert!(stamp >= past && stamp <= got.arrived, "{past:?} {stamp:?}");
 }
 
 /// **A closed connection refuses a send**, and closing it again does nothing.

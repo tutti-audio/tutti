@@ -46,6 +46,10 @@ pub enum Error {
     /// a timestamp holds, or the clock reports no frequency.
     #[error("the time is not a timestamp of the service's clock")]
     Timestamp,
+    /// The time is further ahead than the service schedules: it takes the message once the
+    /// time is nearer.
+    #[error("the time is too far ahead for the service to schedule")]
+    TooFarAhead,
     /// The service delivered words that are not one whole UMP message.
     #[error("the service delivered {words} words, which are not one UMP message")]
     NotAMessage {

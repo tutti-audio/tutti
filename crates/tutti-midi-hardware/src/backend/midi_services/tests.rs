@@ -1,13 +1,30 @@
 use super::watch::change_of;
 use super::*;
 use tutti_midi_device::{OsChange, PortDirection};
+use tutti_ump::{EndpointInfoNotification, FunctionBlockCount, FunctionBlocks, UmpVersion};
 use tutti_winmidi2_ffi::Change;
+
+fn declared(midi1: bool, midi2: bool) -> Declared {
+    Declared {
+        info: EndpointInfoNotification {
+            version: UmpVersion::V1_1,
+            static_function_blocks: false,
+            function_blocks: FunctionBlocks::Count(FunctionBlockCount::saturating(0)),
+            midi2,
+            midi1,
+            rx_jr: false,
+            tx_jr: false,
+        },
+        blocks: Vec::new(),
+    }
+}
 
 fn endpoint(id: &str) -> Endpoint {
     Endpoint {
         id: id.to_owned(),
         name: "Loopback".to_owned(),
         loopback: None,
+        declared: declared(true, true),
     }
 }
 
@@ -102,4 +119,16 @@ fn buffered_changes_apply_in_order_after_the_list() {
             .list()
             .all(|d| d.id.to_string().contains(x) || d.id.to_string().contains(z))
     );
+}
+
+/// **An endpoint that supports MIDI 2.0 speaks it, and one that supports only MIDI 1.0
+/// speaks that**, each supporting what it declares.
+#[test]
+fn an_endpoint_speaks_midi2_when_it_supports_it() {
+    let both = described(&declared(true, true)).endpoint;
+    assert_eq!(both.active().protocol, Protocol::Midi2);
+    assert!(both.capabilities().midi1 && both.capabilities().midi2);
+    let only1 = described(&declared(true, false)).endpoint;
+    assert_eq!(only1.active().protocol, Protocol::Midi1);
+    assert!(only1.capabilities().midi1 && !only1.capabilities().midi2);
 }

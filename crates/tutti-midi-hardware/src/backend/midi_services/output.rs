@@ -29,8 +29,10 @@ pub(super) struct MidiServicesOutput {
 }
 
 impl MidiServicesOutput {
-    /// Sends `ump` at `send`. A time the service's clock cannot hold is not schedulable, so
-    /// the packet goes now.
+    /// Sends `ump` at `send`: the service's timestamp of the message is that time, and the
+    /// service holds it until then. A time the clock has passed, or that is before its origin
+    /// and so cannot be a timestamp, goes now; a time too far ahead for the service to
+    /// schedule is refused, so the packet is not taken and is offered again.
     fn send(&self, send: SendAt, ump: &Ump) -> core::result::Result<(), Error> {
         let at = match send {
             SendAt::Now => None,
@@ -82,7 +84,7 @@ impl DeviceOut for MidiServicesOutput {
 /// The platform's error from the connection.
 pub(super) fn open(session: Arc<Session>, endpoint: &str) -> Result<MidiServicesOutput> {
     // A send has no use for what the endpoint sends.
-    let connection = session.connect(endpoint, |_| {}).map_err(os)?;
+    let connection = session.connect_send_only(endpoint).map_err(os)?;
     let (lost, losses) = counter();
     Ok(MidiServicesOutput {
         connection,

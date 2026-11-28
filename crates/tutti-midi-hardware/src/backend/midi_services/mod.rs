@@ -9,13 +9,16 @@
 //!   interface path, which survives a replug. An [`EndpointId`] is a 64-bit FNV-1a digest
 //!   of that path, never a list position, and a listing is read afresh to resolve one:
 //!   opening an endpoint that has left fails with
-//!   [`NotFound::Endpoint`](crate::NotFound::Endpoint). Each endpoint is described as MIDI 1.0,
-//!   the conservative reading of an endpoint whose properties are not read.
+//!   [`NotFound::Endpoint`](crate::NotFound::Endpoint). Each endpoint is described by what the
+//!   service declares of it: its Endpoint Info and its Function Blocks (`described`). The
+//!   service translates between the protocols for an app, so an endpoint that supports
+//!   MIDI 2.0 is described as speaking it, and any other as MIDI 1.0.
 //! - **Input** is a message-received callback on the service's own thread, behind a
 //!   [`Guard`](crate::guard::Guard). A message the service delivered that cannot be read is
 //!   counted in the port's losses.
-//! - **Output** sends each packet through the connection, each at its time: the service
-//!   holds a message with a time ahead of its clock until then.
+//! - **Output** sends each packet through a connection that registers no handler, each at
+//!   its time: the service holds a message with a time ahead of its clock until then, and a
+//!   message whose time is too far ahead for it to schedule is not taken yet.
 //! - **The device watch** is the service's endpoint watcher: an endpoint added, removed or
 //!   updated reaches the list from the notification, with no re-list. A watcher that
 //!   stops, or a change it cannot read, ends the watch with the cause.
@@ -36,7 +39,7 @@ mod watch;
 use std::sync::Arc;
 
 use crate::InputProducerHandle;
-use crate::capability::{OsEndpoint, legacy};
+use crate::capability::{Described, OsEndpoint, from_os};
 use crate::devices::ChangeSink;
 use crate::devices::reporter::os_devices;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
@@ -44,7 +47,8 @@ use crate::error::{MidiHardwareError, NotFound, Result};
 use crate::start::Started;
 use tutti_midi_device::{EndpointId, OsDevice, OsEndpointIdentity};
 use tutti_rt::Mutex;
-use tutti_winmidi2_ffi::{Endpoint, Error, Session, endpoints, ensure_service_available};
+use tutti_ump::Protocol;
+use tutti_winmidi2_ffi::{Declared, Endpoint, Error, Session, endpoints, ensure_service_available};
 
 /// The name of the engine's session with the service.
 const SESSION: &str = "tutti";
@@ -79,14 +83,35 @@ fn endpoint_id(id: &str) -> EndpointId {
     ))
 }
 
+/// What the service declares of an endpoint, as the endpoint it describes: the protocols
+/// it supports and the Function Blocks it declares. The service translates between the
+/// protocols for an app, so the protocol in use is MIDI 2.0 for an endpoint that supports
+/// it and MIDI 1.0 otherwise.
+fn described(declared: &Declared) -> Described {
+    let protocol = if declared.info.midi2 {
+        Protocol::Midi2
+    } else {
+        Protocol::Midi1
+    };
+    from_os(
+        protocol,
+        Some(&declared.info),
+        declared
+            .blocks
+            .iter()
+            .map(|block| (block.info, block.name.as_deref())),
+    )
+}
+
 /// An endpoint the service lists, as the endpoint it describes.
 fn os_endpoint(endpoint: &Endpoint) -> OsEndpoint {
+    let described = described(&endpoint.declared);
     OsEndpoint {
         id: endpoint_id(&endpoint.id),
         identity: OsEndpointIdentity::MidiServices(endpoint.id.clone()),
         name: endpoint.name.clone(),
-        capability: legacy(),
-        blocks_left_out: 0,
+        capability: described.endpoint,
+        blocks_left_out: described.blocks_left_out,
     }
 }
 

@@ -4,6 +4,7 @@ use windows_core::HSTRING;
 
 use super::Error;
 use super::call::{call, statics};
+use super::properties;
 use crate::bindings::Windows::Devices::Midi2::Diagnostics::{
     IMidiDiagnosticsStatics, MidiDiagnostics,
 };
@@ -12,6 +13,7 @@ use crate::bindings::Windows::Devices::Midi2::Enumeration::{
     MidiEndpointDeviceInformationFilters, MidiEndpointDeviceInformationSortOrder,
 };
 use crate::bindings::Windows::Devices::Midi2::{IMidiApiStatics, MidiApi};
+use crate::checks::read::Declared;
 use windows_collections::IVectorView;
 
 /// Which of the service's two cross-wired diagnostic loopback endpoints an endpoint is: what
@@ -24,7 +26,7 @@ pub enum Loopback {
     B,
 }
 
-/// One endpoint the service lists.
+/// One endpoint the service lists, with what it declares.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Endpoint {
     /// The service's endpoint device id, which `Session::connect` takes.
@@ -33,6 +35,8 @@ pub struct Endpoint {
     pub name: String,
     /// Which diagnostic loopback endpoint it is, if it is one.
     pub loopback: Option<Loopback>,
+    /// What the service declares of it: its Endpoint Info and Function Blocks.
+    pub declared: Declared,
 }
 
 /// Starts the MIDI service if it is stopped and answers whether it is running.
@@ -92,7 +96,13 @@ impl LoopbackIds {
         } else {
             None
         };
-        Ok(Endpoint { id, name, loopback })
+        let declared = properties::read(information)?;
+        Ok(Endpoint {
+            id,
+            name,
+            loopback,
+            declared,
+        })
     }
 }
 
