@@ -87,7 +87,6 @@ fn render_graph
 fn settings::TransportSettings::current_tempo
 fn settings::TransportSettings::is_paused
 fn settings::TransportSettings::meter_map
-fn settings::TransportSettings::meter_reader
 fn settings::TransportSettings::new
 fn settings::TransportSettings::project_meter
 fn settings::TransportSettings::reclaim_meter
