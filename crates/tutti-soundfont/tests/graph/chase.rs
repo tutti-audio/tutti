@@ -225,7 +225,7 @@ fn a_font_swapped_for_a_polysynth_keeps_its_controllers() {
         let mut rig = Rig::new(unit());
         rig.send(&volume.map(|v| cc(0, 7, v)).into_iter().collect::<Vec<_>>());
         rig.block();
-        let synth = PolySynth::new(SynthConfig::new());
+        let synth = PolySynth::from(SynthConfig::new());
         rig.swap(synth);
         rig.send(&[note_on()]);
         let peak = rig.block();

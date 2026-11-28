@@ -14,13 +14,15 @@
 
 use tutti_buffers::ChannelTopology;
 use tutti_graph::{
-    Chase, Cx, InEvents, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status,
+    Chase, Cx, HostValues, InEvents, Initials, IntoNode, Io, Node, NodeConfig, NodeParts,
+    ParamNode, ParamSet, Prepare, Shape, Status,
 };
-use tutti_units::UnitParam;
 use tutti_units::{Amplitude, CentsSpan, Spread};
+use tutti_units::{UnitAddr, UnitParam};
 use tutti_voicing::VoiceAllocator;
 
 use super::PolySynth;
+use crate::SynthConfig;
 use crate::lane::SynthFloat;
 
 // The params a `PolySynth` lets the graph modulate, in port order: master
@@ -32,6 +34,44 @@ tutti_graph::declare_params!([F: SynthFloat] PolySynth<F>, n {
     Detune => CentsSpan = n.unison.as_ref().map(|u| u.detune()),
     StereoSpread => Spread = n.unison.as_ref().map(|u| u.spread()),
 });
+
+/// A synth's config is its structure and the starting values of its params: the master
+/// volume and, with a unison engine, its detune and stereo spread. A change of those is a
+/// write to the running synth; any other field builds a new one.
+impl<F: SynthFloat> NodeConfig<F> for SynthConfig {
+    type Node = PolySynth<F>;
+
+    fn build(&self, _: &HostValues) -> PolySynth<F> {
+        PolySynth::from(self.clone())
+    }
+
+    fn same_structure(&self, other: &Self) -> bool {
+        let mut values_of_other = self.clone();
+        values_of_other.volume = other.volume;
+        if let (Some(mine), Some(theirs)) = (&mut values_of_other.unison, &other.unison) {
+            mine.detune_cents = theirs.detune_cents;
+            mine.stereo_spread = theirs.stereo_spread;
+        }
+        values_of_other == *other
+    }
+
+    fn initials(&self) -> Initials {
+        let initials =
+            Initials::new().param(UnitAddr::first(UnitParam::Volume), self.volume.get().get());
+        match &self.unison {
+            Some(unison) => initials
+                .param(
+                    UnitAddr::first(UnitParam::Detune),
+                    unison.detune_cents.get(),
+                )
+                .param(
+                    UnitAddr::first(UnitParam::StereoSpread),
+                    unison.stereo_spread.get(),
+                ),
+            None => initials,
+        }
+    }
+}
 
 /// The most oscillator lanes (`polyphony` × unison sub-voices) a synth
 /// may render and still declare [`Cost::Moderate`](tutti_graph::Cost).
