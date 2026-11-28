@@ -205,11 +205,11 @@ pub use tutti_session::{
     AddPluginError, AnyPlugin, AwaitingOp, Diagnostics, InProcessOp, ListedPreset, LoadInProcess,
     LoadOutOfProcess, LoadPlugin, LoadPreset, LoadPresetInProcess, LoadPresetOp,
     LoadPresetOutOfProcess, LoadedPlugin, LoadedPreset, LoadingPlugin, Op, Opened, OutOfProcessOp,
-    Plugin, PluginApplyError, PluginBuses, PluginChange, PluginEvent, PluginHealth, PluginInfo,
-    PluginInstance, PluginOp, PluginPresets, PortCounts, PresetStartError, RestoreState,
-    RestoreStateInProcess, RestoreStateOp, RestoreStateOutOfProcess, RestoredState, SaveState,
-    SaveStateInProcess, SaveStateOp, SaveStateOutOfProcess, Saved, StateStartError,
-    SwapPluginError,
+    Plugin, PluginApplyError, PluginBuses, PluginChange, PluginDecl, PluginEvent, PluginHealth,
+    PluginInfo, PluginInstance, PluginOp, PluginPatchError, PluginPresets, PortCounts,
+    PresetStartError, RestoreState, RestoreStateInProcess, RestoreStateOp,
+    RestoreStateOutOfProcess, RestoredState, SaveState, SaveStateInProcess, SaveStateOp,
+    SaveStateOutOfProcess, Saved, StateStartError, SwapPluginError,
 };
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{

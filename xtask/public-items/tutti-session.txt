@@ -106,6 +106,7 @@ enum sampler::OpenStreamError
 enum sampler::SamplerError
 enum session::declared::PatchError
 enum session::declared::instrument::LeaseError
+enum session::declared::plugin::PluginPatchError
 enum session::event::SessionEvent
 enum session::main_output::MainOutputTopologyStatus
 enum session::phases::Phase
@@ -535,6 +536,8 @@ fn patch::NodeDecl::fade
 fn patch::NodeDecl::key
 fn patch::NodeDecl::new
 fn patch::NodeDecl::unfaded
+fn patch::PluginDecl::initial
+fn patch::PluginDecl::new
 fn patch::Section::new
 fn peer::Presence::cause
 fn peer::Presence::is_live
@@ -623,6 +626,7 @@ fn plugin_diagnostics::Diagnostics::server_losses
 fn plugin_diagnostics::Diagnostics::server_pid
 fn plugin_diagnostics::Diagnostics::tail
 fn plugin_diagnostics::Diagnostics::terminate
+fn plugin_diagnostics::Diagnostics::unlisted_initials
 fn plugin_diagnostics::PluginBuses::input
 fn plugin_diagnostics::PluginBuses::input_count
 fn plugin_diagnostics::PluginBuses::main_input
@@ -982,6 +986,8 @@ struct modulation::state::ModState
 struct patch::Declarations
 struct patch::InstrumentDecl
 struct patch::NodeDecl
+struct patch::PluginDecl
+struct patch::PluginHeld
 struct patch::Sealed
 struct patch::Section
 struct peer::PeerResourceId
@@ -1113,7 +1119,9 @@ trait key::Wire
 trait key::sealed::Sealed
 trait modulation::Ranged
 trait modulation::ranged::Sealed
+trait patch::HoldsPlugin
 trait patch::IntoPatch
+trait patch::PatchFloat
 trait patch::PatchTarget
 trait peer::Peer
 trait peer::Resource

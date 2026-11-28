@@ -8,9 +8,10 @@
 //! # The load
 //!
 //! A plugin is a value the app runs ([`LoadPlugin`]): an in-process plugin on the
-//! main thread, an out-of-process one on any thread. It returns a [`LoadedPlugin`], which has a refcounted [`PluginInstance`]; [`Session::apply`] puts
-//! its node in the graph through the one install, and the node's record holds a
-//! clone of the instance until the record retires.
+//! main thread, an out-of-process one on any thread. It returns a [`LoadedPlugin`], which has a refcounted [`PluginInstance`]; [`Session::apply`] or a
+//! [`PluginDecl`](crate::PluginDecl) in a patch puts its node in the graph through
+//! the one install, and the node's record holds a clone of the instance until the
+//! record retires.
 //!
 //! # The record
 //!
@@ -970,6 +971,9 @@ pub(crate) struct HostedPlugin {
     /// Periodic state snapshots the plugin failed:
     /// [`Diagnostics::failed_snapshots`].
     pub(crate) failed_snapshots: tutti_rt::TallyWriter<tutti_units::Calls>,
+    /// Declared initials that came due after the plugin stopped listing the
+    /// parameter: [`Diagnostics::unlisted_initials`].
+    pub(crate) unlisted_initials: tutti_rt::TallyWriter<tutti_units::Calls>,
     /// What the plugins before the held one had refused off their thread:
     /// banked when a plugin is replaced, so
     /// [`Diagnostics::refused_off_thread_calls`] only grows.
@@ -1247,6 +1251,7 @@ impl HostedPlugin {
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
             failed_snapshots: tutti_rt::tally().writer(),
+            unlisted_initials: tutti_rt::tally().writer(),
             banked_off_thread: tutti_units::Calls::ZERO,
             liveness: Liveness::new(),
             hang: HangDetector::default(),
@@ -1273,6 +1278,40 @@ impl HostedPlugin {
             silence: Silence::Pending,
             link: None,
             rebind: None,
+        }
+    }
+
+    /// Writes the declared `initials` to the plugin at `node`: each one the plugin
+    /// lists writable joins `batch`, the session's one write path
+    /// (`PluginEntry::write`); one the plugin no longer lists, or lists
+    /// read-only, is counted ([`Diagnostics::unlisted_initials`]) and not
+    /// written. While the plugin's list is unread, the write is owed through the
+    /// ledger, which the plugin's handle answers by name.
+    pub(crate) fn write_initials(
+        &self,
+        node: NodeKey,
+        initials: &[(ParamId, Normalized)],
+        batch: &mut Vec<crate::AnyAssign>,
+    ) {
+        for &(id, value) in initials {
+            if !self.mirror.is_ready() {
+                self.writes.send_each(&self.handle, &[(id, value)]);
+                continue;
+            }
+            let listed = self
+                .mirror
+                .position(id)
+                .map(|at| tutti_plugin_types::ParamAccess::of(&self.mirror.descriptors()[at]));
+            match listed {
+                None | Some(tutti_plugin_types::ParamAccess::ReadOnly) => {
+                    self.unlisted_initials.add(tutti_units::Calls::new(1));
+                }
+                Some(_) => batch.push(
+                    crate::PluginParamTarget::<Normalized>::new(node, id)
+                        .to(value)
+                        .erase(),
+                ),
+            }
         }
     }
 
@@ -1916,8 +1955,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     }
 
     /// Puts an opened plugin in the graph, unwired, and hosts it: the one
-    /// place a plugin enters the session, through
-    /// [`apply`](Self::apply).
+    /// place a plugin enters the session. A plugin enters through
+    /// `install_plugin`, from [`apply`](Self::apply) or a
+    /// [`PluginDecl`](crate::PluginDecl).
     /// Its meter is the metronome's, an out-of-process plugin keeps how it
     /// was loaded for a reload (`origin`) and the session's recovery, and a
     /// parameter read that finished at the load is its mirror.

@@ -8,16 +8,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use thiserror::Error;
-use tutti_buffers::Float;
 #[cfg(feature = "midi")]
 use tutti_graph::InstrumentNode;
 use tutti_graph::{HostValues, Initials, IntoNode, NodeConfig, NodeKey, Shape, Shapes};
 use tutti_units::{Gain, Samples};
 
 use crate::graph::Split;
+#[cfg(feature = "plugin")]
+use crate::patch::HoldsPlugin;
 use crate::patch::{
-    Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchTarget, Place, WireDecl,
-    WireEnds, WireId,
+    Body, Built, Declaration, Declarations, Fading, IntoPatch, KeyError, PatchFloat, PatchTarget,
+    Place, WireDecl, WireEnds, WireId,
 };
 use crate::value::{declared_param, declared_published, declared_setting};
 use crate::{AnyAssign, AppKey, Clock, ConnectError, Graph, Key, ReplaceRefused, Session};
@@ -28,22 +29,28 @@ mod instrument;
 #[cfg(not(feature = "midi"))]
 #[path = "declared/instrument_none.rs"]
 mod instrument;
+#[cfg(feature = "plugin")]
+mod plugin;
 mod section;
 mod wire;
 use check::check;
 #[cfg(feature = "midi")]
 pub use instrument::LeaseError;
 use instrument::{NewParts, Parts};
+#[cfg(feature = "plugin")]
+pub use plugin::PluginPatchError;
 use section::{Decided, KeptSection, Kind, decide};
 use wire::{KeptWire, Resolved, Role};
 
 /// The session's graph is where declarations go: a config is built at the
 /// graph's float.
-impl<F: Float> PatchTarget for Graph<F> {
+impl<F: PatchFloat> PatchTarget for Graph<F> {
     type Refused = ReplaceRefused;
+    #[cfg(feature = "plugin")]
+    type Plugin = F::Plugin;
 }
 
-impl<F: Float, C> Place<C> for Graph<F>
+impl<F: PatchFloat, C> Place<C> for Graph<F>
 where
     C: NodeConfig<F>,
     C::Node: IntoNode<F, Controls: Send + 'static>,
@@ -87,7 +94,7 @@ where
 
 /// The node `config` builds, with the main pair it names.
 #[cfg(feature = "midi")]
-fn build_instrument<F: Float, C>(config: &C, host: &HostValues) -> Built
+fn build_instrument<F: PatchFloat, C>(config: &C, host: &HostValues) -> Built
 where
     C: NodeConfig<F>,
     C::Node: InstrumentNode<F> + IntoNode<F, Controls: Send + 'static>,
@@ -105,7 +112,7 @@ where
 
 /// A declared instrument is part of a patch over the session's graph.
 #[cfg(feature = "midi")]
-impl<K, F: Float, C> IntoPatch<K, Graph<F>> for crate::InstrumentDecl<K, C>
+impl<K, F: PatchFloat, C> IntoPatch<K, Graph<F>> for crate::InstrumentDecl<K, C>
 where
     C: NodeConfig<F>,
     C::Node: InstrumentNode<F> + IntoNode<F, Controls: Send + 'static>,
@@ -116,7 +123,7 @@ where
 }
 
 /// The node `C` built, out of its erased form.
-fn split_of<C, F: Float>(built: Built) -> Split<C::Node, F>
+fn split_of<C, F: PatchFloat>(built: Built) -> Split<C::Node, F>
 where
     C: NodeConfig<F>,
     C::Node: IntoNode<F, Controls: Send + 'static>,
@@ -180,6 +187,10 @@ pub enum PatchError<K> {
         /// What [`Graph::connect`](crate::Graph::connect) would refuse with.
         cause: ConnectError,
     },
+    /// A [`PluginDecl`](crate::PluginDecl) the session cannot make a node of.
+    #[cfg(feature = "plugin")]
+    #[error(transparent)]
+    Plugin(PluginPatchError<K>),
 }
 
 /// What [`Session::patch`](crate::Session::patch) did to nodes it had already
@@ -211,10 +222,10 @@ pub struct Patched<K> {
 
 /// One declaration with what the plan decided: its fate, and the key its node
 /// has (a new key for a new node).
-struct PlannedNode<K, F: Float> {
+struct PlannedNode<K, F: PatchFloat, P = Plan> {
     key: K,
     declaration: Declaration<Graph<F>>,
-    fate: Fate,
+    plan: P,
     id: NodeKey,
     /// The queue and strip an instrument's new node gets.
     parts: Option<NewParts>,
@@ -222,7 +233,7 @@ struct PlannedNode<K, F: Float> {
 
 /// A patch's declarations planned: the shapes of the nodes it builds, and the
 /// node each key names once it is applied.
-struct Planned<K, F: Float> {
+struct Planned<K, F: PatchFloat> {
     nodes: Vec<PlannedNode<K, F>>,
     shapes: Shapes,
     at: BTreeMap<K, NodeKey>,
@@ -230,7 +241,7 @@ struct Planned<K, F: Float> {
     strips: BTreeMap<K, NodeKey>,
 }
 
-impl<K: Ord, F: Float> Planned<K, F> {
+impl<K: Ord, F: PatchFloat> Planned<K, F> {
     /// The node `key` names at a wire's end.
     fn of(&self, key: &K, role: Role) -> NodeKey {
         match (role, self.strips.get(key)) {
@@ -241,13 +252,13 @@ impl<K: Ord, F: Float> Planned<K, F> {
 }
 
 /// What a patch declared of one key, and the node it made.
-pub(crate) struct Stored<F: Float> {
+pub(crate) struct Stored<F: PatchFloat> {
     pub(crate) node: NodeKey,
     pub(crate) declaration: Declaration<Graph<F>>,
 }
 
 /// The declarations of the last patch, by app key. Control side only.
-pub(crate) struct Kept<K, F: Float> {
+pub(crate) struct Kept<K, F: PatchFloat> {
     nodes: BTreeMap<K, Stored<F>>,
     /// The wires the last patch made, by their ends and delay.
     wires: BTreeMap<WireId<K>, KeptWire>,
@@ -258,7 +269,7 @@ pub(crate) struct Kept<K, F: Float> {
     instruments: BTreeMap<K, Parts>,
 }
 
-impl<K: Ord, F: Float> Kept<K, F> {
+impl<K: Ord, F: PatchFloat> Kept<K, F> {
     /// The node `key` names at a wire's end.
     fn at(&self, key: &K, role: Role) -> NodeKey {
         match (role, self.instruments.get(key)) {
@@ -268,7 +279,7 @@ impl<K: Ord, F: Float> Kept<K, F> {
     }
 }
 
-impl<K, F: Float> Default for Kept<K, F> {
+impl<K, F: PatchFloat> Default for Kept<K, F> {
     fn default() -> Self {
         Self {
             instruments: BTreeMap::new(),
@@ -279,20 +290,108 @@ impl<K, F: Float> Default for Kept<K, F> {
     }
 }
 
-/// What a declaration does to the node under its key, with the node it builds
-/// (built once, in the plan).
-enum Fate {
+/// What a declaration does to the node under its key, with what the plan made
+/// for it: the node a value builds (built once, in the plan), or the shape of the
+/// node over a plugin.
+enum Fate<B> {
     /// The key is new.
-    Add(Built),
+    Add(B),
     /// The node is gone or the config is of another type: a new node.
-    Readd(Built),
+    Readd(B),
     /// The structure is the same: the differing values are written.
     Values,
     /// Another structure: the node is swapped.
-    Swap(Built),
+    Swap(B),
 }
 
-impl<K: fmt::Debug, F: Float> fmt::Debug for Kept<K, F> {
+impl<B> Fate<B> {
+    /// What `kind` does, with `made` giving the node it adds or swaps in.
+    fn of(kind: Kind, made: impl FnOnce() -> B) -> Self {
+        match kind {
+            Kind::Add => Self::Add(made()),
+            Kind::Readd => Self::Readd(made()),
+            Kind::Values => Self::Values,
+            Kind::Swap => Self::Swap(made()),
+        }
+    }
+
+    /// Whether the key gets a new node.
+    fn is_new(&self) -> bool {
+        matches!(self, Self::Add(_) | Self::Readd(_))
+    }
+
+    /// Whether the key keeps its node, with its queue and strip.
+    fn keeps_node(&self) -> bool {
+        matches!(self, Self::Values | Self::Swap(_))
+    }
+
+    /// What the plan made for a node that is added, readded or swapped.
+    fn made(&self) -> Option<&B> {
+        match self {
+            Self::Add(made) | Self::Readd(made) | Self::Swap(made) => Some(made),
+            Self::Values => None,
+        }
+    }
+}
+
+/// A declaration's fate, by what its body is a node of.
+enum Plan {
+    /// A node built from a value.
+    Node(Fate<Built>),
+    /// A node over a loaded plugin, with the shape its ports give it.
+    #[cfg(feature = "plugin")]
+    Plugin(Fate<Shape>),
+}
+
+impl Plan {
+    /// Whether the key gets a new node.
+    fn is_new(&self) -> bool {
+        match self {
+            Self::Node(fate) => fate.is_new(),
+            #[cfg(feature = "plugin")]
+            Self::Plugin(fate) => fate.is_new(),
+        }
+    }
+
+    /// Whether the key keeps its node.
+    fn keeps_node(&self) -> bool {
+        match self {
+            Self::Node(fate) => fate.keeps_node(),
+            #[cfg(feature = "plugin")]
+            Self::Plugin(fate) => fate.keeps_node(),
+        }
+    }
+
+    /// Whether the key's old node goes and a new one comes.
+    fn is_readd(&self) -> bool {
+        match self {
+            Self::Node(fate) => matches!(fate, Fate::Readd(_)),
+            #[cfg(feature = "plugin")]
+            Self::Plugin(fate) => matches!(fate, Fate::Readd(_)),
+        }
+    }
+
+    /// The shape of the node a patch adds or swaps in, as its wires are
+    /// checked against it.
+    fn shape(&self) -> Option<Shape> {
+        match self {
+            Self::Node(fate) => fate.made().map(|built| built.shape),
+            #[cfg(feature = "plugin")]
+            Self::Plugin(fate) => fate.made().copied(),
+        }
+    }
+
+    /// The node built from a value, when the plan built one.
+    fn built(&self) -> Option<&Built> {
+        match self {
+            Self::Node(fate) => fate.made(),
+            #[cfg(feature = "plugin")]
+            Self::Plugin(_) => None,
+        }
+    }
+}
+
+impl<K: fmt::Debug, F: PatchFloat> fmt::Debug for Kept<K, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_map()
             .entries(self.nodes.iter().map(|(key, s)| (key, s.node)))
@@ -302,7 +401,7 @@ impl<K: fmt::Debug, F: Float> fmt::Debug for Kept<K, F> {
 
 /// The assignments of what `new` gives that `old` did not give or gave
 /// another value, to the node at `node`, of the node type `owner`.
-fn declared_writes<F: Float>(
+fn declared_writes<F: PatchFloat>(
     graph: &Graph<F>,
     node: NodeKey,
     owner: TypeId,
@@ -402,17 +501,21 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         if let Some(key) = again {
             return Err(PatchError::DuplicateKey(key.clone()));
         }
+        // A plugin's initials are `Normalized`: finite by their type.
         let finite = |declaration: &Declaration<Graph<C::Float>>| {
-            declaration
-                .config
-                .initials()
-                .params()
-                .iter()
-                .all(|(_, raw)| raw.is_finite())
+            declaration.body.node().is_none_or(|config| {
+                config
+                    .initials()
+                    .params()
+                    .iter()
+                    .all(|(_, raw)| raw.is_finite())
+            })
         };
         if let Some((key, ..)) = nodes.iter().find(|(_, d, _)| !finite(d)) {
             return Err(PatchError::NotFinite(key.clone()));
         }
+        #[cfg(feature = "plugin")]
+        self.check_plugins(&nodes)?;
         let mut wires = Self::declared_wires(&declared, &seen)?;
         // A carried wire is kept as it was made: a carried section converged,
         // so none of its wires was left dormant out of the kept ones.
@@ -466,7 +569,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let mut writes = Vec::new();
         let mut fresh = BTreeSet::new();
         for planned in planned.nodes {
-            if matches!(planned.fate, Fate::Add(_) | Fate::Readd(_)) {
+            if planned.plan.is_new() {
                 fresh.insert(planned.key.clone());
             }
             self.declare(&mut kept, planned, &mut patched, &mut writes);
@@ -523,19 +626,25 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             }
         }
         for (key, declaration, kind) in nodes {
-            let fate = Self::fate(kind, &declaration, host);
-            let id = match &fate {
-                Fate::Add(_) | Fate::Readd(_) => NodeKey::fresh(),
-                Fate::Values | Fate::Swap(_) => kept.nodes[&key].node,
+            let plan = Self::plan_of(kind, &declaration, host);
+            let id = if plan.is_new() {
+                NodeKey::fresh()
+            } else {
+                kept.nodes[&key].node
             };
-            if let Fate::Add(built) | Fate::Readd(built) | Fate::Swap(built) = &fate {
-                planned.shapes.insert(id, built.shape);
+            if let Some(shape) = plan.shape() {
+                planned.shapes.insert(id, shape);
             }
-            let new_parts = matches!(fate, Fate::Add(_) | Fate::Readd(_))
-                .then(|| declaration.config.played().map(NewParts::new::<C::Float>))
+            let new_parts = plan
+                .is_new()
+                .then(|| {
+                    let config = declaration.body.node()?;
+                    config.played().map(NewParts::new::<C::Float>)
+                })
                 .flatten();
             // A kept key's node keeps its queue and strip.
-            let kept_strip = matches!(fate, Fate::Values | Fate::Swap(_))
+            let kept_strip = plan
+                .keeps_node()
                 .then(|| kept.instruments.get(&key))
                 .flatten()
                 .map(Parts::strip);
@@ -550,7 +659,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             planned.nodes.push(PlannedNode {
                 key,
                 declaration,
-                fate,
+                plan,
                 id,
                 parts: new_parts,
             });
@@ -558,13 +667,13 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         planned
     }
 
-    fn fate(kind: Kind, declaration: &Declaration<Graph<C::Float>>, host: &HostValues) -> Fate {
-        let new = &declaration.config;
-        match kind {
-            Kind::Add => Fate::Add(new.build(host)),
-            Kind::Readd => Fate::Readd(new.build(host)),
-            Kind::Values => Fate::Values,
-            Kind::Swap => Fate::Swap(new.build(host)),
+    /// What `declaration` does to its key's node: a value's node is built
+    /// here, and a plugin's is not (its install is taken at the commit).
+    fn plan_of(kind: Kind, declaration: &Declaration<Graph<C::Float>>, host: &HostValues) -> Plan {
+        match &declaration.body {
+            Body::Node(new) => Plan::Node(Fate::of(kind, || new.build(host))),
+            #[cfg(feature = "plugin")]
+            Body::Plugin(held) => Plan::Plugin(Fate::of(kind, || held.held().shape())),
         }
     }
 
@@ -672,11 +781,54 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let PlannedNode {
             key,
             declaration,
-            fate,
+            plan,
             id,
             parts,
         } = planned;
-        let new = &declaration.config;
+        match plan {
+            Plan::Node(plan) => {
+                let planned = PlannedNode {
+                    key,
+                    declaration,
+                    plan,
+                    id,
+                    parts,
+                };
+                self.declare_node(kept, planned, patched, writes);
+            }
+            #[cfg(feature = "plugin")]
+            Plan::Plugin(plan) => {
+                let planned = PlannedNode {
+                    key,
+                    declaration,
+                    plan,
+                    id,
+                    parts,
+                };
+                self.declare_plugin(kept, planned, patched, writes);
+            }
+        }
+    }
+
+    /// Makes `key`'s node, built from a value, match its declaration.
+    fn declare_node(
+        &mut self,
+        kept: &mut Kept<K, C::Float>,
+        planned: PlannedNode<K, C::Float, Fate<Built>>,
+        patched: &mut Patched<K>,
+        writes: &mut Vec<AnyAssign>,
+    ) {
+        let PlannedNode {
+            key,
+            declaration,
+            plan: fate,
+            id,
+            parts,
+        } = planned;
+        let new = declaration
+            .body
+            .node()
+            .expect("a node is declared by a value-built declaration");
         match fate {
             Fate::Add(built) => {
                 let main = built.main;
@@ -733,16 +885,21 @@ impl<K: AppKey, C: Clock> Session<K, C> {
             }
             Fate::Values => {
                 let old = kept.nodes.get_mut(&key).expect("a kept key has its node");
+                let old_node = old
+                    .declaration
+                    .body
+                    .node()
+                    .expect("a kept value-built node is declared by a value");
                 declared_writes(
                     &self.graph,
                     old.node,
                     new.node_type(),
-                    &old.declaration.config.initials(),
-                    &declaration.config.initials(),
+                    &old_node.initials(),
+                    &new.initials(),
                     writes,
                 );
                 if let (Some(parts), Some(gain)) = (kept.instruments.get(&key), new.played())
-                    && old.declaration.config.played() != Some(gain)
+                    && old_node.played() != Some(gain)
                 {
                     writes.push(parts.set_gain(gain));
                 }
@@ -774,7 +931,12 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let Some(stored) = self.declared.nodes.get(key) else {
             return Err(KeyError::Undeclared(key.clone()));
         };
-        if stored.declaration.config.config_type() != TypeId::of::<Cfg>() {
+        let of_type = stored
+            .declaration
+            .body
+            .node()
+            .is_some_and(|config| config.config_type() == TypeId::of::<Cfg>());
+        if !of_type {
             return Err(KeyError::OtherConfig(key.clone()));
         }
         if !self.graph.contains(stored.node) {

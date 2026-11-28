@@ -4,7 +4,7 @@
 //! the instrument's key and lends the keys once ([`Session::take_keys`]).
 
 use thiserror::Error;
-use tutti_buffers::{ChannelTopology, Float};
+use tutti_buffers::ChannelTopology;
 use tutti_graph::{HostValues, InletCounts, NodeKey, Shape};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
 use tutti_nodes::{BusStripConfig, BusStripNode};
@@ -14,6 +14,7 @@ use tutti_units::Amplitude;
 use super::Kept;
 use super::wire::Resolved;
 use crate::Graph;
+use crate::patch::PatchFloat;
 use crate::patch::{Built, Fading, Place};
 use crate::{AnyAssign, AppKey, Clock, EventInputPort, Key, OutputPort, ReplaceRefused, Session};
 
@@ -63,7 +64,7 @@ pub(super) struct NewParts {
 
 impl NewParts {
     /// A stereo strip at `gain`, under a key no node holds.
-    pub(super) fn new<F: Float>(gain: Amplitude) -> Self {
+    pub(super) fn new<F: PatchFloat>(gain: Amplitude) -> Self {
         let config = BusStripConfig::new(ChannelTopology::STEREO).volume(gain);
         Self {
             strip: NodeKey::fresh(),

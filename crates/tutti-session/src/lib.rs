@@ -327,6 +327,8 @@ pub use hang::HangPolicy;
 pub use midi_hardware::{MidiPolicy, MidiPolicyError};
 #[cfg(feature = "midi")]
 pub use patch::InstrumentDecl;
+#[cfg(feature = "plugin")]
+pub use patch::PluginDecl;
 pub use patch::{Declarations, IntoPatch, KeyError, NodeDecl, PatchTarget, Section, WireEnds};
 #[cfg(feature = "plugin")]
 pub use plugin_diagnostics::{Diagnostics, PluginBuses};
@@ -345,6 +347,8 @@ pub use recovery::{
 };
 #[cfg(feature = "sampler")]
 pub use sampler::{OpenStream, OpenStreamError, OpenedStream, OpeningStream, SamplerError};
+#[cfg(feature = "plugin")]
+pub use session::PluginPatchError;
 pub use session::{
     AppKey, MainOutputTopologyStatus, PHASES, PatchError, Patched, Phase, PhaseCx, Session,
     SessionEvent,

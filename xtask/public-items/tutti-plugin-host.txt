@@ -133,6 +133,7 @@ fn node::client::InProcessClient::seed_delivery
 fn node::client::InProcessClient::set_render_mode
 fn node::client::LiveView::announce_render_mode
 fn node::client::LiveView::render_mode
+fn node::client::declared_shape
 fn node::fork::PluginNode::fork_instance
 fn node::graph::InProcessClient::controls
 fn node::graph::InProcessClient::origin

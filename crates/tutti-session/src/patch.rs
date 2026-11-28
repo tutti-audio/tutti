@@ -24,6 +24,8 @@ use std::fmt;
 use thiserror::Error;
 use tutti_graph::{Fade, HostValues, Initials, NodeKey, Shape};
 use tutti_units::{Amplitude, Samples};
+#[cfg(feature = "plugin")]
+use tutti_units::{Normalized, ParamId};
 
 mod wire;
 
@@ -161,7 +163,7 @@ impl<K, C> InstrumentDecl<K, C> {
             }),
         };
         let declaration = Declaration {
-            config: Box::new(held),
+            body: Body::Node(Box::new(held)),
             fading: self.fading,
         };
         (self.key, declaration)
@@ -280,6 +282,55 @@ pub(crate) struct PendingSection<K, G: PatchTarget> {
 pub trait PatchTarget {
     /// Why a swap was refused.
     type Refused;
+
+    /// What a plugin node is declared as on this target: the held plugin where
+    /// the graph hosts plugins, and an empty type where it cannot.
+    #[doc(hidden)]
+    #[cfg(feature = "plugin")]
+    type Plugin: HoldsPlugin + Send;
+}
+
+/// The float a declared graph runs at, and what a plugin node is declared as
+/// at it: the held plugin for `f32`, whose formats are `f32` at their FFI, and
+/// an empty type for `f64`, so an `f64` patch cannot hold a plugin.
+#[doc(hidden)]
+pub trait PatchFloat: tutti_buffers::Float {
+    /// What a plugin node is declared as at this float.
+    #[cfg(feature = "plugin")]
+    type Plugin: HoldsPlugin + Send;
+}
+
+impl PatchFloat for f32 {
+    #[cfg(feature = "plugin")]
+    type Plugin = PluginHeld;
+}
+
+impl PatchFloat for f64 {
+    #[cfg(feature = "plugin")]
+    type Plugin = std::convert::Infallible;
+}
+
+/// A plugin as a declaration holds it. An empty type implements it for a graph
+/// that hosts no plugin, so a plugin arm over that graph is never entered.
+#[doc(hidden)]
+#[cfg(feature = "plugin")]
+pub trait HoldsPlugin {
+    /// The held plugin.
+    fn held(&self) -> &PluginHeld;
+}
+
+#[cfg(feature = "plugin")]
+impl HoldsPlugin for PluginHeld {
+    fn held(&self) -> &PluginHeld {
+        self
+    }
+}
+
+#[cfg(feature = "plugin")]
+impl HoldsPlugin for std::convert::Infallible {
+    fn held(&self) -> &PluginHeld {
+        match *self {}
+    }
 }
 
 /// A node built from a declaration and not yet placed: the target's own node
@@ -420,8 +471,135 @@ where
 
 /// A declaration in a patch or kept from one.
 pub(crate) struct Declaration<G: PatchTarget> {
-    pub(crate) config: Box<dyn Declared<G>>,
+    pub(crate) body: Body<G>,
     pub(crate) fading: Fading,
+}
+
+/// What a declaration is a node of. A `match` over it sits in the plan and the
+/// commit of `Session::patch` alone.
+pub(crate) enum Body<G: PatchTarget> {
+    /// A node built from a value: built at the plan, placed at the commit, and
+    /// built again by any number of plans.
+    Node(Box<dyn Declared<G>>),
+    /// A node bound over a loaded plugin: checked at the plan, installed at the
+    /// commit, once.
+    #[cfg(feature = "plugin")]
+    Plugin(G::Plugin),
+}
+
+impl<G: PatchTarget> Body<G> {
+    /// The config of a value-built node, `None` for any other body.
+    pub(crate) fn node(&self) -> Option<&dyn Declared<G>> {
+        match self {
+            Self::Node(config) => Some(&**config),
+            #[cfg(feature = "plugin")]
+            Self::Plugin(_) => None,
+        }
+    }
+
+    /// The loaded plugin of a plugin node, `None` for any other body.
+    #[cfg(feature = "plugin")]
+    pub(crate) fn plugin(&self) -> Option<&PluginHeld> {
+        match self {
+            Self::Node(_) => None,
+            Self::Plugin(held) => Some(held.held()),
+        }
+    }
+}
+
+/// A loaded plugin as declared: the plugin, which is identified by its
+/// instance, and the values its parameters are declared at.
+#[cfg(feature = "plugin")]
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct PluginHeld {
+    pub(crate) loaded: crate::LoadedPlugin,
+    pub(crate) initials: Vec<(ParamId, Normalized)>,
+}
+
+/// One plugin node of a patch: the app's key for it and the loaded plugin it is
+/// over.
+///
+/// The plugin is the node's identity. A patch that declares the key again with
+/// the same [`LoadedPlugin`](crate::LoadedPlugin) (or a clone of it) keeps the node, its editor and
+/// its record, and writes the [`initial`](Self::initial) values that changed;
+/// with another plugin it swaps the node over, the old plugin closing, over the
+/// graph's declick; with a config of another type it removes the node and adds
+/// the new one. A patch without the key removes the node, and the plugin with
+/// it: a plugin whose node was removed is spent, and is loaded again to be
+/// declared again.
+///
+/// A plugin is declared under one key, and is taken by the first patch that adds
+/// it. The ports of the node are the plugin's own: a change of them is the
+/// plugin's, and the node at the key follows it.
+///
+/// A swap the graph refuses leaves the key in
+/// [`Patched::unconverged`](crate::Patched::unconverged). A swap refused as
+/// busy takes nothing, so the next patch tries it again with the same plugin.
+/// A swap refused for any other reason closes the incoming plugin, as
+/// [`swap_plugin`](crate::Session::swap_plugin) does. That plugin is spent: the
+/// next patch that declares it is refused with
+/// [`PluginPatchError::Spent`](crate::PluginPatchError::Spent), and it is
+/// loaded again to be declared again.
+#[cfg(feature = "plugin")]
+#[must_use = "a declaration is part of a patch only once `Session::patch` takes it"]
+pub struct PluginDecl<K> {
+    key: K,
+    loaded: crate::LoadedPlugin,
+    initials: Vec<(ParamId, Normalized)>,
+}
+
+#[cfg(feature = "plugin")]
+impl<K> PluginDecl<K> {
+    /// The plugin `loaded` as the node under `key`, with no parameter declared.
+    pub fn new(key: K, loaded: crate::LoadedPlugin) -> Self {
+        Self {
+            key,
+            loaded,
+            initials: Vec::new(),
+        }
+    }
+
+    /// Declares the parameter `id` at `value`: written to the plugin when the
+    /// node is added or swapped in, and again each time a patch declares another
+    /// value for it. A patch that declares the same value writes nothing, so an
+    /// edit made in the plugin's editor stands until the app declares a new
+    /// value. Declaring `id` twice keeps the last value.
+    ///
+    /// An id the plugin does not list, or lists read-only, refuses the patch
+    /// ([`PluginPatchError::NoSuchParam`](crate::PluginPatchError::NoSuchParam),
+    /// [`ParamReadOnly`](crate::PluginPatchError::ParamReadOnly)). A plugin that
+    /// stops listing a declared parameter after it loaded is not written to for
+    /// it: that is counted
+    /// ([`Diagnostics::unlisted_initials`](crate::Diagnostics::unlisted_initials)).
+    pub fn initial(mut self, id: ParamId, value: Normalized) -> Self {
+        self.initials.retain(|&(known, _)| known != id);
+        self.initials.push((id, value));
+        self
+    }
+
+    /// The declaration this makes.
+    pub(crate) fn declaration<G: PatchTarget<Plugin = PluginHeld>>(self) -> (K, Declaration<G>) {
+        let held = PluginHeld {
+            loaded: self.loaded,
+            initials: self.initials,
+        };
+        let declaration = Declaration {
+            body: Body::Plugin(held),
+            fading: Fading::Declick,
+        };
+        (self.key, declaration)
+    }
+}
+
+#[cfg(feature = "plugin")]
+impl<K: fmt::Debug> fmt::Debug for PluginDecl<K> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PluginDecl")
+            .field("key", &self.key)
+            .field("initials", &self.initials)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The nodes one `session.patch` call declares, in the order declared.
@@ -509,10 +687,10 @@ where
         patch.nodes.push((
             self.key,
             Declaration {
-                config: Box::new(Held {
+                body: Body::Node(Box::new(Held {
                     config: self.config,
                     played: None,
-                }),
+                })),
                 fading: self.fading,
             },
         ));

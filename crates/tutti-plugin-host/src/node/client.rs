@@ -301,6 +301,20 @@ impl Declared {
     }
 }
 
+/// The shape a node over a plugin that reports `wiring` declares: its buses
+/// and channels as the node's, one event input (MIDI and parameter events) and
+/// an event output for a plugin with MIDI out. What a host checks a wire
+/// against before the node is bound; the bound node adds the plugin's latency
+/// and tail.
+///
+/// # Errors
+///
+/// [`PluginTooWide`] when the plugin has more channels in a direction than a
+/// block serves, which no node is built over.
+pub fn declared_shape(wiring: &PluginWiring) -> Result<Shape, PluginTooWide> {
+    Ok(Declared::of(wiring)?.event_shape(wiring.features))
+}
+
 /// The node's buses for a plugin's, in bus order, each with the role the
 /// format gave it.
 ///

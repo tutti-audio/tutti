@@ -917,6 +917,37 @@ fn a_write_to_a_parameter_a_rescan_dropped_is_refused_by_name_and_then_no_target
     ));
 }
 
+/// **A declared initial the plugin no longer lists after a rescan is counted and
+/// not written**: the one it still lists joins the batch. A later write of the
+/// dropped id is no target.
+#[test]
+fn a_declared_initial_a_rescan_dropped_is_counted_and_not_written() {
+    let (mut s, key, fake, refresh) = session_keyed();
+    let _ = update(&mut s);
+    *fake.infos.lock() = vec![ParameterInfo::new(MODE, "Mode").with_normalized_default(0.0)];
+    refresh.fire(PluginRefresh::ParamTitles);
+    let _ = update(&mut s);
+    let unlisted = |s: &Session| {
+        s.plugin_view(key)
+            .unwrap()
+            .diagnostics()
+            .unlisted_initials()
+    };
+    assert_eq!(unlisted(&s), tutti_units::Calls::ZERO);
+
+    let mut batch = Vec::new();
+    let initials = [(CUTOFF, Normalized::of(0.8)), (MODE, Normalized::of(0.5))];
+    s.graph.plugins[&key.erase()].write_initials(key.erase(), &initials, &mut batch);
+
+    assert_eq!(
+        batch.len(),
+        1,
+        "only the parameter the plugin lists is written"
+    );
+    assert_eq!(unlisted(&s), tutti_units::Calls::new(1));
+    assert!(fake.sets().is_empty(), "nothing reached the plugin yet");
+}
+
 /// **A write the plugin did not answer for is owed, and sent again at the next
 /// phase, newest value only.** Two writes to one parameter while the plugin
 /// gives no answer are one send of the later value once it answers; a phase

@@ -4,7 +4,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use tutti_buffers::Float;
 use tutti_graph::{
     BusOutputPort, CycleEdge, Edge, EdgeId, GraphSpec, NodeKey, NodeSpec, PortSink, PortSource,
 };
@@ -12,14 +11,15 @@ use tutti_units::Samples;
 
 use super::instrument::Parts;
 use super::wire::{KeptWire, Ports, Resolved};
-use super::{Fate, Kept, PatchError, Planned};
+use super::{Kept, PatchError, Planned};
 use crate::key::BusEnd;
-use crate::patch::{Built, WireEnds, WireId};
+use crate::patch::PatchFloat;
+use crate::patch::{WireEnds, WireId};
 use crate::{AppKey, BusInputPort, ConnectError, EventInputPort, Graph, OutputPort};
 
 /// Refuses what the declared nodes and wires cannot make, with nothing changed,
 /// and names the edges leaving the graph that would close a cycle with them.
-pub(super) fn check<K: AppKey, F: Float>(
+pub(super) fn check<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,
@@ -79,9 +79,9 @@ fn forget_nodes(spec: &mut GraphSpec, gone: &BTreeSet<NodeKey>) {
 
 /// Refuses an instrument whose node lacks the ports the session wires: an
 /// event input for its queue and the two outputs of its main pair.
-fn ports<K: AppKey, F: Float>(planned: &Planned<K, F>) -> Result<(), PatchError<K>> {
+fn ports<K: AppKey, F: PatchFloat>(planned: &Planned<K, F>) -> Result<(), PatchError<K>> {
     for p in &planned.nodes {
-        let (Fate::Add(built) | Fate::Readd(built) | Fate::Swap(built)) = &p.fate else {
+        let Some(built) = p.plan.built() else {
             continue;
         };
         let Some(main) = built.main else {
@@ -109,7 +109,7 @@ fn ports<K: AppKey, F: Float>(planned: &Planned<K, F>) -> Result<(), PatchError<
 }
 
 /// Refuses a wire the declared nodes cannot make, with nothing changed.
-fn wires<K: AppKey, F: Float>(
+fn wires<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,
@@ -151,7 +151,7 @@ fn wires<K: AppKey, F: Float>(
 
 /// Refuses a feedback wire the graph would not compile, and a wire that
 /// puts a second edge on ports that hold one, with nothing changed.
-fn feedback<K: AppKey, F: Float>(
+fn feedback<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,
@@ -212,7 +212,7 @@ fn feedback<K: AppKey, F: Float>(
 /// search. An edge that leaves (dropped by this patch, or still fading)
 /// and closes a cycle is cut; a cycle left through live wires is the
 /// patch's.
-fn acyclic<K: AppKey, F: Float>(
+fn acyclic<K: AppKey, F: PatchFloat>(
     graph: &Graph<F>,
     planned: &Planned<K, F>,
     wires: &BTreeMap<WireId<K>, KeptWire>,
@@ -230,7 +230,7 @@ fn acyclic<K: AppKey, F: Float>(
             planned
                 .nodes
                 .iter()
-                .filter(|p| matches!(p.fate, Fate::Readd(_)))
+                .filter(|p| p.plan.is_readd())
                 .map(|p| &p.key),
         );
     let gone: BTreeSet<NodeKey> = leaving
@@ -247,17 +247,13 @@ fn acyclic<K: AppKey, F: Float>(
     }
     // A new instrument's strip reads its node's main pair.
     for p in &planned.nodes {
-        if let (
-            Fate::Add(Built {
-                main: Some(main), ..
-            })
-            | Fate::Readd(Built {
-                main: Some(main), ..
-            }),
-            Some(parts),
-        ) = (&p.fate, &p.parts)
-        {
-            for wire in parts.audio(p.id, *main) {
+        let main = p
+            .plan
+            .built()
+            .filter(|_| p.plan.is_new())
+            .and_then(|built| built.main);
+        if let (Some(main), Some(parts)) = (main, &p.parts) {
+            for wire in parts.audio(p.id, main) {
                 wire.in_spec(&mut spec, graph, pending, true);
             }
         }

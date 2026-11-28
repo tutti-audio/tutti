@@ -111,13 +111,13 @@ impl Request {
         };
         let config = request.config.clone();
         let opened = open(request);
-        let (shared, install) =
-            Shared::new(&cx, stamp, self.id, opened, self.loadable, config, presets)?;
+        let shared = Shared::new(&cx, stamp, self.id, opened, self.loadable, config, presets)?;
         Ok(LoadedPlugin {
-            instance: PluginInstance {
-                shared: Arc::new(shared),
-            },
-            install: Some(Box::new(install)),
+            owners: Arc::new(Owners {
+                instance: PluginInstance {
+                    shared: Arc::new(shared),
+                },
+            }),
             cut: cx.cut,
         })
     }
@@ -323,8 +323,7 @@ impl Future for LoadingPlugin {
             let answered = std::task::ready!(Pin::new(receiver).poll(cx));
             // A sender dropped unanswered: the executor dropped the launch task
             // before it ran (the open is `caught`, so a panic answers).
-            let mut node = match answered.unwrap_or_else(|_| Err(plugin_failed(IpcError::ShutDown)))
-            {
+            let node = match answered.unwrap_or_else(|_| Err(plugin_failed(IpcError::ShutDown))) {
                 Ok(node) => node,
                 Err(error) => {
                     this.stage = Stage::Finished;
@@ -343,7 +342,7 @@ impl Future for LoadingPlugin {
             panic!("a load future is polled after it resolved");
         };
         let values = std::task::ready!(Pin::new(reading).poll(cx));
-        let mut node = node.take().expect("the node waits for its read");
+        let node = node.take().expect("the node waits for its read");
         // A list the plugin did not give leaves the read with the node, for the session's
         // next update to start again.
         node.land_params(values);
@@ -443,46 +442,79 @@ impl Peer for PluginInstance {
 }
 
 /// A plugin loaded and not yet in the graph: a load's output, which
-/// [`Session::apply`] and [`Session::swap_plugin`] take. A plugin is in one
-/// node, so a `LoadedPlugin` is not `Clone`; applying it gives the node's
-/// [`Key`], and a refused apply hands nothing back.
+/// [`Session::apply`] and [`Session::swap_plugin`] take, and which a
+/// [`PluginDecl`](crate::PluginDecl) names.
+///
+/// A plugin is in one node, and its identity is its [`PluginInstance`]: a clone
+/// is the same plugin, and the node it enters is the first one to take it. Taking
+/// it spends it: a clone applied or declared after that is refused by name
+/// ([`AddPluginError::Spent`], [`PluginPatchError::Spent`](crate::PluginPatchError::Spent)),
+/// and a plugin whose node was removed is loaded again.
 ///
 /// It is `Send`: a session on any thread takes it, whichever thread opened it.
-/// Dropped before it is applied, it closes its plugin (an in-process plugin on
-/// the main thread, whichever thread drops it).
+/// Dropped before it is taken (every clone of it), it closes its plugin (an
+/// in-process plugin on the main thread, whichever thread drops it).
 ///
 /// ```
 /// fn send<T: Send>() {}
 /// send::<tutti_session::LoadedPlugin>();
 /// ```
+#[derive(Clone)]
 #[must_use = "a loaded plugin does nothing until it is applied"]
 pub struct LoadedPlugin {
-    instance: PluginInstance,
-    /// The plugin, until a session takes it. Boxed: an opened plugin is far
-    /// larger than the errors that hand a node back.
-    install: Option<Box<Install>>,
+    owners: Arc<Owners>,
     /// The session that loaded it, the only one it may be applied to.
     cut: Cut,
+}
+
+/// What the clones of one [`LoadedPlugin`] share: the instance, and the drop
+/// that closes a plugin no node took.
+struct Owners {
+    instance: PluginInstance,
+}
+
+impl Drop for Owners {
+    /// Every clone dropped with the plugin still in its slot: the plugin
+    /// closes (an observer of the instance holds the slot's owner, not the
+    /// plugin), and its handle keeps no server alive.
+    fn drop(&mut self) {
+        let shared = &self.instance.shared;
+        let unclaimed = shared.install.lock().take();
+        if unclaimed.is_some() {
+            shared.standing.retired.store(true, Ordering::Release);
+            shared.standing.release_handle();
+        }
+    }
 }
 
 impl fmt::Debug for LoadedPlugin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LoadedPlugin")
-            .field("instance", &self.instance)
+            .field("instance", &self.owners.instance)
             .finish_non_exhaustive()
     }
 }
 
 impl LoadedPlugin {
     /// The parameter read the open left for its caller to await, when it has one.
-    fn take_param_read(&mut self) -> Option<tutti_plugin_host::ParamRead> {
-        self.install.as_mut()?.mirror.as_mut()?.unread.take()
+    fn take_param_read(&self) -> Option<tutti_plugin_host::ParamRead> {
+        self.owners
+            .instance
+            .shared
+            .install
+            .lock()
+            .as_mut()?
+            .mirror
+            .as_mut()?
+            .unread
+            .take()
     }
 
     /// Lands what that read gave, or keeps the read when the plugin's list was
     /// unavailable.
-    fn land_params(&mut self, values: super::ParamValues) {
-        let Some(mirror) = self.install.as_mut().and_then(|i| i.mirror.as_mut()) else {
+    fn land_params(&self, values: super::ParamValues) {
+        let mut slot = self.owners.instance.shared.install.lock();
+        let Some(mirror) = slot.as_mut().and_then(|i| i.mirror.as_mut()) else {
             return;
         };
         match values {
@@ -493,29 +525,67 @@ impl LoadedPlugin {
 
     /// The observer of this plugin: a clone of it outlives the load.
     pub fn instance(&self) -> PluginInstance {
-        self.instance.clone()
+        self.owners.instance.clone()
     }
 
     /// The plugin and its instance, the load spent: the caller owns the plugin's
-    /// retirement from here.
-    fn into_parts(mut self) -> (Install, PluginInstance) {
-        let install = self
-            .install
-            .take()
-            .expect("a node holds its plugin until taken");
-        (*install, self.instance.clone())
+    /// retirement from here. `None` once a node took it.
+    pub(super) fn take(&self) -> Option<(Install, PluginInstance)> {
+        let install = self.owners.instance.shared.install.lock().take()?;
+        Some((*install, self.instance()))
     }
-}
 
-impl Drop for LoadedPlugin {
-    /// Dropped with its plugin still in it: the plugin closes, and its handle
-    /// keeps no server alive.
-    fn drop(&mut self) {
-        if self.install.is_some() {
-            let standing = &self.instance.shared.standing;
-            standing.retired.store(true, Ordering::Release);
-            standing.release_handle();
-        }
+    /// Whether a node took the plugin.
+    pub(crate) fn is_spent(&self) -> bool {
+        self.owners.instance.shared.install.lock().is_none()
+    }
+
+    /// The plugin's parameters as the load read them, when that read landed and
+    /// no node has taken the plugin yet.
+    pub(crate) fn listed(&self) -> Option<Vec<tutti_plugin_types::ParameterInfo>> {
+        let slot = self.owners.instance.shared.install.lock();
+        let values = &slot.as_ref()?.mirror.as_ref()?.values;
+        values.is_ready().then(|| values.descriptors().to_vec())
+    }
+
+    /// Whether `other` is this plugin: the same instance.
+    pub(crate) fn is(&self, other: &Self) -> bool {
+        self.owners.instance.id() == other.owners.instance.id()
+    }
+
+    /// The instance's standing.
+    fn standing(&self) -> &Standing {
+        &self.owners.instance.shared.standing
+    }
+
+    /// The shape a node over the plugin declares, from the wiring the plugin
+    /// reported: what a wire is checked against before the node is bound. `None`
+    /// once a node took the plugin, whose shape is then the graph's.
+    pub(crate) fn shape(&self) -> Option<tutti_graph::Shape> {
+        let handle = self.standing().handle.lock();
+        // A plugin wider than a block serves was refused at the load.
+        tutti_plugin_host::declared_shape(handle.as_ref()?.loaded()).ok()
+    }
+
+    /// The ports the plugin gives a node over it.
+    pub(crate) fn ports(&self) -> &PluginPorts {
+        self.owners.instance.ports()
+    }
+
+    /// Whether the plugin is lost: its server died, and nothing brings it back.
+    pub(crate) fn is_lost(&self) -> bool {
+        self.standing().lost()
+    }
+
+    /// Whether no plugin is behind the load any more: its node's record
+    /// retired, or it was swapped out.
+    pub(crate) fn is_closed(&self) -> bool {
+        self.standing().retired.load(Ordering::Acquire)
+    }
+
+    /// Whether another session loaded it.
+    pub(crate) fn is_of_another(&self, cut: Cut) -> bool {
+        self.cut != cut
     }
 }
 
@@ -527,6 +597,9 @@ pub enum AddPluginError {
     /// The plugin is lost: its server died before it had a node.
     #[error("the plugin is lost")]
     Lost,
+    /// A node took the plugin already, through another clone of the load.
+    #[error("the plugin is already in a node; load it again")]
+    Spent,
     /// Another session loaded the plugin, at its own rate and with its own
     /// collector of main-thread work.
     #[error("the plugin was loaded by another session")]
@@ -545,6 +618,10 @@ pub enum SwapPluginError {
     /// The incoming plugin is lost.
     #[error("the plugin is lost")]
     Lost(LoadedPlugin),
+    /// A node took the incoming plugin already, through another clone of the
+    /// load.
+    #[error("the plugin is already in a node; load it again")]
+    Spent(LoadedPlugin),
     /// Another session loaded the incoming plugin.
     #[error("the plugin was loaded by another session")]
     Stale(LoadedPlugin),
@@ -722,8 +799,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
     ///
     /// The incoming node comes back in the error, and `node` keeps its plugin:
     /// [`SwapPluginError::NoSuchNode`] when no plugin is hosted at `node`;
-    /// [`SwapPluginError::Lost`] and [`SwapPluginError::Stale`] for an
-    /// incoming plugin that is lost or loaded by another session;
+    /// [`SwapPluginError::Lost`], [`SwapPluginError::Spent`] and
+    /// [`SwapPluginError::Stale`] for an incoming plugin that is lost, that a
+    /// node took already or that another session loaded;
     /// [`SwapPluginError::Ports`] for other audio buses or MIDI output than the
     /// node's; [`SwapPluginError::Busy`] while the graph re-prepares: swap again
     /// after an update. [`SwapPluginError::Graph`] means the graph refused, and
@@ -734,7 +812,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         with: LoadedPlugin,
         _main: MainThreadMarker,
     ) -> Result<(), SwapPluginError> {
-        if with.cut != Cut::of(self) {
+        if with.is_of_another(Cut::of(self)) {
             return Err(SwapPluginError::Stale(with));
         }
         let was = match self.graph.plugins.get(&node.erase()) {
@@ -746,13 +824,16 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 ));
             }
         };
-        if with.instance.shared.standing.lost() {
+        if with.is_spent() {
+            return Err(SwapPluginError::Spent(with));
+        }
+        if with.standing().lost() {
             return Err(SwapPluginError::Lost(with));
         }
         // A replacement with other ports would leave the node's edges on ports
         // that are gone and refuse every later commit.
-        if with.instance.shared.ports != was {
-            let got = Box::new(with.instance.shared.ports.clone());
+        if *with.ports() != was {
+            let got = Box::new(with.ports().clone());
             return Err(SwapPluginError::Ports {
                 got,
                 was: Box::new(was),
@@ -762,29 +843,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
         if self.graph.is_repreparing() {
             return Err(SwapPluginError::Busy(with));
         }
-        let (install, handle) = with.into_parts();
-        let Install {
-            plugin,
-            origin,
-            replay,
-            ..
-        } = install;
-        match self.swap_installed(node.erase(), plugin, origin) {
-            Ok(rebinder) => {
-                // After the swap ended the old plugin's epoch.
-                if let Some(hosted) = self.graph.plugins.get(&node.erase()) {
-                    hosted.writes.send_each(&hosted.handle, &replay);
-                }
-                self.link_node(node, NodeLink::of(handle), rebinder);
-                Ok(())
-            }
-            Err(refused) => {
-                let standing = &handle.shared.standing;
-                standing.retired.store(true, Ordering::Release);
-                standing.release_handle();
-                Err(SwapPluginError::Graph(Arc::new(refused)))
-            }
-        }
+        self.swap_loaded(node.erase(), &with)
+            .map_err(|refused| SwapPluginError::Graph(Arc::new(refused)))
     }
 }
 
@@ -806,27 +866,16 @@ impl ApplySealed<f32> for LoadedPlugin {
     /// the plugin was opened on it, and binding it to a graph node is not
     /// main-thread work, so a session on another thread applies it too.
     ///
-    /// A refusal hands nothing back: the load drops, which closes its plugin.
+    /// A refusal hands nothing back: a plugin no node took closes when the last
+    /// clone of its load drops.
     fn apply_to<K: AppKey, C: Clock<Float = f32>>(
         self,
         session: &mut Session<K, C>,
     ) -> Result<Key<AnyPlugin>, AddPluginError> {
-        if self.instance.shared.standing.lost() {
+        if self.is_lost() {
             return Err(AddPluginError::Lost);
         }
-        let (install, instance) = self.into_parts();
-        let Install {
-            plugin,
-            mirror,
-            origin,
-            replay,
-        } = install;
-        let (key, rebinder) = session.install_plugin(plugin, mirror, origin);
-        if let Some(hosted) = session.graph.plugins.get(&key.erase()) {
-            hosted.writes.send_each(&hosted.handle, &replay);
-        }
-        session.link_node(key, NodeLink::of(instance), rebinder);
-        Ok(key)
+        session.add_loaded(&self).ok_or(AddPluginError::Spent)
     }
 }
 
@@ -865,6 +914,72 @@ impl Drop for NodeLink {
 }
 
 impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
+    /// Puts the plugin `loaded` in the graph as a node, unwired, taking it from
+    /// its slot: `None` when a node took it already. This is the one way a
+    /// plugin enters the graph: [`apply`](Self::apply) and a
+    /// [`PluginDecl`](crate::PluginDecl) both come here, through
+    /// `install_plugin`.
+    pub(crate) fn add_loaded(&mut self, loaded: &LoadedPlugin) -> Option<Key<AnyPlugin>> {
+        let (install, instance) = loaded.take()?;
+        let Install {
+            plugin,
+            mirror,
+            origin,
+            replay,
+        } = install;
+        let (key, rebinder) = self.install_plugin(plugin, mirror, origin);
+        if let Some(hosted) = self.graph.plugins.get(&key.erase()) {
+            hosted.writes.send_each(&hosted.handle, &replay);
+        }
+        self.link_node(key, NodeLink::of(instance), rebinder);
+        Some(key)
+    }
+
+    /// Swaps the plugin at `node` for `loaded`'s, taking it from its slot, as
+    /// [`swap_plugin`](Self::swap_plugin) does: the outgoing plugin retires and
+    /// the record is carried to the incoming one. A refusal closes the incoming
+    /// plugin, except [`Busy`](ReplaceRefused::Busy) (the graph is between the
+    /// two commits of a re-prepare), which takes nothing.
+    ///
+    /// # Panics
+    ///
+    /// If a node took the plugin already: the callers checked, and only a
+    /// session takes it.
+    pub(crate) fn swap_loaded(
+        &mut self,
+        node: NodeKey,
+        loaded: &LoadedPlugin,
+    ) -> Result<(), ReplaceRefused> {
+        if self.graph.is_repreparing() {
+            return Err(ReplaceRefused::Busy);
+        }
+        let (install, instance) = loaded
+            .take()
+            .expect("a plugin is swapped in only while it is in its slot");
+        let Install {
+            plugin,
+            origin,
+            replay,
+            ..
+        } = install;
+        match self.swap_installed(node, plugin, origin) {
+            Ok(rebinder) => {
+                // After the swap ended the old plugin's epoch.
+                if let Some(hosted) = self.graph.plugins.get(&node) {
+                    hosted.writes.send_each(&hosted.handle, &replay);
+                }
+                self.link_node(Key::new(node), NodeLink::of(instance), rebinder);
+                Ok(())
+            }
+            Err(refused) => {
+                let standing = &instance.shared.standing;
+                standing.retired.store(true, Ordering::Release);
+                standing.release_handle();
+                Err(refused)
+            }
+        }
+    }
+
     /// Swaps the plugin at `node` for `plugin`, opened with `origin`, as
     /// [`replace`](crate::Graph::replace) swaps any node: crossfading when the
     /// shapes fit the graph's check, else a plain swap at the same key. The
