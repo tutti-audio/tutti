@@ -19,9 +19,9 @@ use super::watcher::StoredChange;
 /// a value and lands it. Nothing outside the crate can name it, so nothing
 /// outside the crate implements [`Target`].
 pub(crate) mod sealed {
-    /// One step of a gesture over a target (`Store::held`).
+    /// One step of a gesture over a target (`Store::gesture_step`).
     #[derive(Clone, Copy, Debug)]
-    pub enum Held<V> {
+    pub enum GestureStep<V> {
         /// The gesture opened.
         Begin,
         /// The gesture wrote this value.
@@ -62,7 +62,7 @@ pub(crate) mod sealed {
         /// A gesture over the target takes `step`: tells whatever the value is
         /// written to that the target is held, moved or let go. Under the value
         /// lock; a target nothing outside the session is told of ignores it.
-        fn held(self, params: &Params, step: Held<&Self::Value>);
+        fn gesture_step(self, params: &Params, step: GestureStep<&Self::Value>);
 
         /// What a watcher is told of a stored value that is not the base it
         /// was read at. A target whose value type a watcher does not name
@@ -345,7 +345,12 @@ pub(super) trait Staged {
 /// told a gesture of: each answers that it has no one to tell.
 macro_rules! no_host_gesture {
     () => {
-        fn held(self, _: &$crate::value::Params, _: $crate::value::Held<&Self::Value>) {}
+        fn gesture_step(
+            self,
+            _: &$crate::value::Params,
+            _: $crate::value::GestureStep<&Self::Value>,
+        ) {
+        }
     };
 }
 pub(crate) use no_host_gesture;

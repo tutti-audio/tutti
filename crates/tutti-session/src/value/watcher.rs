@@ -19,7 +19,7 @@ use super::saved::Captured;
 use super::state::{Params, ValueState};
 use super::target::{
     Assign, Target, TargetId,
-    sealed::{Held, Sealed, Store},
+    sealed::{GestureStep, Sealed, Store},
 };
 use crate::AppKey;
 
@@ -555,15 +555,15 @@ impl<T: Store> Targets for T {
     }
 
     fn begin(&self, params: &Params) {
-        Store::held(*self, params, Held::Begin);
+        Store::gesture_step(*self, params, GestureStep::Begin);
     }
 
     fn end(&self, params: &Params) {
-        Store::held(*self, params, Held::End);
+        Store::gesture_step(*self, params, GestureStep::End);
     }
 
     fn wrote(&self, params: &Params, value: &T::Value) {
-        Store::held(*self, params, Held::Wrote(value));
+        Store::gesture_step(*self, params, GestureStep::Wrote(value));
     }
 }
 impl<T: Store> IntoTargets for T {}

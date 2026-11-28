@@ -24,7 +24,7 @@ use tutti_units::{
 use super::error::{PluginParamRefusal, SetRefusal, UnitError};
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
-use super::target::{Modulatable, Target, TargetId, sealed, sealed::Held, target_builders};
+use super::target::{Modulatable, Target, TargetId, sealed, sealed::GestureStep, target_builders};
 use crate::plugin_params::Driven;
 
 /// One parameter of the plugin hosted at a node: what `key.param(id)` returns,
@@ -155,13 +155,13 @@ pub struct PluginCell {
 impl sealed::Store for PluginParamTarget {
     type Cell = PluginCell;
 
-    fn held(self, params: &Params, step: Held<&Normalized>) {
+    fn gesture_step(self, params: &Params, step: GestureStep<&Normalized>) {
         self.hold(
             params,
             match step {
-                Held::Begin => ParamEdit::Begin(self.id),
-                Held::Wrote(value) => ParamEdit::change(self.id, *value),
-                Held::End => ParamEdit::End(self.id),
+                GestureStep::Begin => ParamEdit::Begin(self.id),
+                GestureStep::Wrote(value) => ParamEdit::change(self.id, *value),
+                GestureStep::End => ParamEdit::End(self.id),
             },
         );
     }
@@ -330,11 +330,11 @@ macro_rules! unit_targets {
         impl sealed::Store for PluginParamTarget<$ty> {
             type Cell = UnitCell;
 
-            fn held(self, params: &Params, step: Held<&$ty>) {
+            fn gesture_step(self, params: &Params, step: GestureStep<&$ty>) {
                 let edit = match step {
-                    Held::Begin => ParamEdit::Begin(self.id),
-                    Held::End => ParamEdit::End(self.id),
-                    Held::Wrote(value) => {
+                    GestureStep::Begin => ParamEdit::Begin(self.id),
+                    GestureStep::End => ParamEdit::End(self.id),
+                    GestureStep::Wrote(value) => {
                         let position = params
                             .plugin(self.node)
                             .and_then(|entry| entry.conversion::<$ty>(self.id)?.ok())

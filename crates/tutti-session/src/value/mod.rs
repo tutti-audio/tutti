@@ -108,7 +108,7 @@ pub(crate) use state::{Outgoing, Params, ValueState, ValueTable};
 pub use target::{
     AnyAssign, AnyTarget, Assign, Effective, Info, Modify, Modulatable, ScalarTarget, Target,
 };
-pub(crate) use target::{no_host_gesture, sealed::Held, target_builders};
+pub(crate) use target::{no_host_gesture, sealed::GestureStep, target_builders};
 pub use watcher::{
     Change, ChangedBy, GestureId, GestureState, IntoTargets, IntoWatched, Watchable, Watcher,
 };
