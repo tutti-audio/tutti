@@ -341,8 +341,8 @@ pub(super) trait Staged {
     fn store(self: Box<Self>) -> Option<StoredChange>;
 }
 
-/// The `begin`, `end` and `wrote` of a target nothing outside the session is
-/// told a gesture of: each answers that it has no one to tell.
+/// The `gesture_step` of a target nothing outside the session is told a
+/// gesture of: every step answers that it has no one to tell.
 macro_rules! no_host_gesture {
     () => {
         fn gesture_step(

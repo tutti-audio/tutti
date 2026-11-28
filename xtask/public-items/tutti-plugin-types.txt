@@ -325,7 +325,6 @@ fn host::process_block
 fn host_edits::HostEdits::drain
 fn host_edits::HostEdits::drain_while
 fn host_edits::HostEdits::holds
-fn host_edits::HostEdits::lost
 fn host_edits::HostEdits::new
 fn host_edits::HostEdits::post
 fn host_edits::HostEdits::reset

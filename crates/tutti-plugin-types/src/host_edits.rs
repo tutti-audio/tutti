@@ -8,12 +8,11 @@
 //! ([`EditOutcome::NotDefined`]).
 //!
 //! The senders are any thread and the drain is the plugin's main thread, so
-//! the list is a control-side lock around a bounded, coalesced FIFO.
+//! the list is a control-side lock around a coalesced FIFO, bounded by three
+//! entries per parameter.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
-
-use tutti_rt::{Mutex, TallyWriter, tally};
+use tutti_rt::Mutex;
 use tutti_units::ParamId;
 
 use crate::ParamEdit;
@@ -34,31 +33,48 @@ pub enum EditOutcome {
 /// - FIFO: the drain sees `Begin`, the values and `End` in the order posted.
 /// - A `Change` is queued only while its id has an open `Begin`, and replaces
 ///   that id's earlier `Change` since the `Begin`.
-/// - `Begin` and `End` are never dropped; an `End` whose id is not open is
-///   not queued (a replacement plugin never heard the `Begin`).
-/// - A `Change` that finds the list holding two more than one per held id is
-///   counted in [`lost`](Self::lost) and not queued; nothing waits.
-#[derive(Debug)]
+/// - A gesture that begins on an id whose last queued edit is its `End`
+///   reopens it: the `End` goes, and the two gestures drain as one `Begin`,
+///   the latest value, `End`. Both would have reached the plugin at the same
+///   tick, so the plugin cannot tell them apart.
+/// - A `Begin` on an id already open queues nothing, and only the `End` that
+///   closes the last open hold is queued: the plugin hears one gesture.
+/// - An `End` whose id is not open is not queued (a replacement plugin never
+///   heard the `Begin`).
+///
+/// So each id holds at most `Begin`, `Change`, `End` between two drains: the
+/// list is bounded by three entries per id with no refusal, and nothing waits.
+#[derive(Debug, Default)]
 pub struct HostEdits {
     list: Mutex<List>,
-    lost: TallyWriter<u64>,
 }
 
 #[derive(Debug, Default)]
 struct List {
     queued: VecDeque<ParamEdit>,
-    /// The ids with an open `Begin`, one entry per `Begin`.
-    held: Vec<ParamId>,
+    /// The ids with an open gesture, each with how many holds are open on it.
+    held: Vec<(ParamId, u32)>,
+}
+
+impl List {
+    fn holds(&mut self, id: ParamId) -> Option<&mut u32> {
+        self.held
+            .iter_mut()
+            .find(|(held, _)| *held == id)
+            .map(|(_, count)| count)
+    }
+
+    /// The position of the last queued edit of `id`.
+    fn last_of(&self, id: ParamId) -> Option<usize> {
+        self.queued.iter().rposition(|queued| queued.id() == id)
+    }
 }
 
 impl HostEdits {
     /// An empty list.
     #[must_use]
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            list: Mutex::new(List::default()),
-            lost: tally::<u64>().writer(),
-        })
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Queues `edit` under the rules above. Never waits for the main thread.
@@ -67,38 +83,37 @@ impl HostEdits {
         let id = edit.id();
         match edit {
             ParamEdit::Begin(_) => {
-                list.held.push(id);
-                list.queued.push_back(edit);
+                if let Some(count) = list.holds(id) {
+                    *count += 1;
+                    return;
+                }
+                list.held.push((id, 1));
+                match list.last_of(id) {
+                    Some(at) if matches!(list.queued[at], ParamEdit::End(_)) => {
+                        list.queued.remove(at);
+                    }
+                    _ => list.queued.push_back(edit),
+                }
             }
             ParamEdit::End(_) => {
-                if let Some(at) = list.held.iter().position(|held| *held == id) {
-                    list.held.remove(at);
+                let Some(count) = list.holds(id) else {
+                    return;
+                };
+                *count -= 1;
+                if *count == 0 {
+                    list.held.retain(|(held, _)| *held != id);
                     list.queued.push_back(edit);
                 }
             }
             ParamEdit::Change { .. } => {
-                if !list.held.contains(&id) {
+                if list.holds(id).is_none() {
                     return;
                 }
-                let earlier = list
-                    .queued
-                    .iter_mut()
-                    .rev()
-                    .find(|queued| queued.id() == id);
-                match earlier {
-                    Some(slot @ ParamEdit::Change { .. }) => *slot = edit,
-                    _ => {
-                        let changes = list
-                            .queued
-                            .iter()
-                            .filter(|queued| matches!(queued, ParamEdit::Change { .. }))
-                            .count();
-                        if changes >= 2 + list.held.len() {
-                            self.lost.add(1);
-                        } else {
-                            list.queued.push_back(edit);
-                        }
+                match list.last_of(id) {
+                    Some(at) if matches!(list.queued[at], ParamEdit::Change { .. }) => {
+                        list.queued[at] = edit;
                     }
+                    _ => list.queued.push_back(edit),
                 }
             }
         }
@@ -116,6 +131,9 @@ impl HostEdits {
     /// Hands queued edits to `apply`, oldest first, until it answers `false`:
     /// that edit and the rest stay queued, in order, for the next call. For a
     /// receiver that can be full.
+    ///
+    /// `apply` runs with the list locked, so it must not block: a poster waits
+    /// for it.
     pub fn drain_while(&self, mut apply: impl FnMut(ParamEdit) -> bool) {
         let mut list = self.list.lock();
         while let Some(edit) = list.queued.pop_front() {
@@ -138,15 +156,8 @@ impl HostEdits {
     /// one ordered stream.
     #[must_use]
     pub fn holds(&self, id: ParamId) -> bool {
-        let list = self.list.lock();
-        list.held.contains(&id) || list.queued.iter().any(|queued| queued.id() == id)
-    }
-
-    /// How many `Change`s were not queued for want of room, over the list's
-    /// life.
-    #[must_use]
-    pub fn lost(&self) -> u64 {
-        self.lost.get()
+        let mut list = self.list.lock();
+        list.holds(id).is_some() || list.last_of(id).is_some()
     }
 }
 
@@ -237,17 +248,95 @@ mod tests {
         assert_eq!(drained(&edits), []);
     }
 
-    /// Begin and end are never dropped, whatever the number of ids held; a
-    /// value of a second gesture on the same id does not take the first's.
+    /// Back-to-back gestures on one id between two drains drain as one, with
+    /// the last value: the list does not grow with the number of gestures.
     #[test]
-    fn begins_and_ends_are_never_dropped() {
+    fn back_to_back_gestures_on_one_id_drain_as_one_with_the_last_value() {
         let edits = HostEdits::new();
         let id = ParamId::new(3);
-        for _ in 0..100 {
+        for n in 0..100 {
             edits.post(ParamEdit::Begin(id));
+            edits.post(change(3, f64::from(n) / 100.0));
             edits.post(ParamEdit::End(id));
         }
-        assert_eq!(drained(&edits).len(), 200);
-        assert_eq!(edits.lost(), 0);
+        assert_eq!(
+            drained(&edits),
+            [ParamEdit::Begin(id), change(3, 0.99), ParamEdit::End(id)]
+        );
+    }
+
+    /// Four clicks between two drains: the plugin ends at the last one's
+    /// value, the value the host holds.
+    #[test]
+    fn the_last_gestures_value_is_never_lost() {
+        let edits = HostEdits::new();
+        let id = ParamId::new(4);
+        for value in [0.1, 0.2, 0.3, 0.4] {
+            edits.post(ParamEdit::Begin(id));
+            edits.post(change(4, value));
+            edits.post(ParamEdit::End(id));
+        }
+        assert_eq!(
+            drained(&edits),
+            [ParamEdit::Begin(id), change(4, 0.4), ParamEdit::End(id)]
+        );
+    }
+
+    /// The same through a receiver that takes one edit per call, as the
+    /// client's outbox drains into a full control queue: gestures posted while
+    /// edits wait merge with them, and the last value arrives.
+    #[test]
+    fn a_full_receiver_still_delivers_the_last_value() {
+        let edits = HostEdits::new();
+        let id = ParamId::new(8);
+        let mut taken = Vec::new();
+        for value in [0.1, 0.2, 0.3, 0.4] {
+            edits.post(ParamEdit::Begin(id));
+            edits.post(change(8, value));
+            edits.post(ParamEdit::End(id));
+            let mut room = 1;
+            edits.drain_while(|edit| {
+                if room == 0 {
+                    return false;
+                }
+                room -= 1;
+                taken.push(edit);
+                true
+            });
+        }
+        edits.drain(|edit| taken.push(edit));
+        assert_eq!(taken.last(), Some(&ParamEdit::End(id)));
+        assert_eq!(
+            taken
+                .iter()
+                .rev()
+                .find(|e| matches!(e, ParamEdit::Change { .. })),
+            Some(&change(8, 0.4)),
+            "the plugin ends at the host's value"
+        );
+        let begins = taken
+            .iter()
+            .filter(|e| matches!(e, ParamEdit::Begin(_)))
+            .count();
+        let ends = taken
+            .iter()
+            .filter(|e| matches!(e, ParamEdit::End(_)))
+            .count();
+        assert_eq!(begins, ends, "every begin is ended");
+    }
+
+    /// Two holds open on one id at once reach the plugin as one gesture: the
+    /// end goes only when the last hold closes.
+    #[test]
+    fn overlapping_holds_on_one_id_are_one_gesture() {
+        let edits = HostEdits::new();
+        let id = ParamId::new(9);
+        edits.post(ParamEdit::Begin(id));
+        edits.post(ParamEdit::Begin(id));
+        edits.post(change(9, 0.5));
+        edits.post(ParamEdit::End(id));
+        assert_eq!(drained(&edits), [ParamEdit::Begin(id), change(9, 0.5)]);
+        edits.post(ParamEdit::End(id));
+        assert_eq!(drained(&edits), [ParamEdit::End(id)]);
     }
 }

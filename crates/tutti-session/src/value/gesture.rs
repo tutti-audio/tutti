@@ -5,9 +5,10 @@
 //! is open its changes are not ended. Dropping it lands the end of every target it
 //! moved as one landing, so a watcher's read sees all the ends or none.
 //!
-//! The gesture also tells each target it is held (`Store::begin` at open,
-//! `Store::end` at drop, moved or not): a plugin's parameter tells the plugin
-//! (`PluginHandle::edit`), every other target has no one to tell.
+//! The gesture also tells each target each step of its hold through
+//! `Store::gesture_step`: `GestureStep::Begin` at open, `Wrote` for each value
+//! stored, and `End` at drop, moved or not. A plugin's parameter tells the
+//! plugin (`PluginHandle::edit`); every other target has no one to tell.
 
 use std::collections::BTreeMap;
 use std::fmt;

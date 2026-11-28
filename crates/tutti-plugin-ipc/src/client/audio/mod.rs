@@ -274,7 +274,7 @@ impl AudioBridge {
             listener,
             responses_lost,
             host_edits: Arc::default(),
-            gesture_outbox: tutti_plugin_types::HostEdits::new(),
+            gesture_outbox: std::sync::Arc::new(tutti_plugin_types::HostEdits::new()),
         };
         Ok((bridge, thread, replies))
     }
@@ -1384,7 +1384,7 @@ mod tests {
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
             host_edits: Arc::default(),
-            gesture_outbox: tutti_plugin_types::HostEdits::new(),
+            gesture_outbox: std::sync::Arc::new(tutti_plugin_types::HostEdits::new()),
         }
     }
 
@@ -1483,7 +1483,7 @@ mod tests {
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
             host_edits: Arc::default(),
-            gesture_outbox: tutti_plugin_types::HostEdits::new(),
+            gesture_outbox: std::sync::Arc::new(tutti_plugin_types::HostEdits::new()),
         };
         let mut held = Vec::new();
         while let Some(payload) = bridge.payloads.acquire() {
@@ -1529,7 +1529,7 @@ mod tests {
             listener: Arc::new(Mutex::new(None)),
             responses_lost: channels::response_ring().2,
             host_edits: Arc::default(),
-            gesture_outbox: tutti_plugin_types::HostEdits::new(),
+            gesture_outbox: std::sync::Arc::new(tutti_plugin_types::HostEdits::new()),
         };
         while bridge
             .channels

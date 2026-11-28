@@ -227,7 +227,7 @@ impl AuLoaded {
             edits: Arc::new(ReportedEdits::default()),
             ranges,
             retired_marks: Vec::new(),
-            host_edits: tutti_plugin_types::HostEdits::new(),
+            host_edits: std::sync::Arc::new(tutti_plugin_types::HostEdits::new()),
             descriptor,
             offline: false,
             mode_accepted,
