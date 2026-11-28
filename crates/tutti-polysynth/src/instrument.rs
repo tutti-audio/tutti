@@ -38,7 +38,7 @@ pub trait InstrumentVoice: NoteVoice<Context = ()> + Clone + Debug + Send + 'sta
     type Float: Float;
 
     /// What the voice is made from.
-    type Config: Clone + Debug + Send + 'static;
+    type Config: Clone + Debug + PartialEq + Send + 'static;
 
     /// An idle voice for `rate`. Allocates: it is called when the instrument is built and when
     /// the graph's rate is not the one it was built for.
@@ -98,7 +98,7 @@ tutti_graph::declare_params!([V: InstrumentVoice] NoteInstrument<V>,
 /// use tutti_units::{SampleRate, Samples};
 /// use tutti_voicing::VoiceConfig;
 ///
-/// let instrument = NoteInstrument::<KarplusVoice<f32>>::new(InstrumentConfig::new(
+/// let instrument = NoteInstrument::<KarplusVoice<f32>>::from(InstrumentConfig::new(
 ///     KarplusVoiceConfig::new(),
 ///     VoiceConfig::poly(NonZeroUsize::new(8).unwrap()),
 /// ));
@@ -129,24 +129,6 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
     const EVENTS: InEvents = Self::PORTS
         .event_input(0)
         .expect("declared one event input");
-
-    /// An instrument of `config.rules.polyphony` idle voices. Allocates.
-    #[must_use]
-    pub fn new(config: InstrumentConfig<V>) -> Self {
-        let rate = Self::INITIAL_RATE;
-        let voices = VoiceTable::new(config.rules, || V::new(&config.voice, rate));
-        Self {
-            cells: InstrumentCells::from_config(&config),
-            rate,
-            voices,
-            universal: UniversalReader::new(config.group, config.device),
-            group: config.group,
-            last_gain: config.gain,
-            applied: None,
-            voice: config.voice,
-            float: PhantomData,
-        }
-    }
 
     /// How many voices are sounding, those in their release among them: a meter an app reads
     /// for a voice-count display.
@@ -185,6 +167,25 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
         ramp(left, from[0], to[0]);
         ramp(right, from[1], to[1]);
         self.applied = Some(to);
+    }
+}
+
+impl<V: InstrumentVoice> From<InstrumentConfig<V>> for NoteInstrument<V> {
+    /// An instrument of `config.rules.polyphony` idle voices. Allocates.
+    fn from(config: InstrumentConfig<V>) -> Self {
+        let rate = Self::INITIAL_RATE;
+        let voices = VoiceTable::new(config.rules, || V::new(&config.voice, rate));
+        Self {
+            cells: InstrumentCells::from_config(&config),
+            rate,
+            voices,
+            universal: UniversalReader::new(config.group, config.device),
+            group: config.group,
+            last_gain: config.gain,
+            applied: None,
+            voice: config.voice,
+            float: PhantomData,
+        }
     }
 }
 

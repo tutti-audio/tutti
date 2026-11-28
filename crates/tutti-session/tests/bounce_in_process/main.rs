@@ -18,6 +18,7 @@ use crate::bounced::bounced;
 use crate::loading::{LoadPlugin, Spec};
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
+use tutti_fixtures::WavePlanes;
 use tutti_plugin_db::Hosting;
 use tutti_plugin_types::PluginRef;
 use tutti_session::ToMemory;
@@ -103,9 +104,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         Ok(out) => {
             let (_, mut done, keys) = out.into_parts();
             match keys.as_slice() {
-                [StemKey::Buffers(key)] => {
-                    done.take_buffers(key).expect("its own key").into_planes()
-                }
+                [StemKey::Buffers(key)] => done.take_buffers(key).expect("its own key").to_planes(),
                 other => panic!("expected one stem held in memory, got {other:?}"),
             }
         }

@@ -16,6 +16,7 @@
 use crate::bounced::bounced;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tutti_buffers::{InterleavedMut, PlanesMut};
+use tutti_fixtures::WavePlanes;
 use tutti_session::ToMemory;
 
 use std::sync::Arc;
@@ -81,7 +82,7 @@ fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, ToMemory>) -> V
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
-        .into_planes()
+        .to_planes()
 }
 
 /// The planes `bounce` renders for each of its stems, in memory, run on this
@@ -95,7 +96,7 @@ fn render_stems(
         .into_parts();
     keys.iter()
         .map(|key| match key {
-            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").into_planes(),
+            StemKey::Buffers(key) => done.take_buffers(key).expect("its own key").to_planes(),
             other => panic!("expected rendered buffers, got {other:?}"),
         })
         .collect()
@@ -196,7 +197,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
         .expect("nothing cancels a control with no token")
         .take_buffers(&planes)
         .expect("a key of these outputs")
-        .into_planes()
+        .to_planes()
     };
     (render(true), render(false))
 }
@@ -1018,7 +1019,7 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
         .apply(rendered)
         .expect("the export renders")
         .into_main_output()
-        .into_planes();
+        .to_planes();
     assert!(built.load(Ordering::SeqCst), "the build ran");
     assert!(
         planes[0].iter().all(|&s| s == 0.5),
@@ -1144,7 +1145,7 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
         .apply(rendered)
         .expect("the export renders")
         .into_main_output()
-        .into_planes();
+        .to_planes();
     assert!(
         planes[1].iter().all(|&s| s == 1.0),
         "the pinned unit renders"

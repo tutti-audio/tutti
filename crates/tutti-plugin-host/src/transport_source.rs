@@ -403,15 +403,13 @@ impl Snapshot {
         if !beat.get().is_finite() {
             return beat;
         }
-        let points = view.map().points();
+        let map = view.map();
         let start = beat;
-        let mut next = points.partition_point(|p| p.beat.get() <= beat.get());
-        while let Some(p) = points.get(next) {
-            if view.frames_between(start, p.beat) > 0 {
+        while let Some(point) = map.point_after(beat) {
+            if view.frames_between(start, point) > 0 {
                 break;
             }
-            beat = p.beat;
-            next += 1;
+            beat = point;
         }
         self.tempo = view.tempo_at(beat);
         beat

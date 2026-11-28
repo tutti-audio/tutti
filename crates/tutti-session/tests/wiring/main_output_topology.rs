@@ -278,7 +278,9 @@ fn an_export_is_placed_from_the_declaration() {
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None);
         let rendered = bounced(s, request).unwrap().into_main_output();
-        rendered.planes().iter().map(|p| p[0]).collect::<Vec<_>>()
+        (0..rendered.channels())
+            .map(|c| rendered.at(c, 0))
+            .collect::<Vec<_>>()
     };
     let mut declared = Session::builder()
         .main_output_topology(buses(4))

@@ -26,6 +26,7 @@ use tutti_export::{
     BufferTarget, Control, DoneError, FileTarget, Gain, Job, Normalize, Output, Outputs, Placement,
     RenderError, RenderGraph, Setup, TailPolicy, TargetError, Written, render,
 };
+use tutti_fixtures::WavePlanes;
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutputPort, PortSource,
     Prepare, Shape, Status, TapId, TapOptions, TapReader,
@@ -280,7 +281,7 @@ fn two_outputs_of_different_formats_are_each_their_own_quantization_of_one_pass(
     .expect("not cancelled");
     let (wa, wb) = (done.file(&ka).unwrap(), done.file(&kb).unwrap());
     assert_eq!((wa.path.as_path(), wb.path.as_path()), (&*a, &*b));
-    let held = done.buffers(&kheld).unwrap().planes();
+    let held = done.buffers(&kheld).unwrap().to_planes();
     assert_eq!((held.len(), held[0].len()), (2, frames));
     let peak = held[0].iter().fold(0.0f32, |m, s| m.max(s.abs()));
     assert!(peak > 0.45, "the tone is there: {peak}");
@@ -397,7 +398,7 @@ fn a_tap_renders_the_signal_of_the_node_it_is_on() {
         ("before the gain", &keys[1], 0.5),
         ("after the gain", &keys[2], 0.25),
     ] {
-        let got = done.buffers(key).unwrap().planes();
+        let got = done.buffers(key).unwrap().to_planes();
         assert_eq!(got.len(), 2, "{name}");
         for (c, plane) in got.iter().enumerate() {
             assert_eq!(plane.len(), 3_000, "{name}");
@@ -449,7 +450,7 @@ fn a_tap_is_drained_and_gated_like_the_main_output() {
     .expect("renders")
     .into_finished()
     .expect("not cancelled");
-    let got = done.buffers(&key).unwrap().planes();
+    let got = done.buffers(&key).unwrap().to_planes();
     assert_eq!(got[0].len(), 2_000);
     for (i, s) in got[0].iter().enumerate() {
         let n = (1_500 + i) as f64;
@@ -905,7 +906,7 @@ fn a_done_refuses_the_key_of_another_outputs_by_name() {
     assert_eq!(other.file(&file), Err(DoneError::Foreign));
     assert_eq!(done.file(&file), done.file(&file));
     assert_eq!(done.buffers(&planes).unwrap().channels(), 2);
-    assert_eq!(done.buffers(&planes).unwrap().frames().get(), 500);
+    assert_eq!(done.buffers(&planes).unwrap().len().get(), 500);
 
     // A taken result is a named error afterwards, not a default.
     let (mut done, file, planes) = (done, file, planes);

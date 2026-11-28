@@ -22,8 +22,7 @@ use std::thread::ThreadId;
 use tutti_session::MainOutput;
 use tutti_session::ToMemory;
 
-use tutti_buffers::ChannelLayout;
-use tutti_export::Rendered;
+use tutti_buffers::{ChannelLayout, Wave};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
     Bounce, BounceTail, ExportClock, InputPort, OutputPort, Range, Session, Stem, StemKey, Workers,
@@ -115,7 +114,7 @@ impl Node for Sum {
 
 /// The fan-out exported to memory on a session with `workers`, and the number
 /// of distinct threads that ran a branch.
-fn export(workers: Workers) -> (Rendered, usize) {
+fn export(workers: Workers) -> (Wave, usize) {
     let (mut targets, ran_on) = export_with(workers, &[]);
     (targets.swap_remove(0), ran_on)
 }
@@ -123,7 +122,7 @@ fn export(workers: Workers) -> (Rendered, usize) {
 /// [`export`] with a stem for each of `stems` (indices into the branches, and
 /// `BRANCHES` for the sum): the main output's planes first and then each stem's,
 /// and the number of distinct threads that ran a branch.
-fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
+fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Wave>, usize) {
     let mut session = Session::builder()
         .render_workers(workers)
         .build_detached(RATE)
@@ -188,15 +187,15 @@ fn a_parallel_export_is_bit_identical_to_the_serial_one() {
         "four workers must spread the branches over threads, ran on {parallel_threads}"
     );
 
-    assert_eq!(serial.frames(), parallel.frames());
-    assert_eq!(serial.frames().get(), 24_000);
+    assert_eq!(serial.len(), parallel.len());
+    assert_eq!(serial.len().get(), 24_000);
     assert_eq!(serial.channels(), 2);
-    let silent = serial.planes()[0].iter().all(|s| *s == 0.0);
+    let silent = serial.channel(0).samples().iter().all(|s| *s == 0.0);
     assert!(!silent, "the fan-out is audible");
     for (c, (a, b)) in serial.planes().iter().zip(parallel.planes()).enumerate() {
         let (a, b): (Vec<u32>, Vec<u32>) = (
-            a.iter().map(|s| s.to_bits()).collect(),
-            b.iter().map(|s| s.to_bits()).collect(),
+            a.samples().iter().map(|s| s.to_bits()).collect(),
+            b.samples().iter().map(|s| s.to_bits()).collect(),
         );
         assert!(
             a == b,
@@ -224,14 +223,15 @@ fn the_stems_of_a_parallel_export_are_bit_identical_to_the_serial_ones() {
     assert_eq!(serial.len(), 1 + stems.len());
     assert_eq!(parallel.len(), serial.len());
     for (i, (a, b)) in serial.iter().zip(&parallel).enumerate() {
-        assert_eq!(a.frames(), Samples::new(24_000), "target {i}");
-        assert_eq!(a.frames(), b.frames(), "target {i}");
+        assert_eq!(a.len(), Samples::new(24_000), "target {i}");
+        assert_eq!(a.len(), b.len(), "target {i}");
         assert!(
-            a.planes()[0].iter().any(|s| *s != 0.0),
+            a.channel(0).samples().iter().any(|s| *s != 0.0),
             "target {i} is audible"
         );
         for (c, (x, y)) in a.planes().iter().zip(b.planes()).enumerate() {
-            let same = x.iter().zip(y).all(|(x, y)| x.to_bits() == y.to_bits());
+            let same =
+                (x.samples().iter().zip(y.samples())).all(|(x, y)| x.to_bits() == y.to_bits());
             assert!(
                 same,
                 "target {i} channel {c} differs from the serial render"
@@ -240,6 +240,6 @@ fn the_stems_of_a_parallel_export_are_bit_identical_to_the_serial_ones() {
     }
     // The sum's stem is the main output's first channel, and a branch's stem is
     // one channel the width of the branch.
-    assert_eq!(serial[3].planes()[0], serial[0].planes()[0]);
+    assert_eq!(serial[3].channel(0), serial[0].channel(0));
     assert_eq!(serial[1].channels(), 1);
 }

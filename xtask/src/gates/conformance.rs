@@ -999,6 +999,125 @@ impl Regen {
             }
         }
     }
+
+    /// The text of a MIDI inventory file for the extracted `items` of `doc`:
+    /// their id, kind, section, facts and digest, with the other columns carried
+    /// from `existing` by sentence ([`carry`]); a new sentence is a `todo` row with
+    /// no paraphrase (the gate refuses it).
+    pub(super) fn midi(
+        doc: &midi_spec::Doc,
+        existing: Option<&str>,
+        items: &[midi_spec::Item],
+    ) -> Result<Self, String> {
+        let old = parsed(doc.file, existing)?;
+        let keys: Vec<(&str, &str)> = items
+            .iter()
+            .map(|i| (i.id.as_str(), i.text.as_str()))
+            .collect();
+        let carried = carry::carry(old, &keys);
+        let mut out = Self::new(midi_header(doc), &carried);
+        for (n, (it, fate)) in items.iter().zip(carried.fates).enumerate() {
+            if fate == Fate::New {
+                out.added.push(it.id.clone());
+            }
+            let (row, lost) = apply(
+                fate,
+                &Extracted {
+                    id: &it.id,
+                    kind: it.kind,
+                    section: &it.section,
+                    facts: &it.facts,
+                    text: &it.text,
+                },
+            );
+            if let Some(old) = lost {
+                out.changed.push((it.id.clone(), old));
+            }
+            out.text.push_str(&row.render());
+            out.text.push('\n');
+            let section = carry::section_of(&it.id);
+            if items
+                .get(n + 1)
+                .is_none_or(|next| carry::section_of(&next.id) != section)
+            {
+                out.write_orphans_of(section);
+            }
+        }
+        out.write_orphans_of("");
+        Ok(out)
+    }
+
+    /// The comment lines of `sf2.txt` are kept as written; this is the text of
+    /// the file for the extracted `items`: every extracted row takes the extracted
+    /// kind, section, facts and digest and keeps the rest of its hand columns while
+    /// its sentence is the same ([`carry`]); a hand-written row and the comments
+    /// stay where they are; a new extracted id is appended as a `todo` row with no
+    /// paraphrase (the gate refuses it).
+    pub(super) fn sf2(existing: &str, items: &[sf2_spec::Item]) -> Result<Self, String> {
+        let mut owned = Vec::new();
+        for (n, line) in existing.lines().enumerate() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            let row = parse_row(t).map_err(|e| format!("sf2.txt:{}: {e}", n + 1))?;
+            if sf2_spec::owns(&row.id) {
+                owned.push(row);
+            }
+        }
+        let keys: Vec<(&str, &str)> = items
+            .iter()
+            .map(|i| (i.id.as_str(), i.text.as_str()))
+            .collect();
+        let carried = carry::carry(owned, &keys);
+        let mut out = Self::new(String::new(), &carried);
+        let mut rows: BTreeMap<&str, Row> = BTreeMap::new();
+        for (it, fate) in items.iter().zip(carried.fates) {
+            if fate == Fate::New {
+                out.added.push(it.id.clone());
+            }
+            let (row, lost) = apply(
+                fate,
+                &Extracted {
+                    id: &it.id,
+                    kind: it.kind,
+                    section: &it.section,
+                    facts: &it.facts,
+                    text: &it.text,
+                },
+            );
+            if let Some(old) = lost {
+                out.changed.push((it.id.clone(), old));
+            }
+            rows.insert(it.id.as_str(), row);
+        }
+        for line in existing.lines() {
+            let t = line.trim();
+            let id = t.split('|').next().unwrap_or("").trim();
+            let is_orphan = t
+                .split('|')
+                .nth(1)
+                .is_some_and(|c| matches!(Side::parse(c.trim()), Side::Orphan(_)));
+            if is_orphan {
+                continue;
+            }
+            if t.is_empty() || t.starts_with('#') || !sf2_spec::owns(id) {
+                out.text.push_str(line);
+                out.text.push('\n');
+            } else if let Some(row) = rows.remove(id) {
+                out.text.push_str(&row.render());
+                out.text.push('\n');
+            }
+        }
+        for it in items {
+            if let Some(row) = rows.remove(it.id.as_str()) {
+                out.text.push_str(&row.render());
+                out.text.push('\n');
+            }
+        }
+        out.write_orphans_of("");
+        Ok(out)
+    }
 }
 
 /// An extracted item's id, kind, section, facts and text.
@@ -1048,125 +1167,6 @@ fn parsed(file: &str, existing: Option<&str>) -> Result<Vec<Row>, String> {
     } else {
         Err(errs.join("\n"))
     }
-}
-
-/// The text of a MIDI inventory file for the extracted `items` of `doc`:
-/// their id, kind, section, facts and digest, with the other columns carried
-/// from `existing` by sentence ([`carry`]); a new sentence is a `todo` row with
-/// no paraphrase (the gate refuses it).
-pub(super) fn regenerate_midi(
-    doc: &midi_spec::Doc,
-    existing: Option<&str>,
-    items: &[midi_spec::Item],
-) -> Result<Regen, String> {
-    let old = parsed(doc.file, existing)?;
-    let keys: Vec<(&str, &str)> = items
-        .iter()
-        .map(|i| (i.id.as_str(), i.text.as_str()))
-        .collect();
-    let carried = carry::carry(old, &keys);
-    let mut out = Regen::new(midi_header(doc), &carried);
-    for (n, (it, fate)) in items.iter().zip(carried.fates).enumerate() {
-        if fate == Fate::New {
-            out.added.push(it.id.clone());
-        }
-        let (row, lost) = apply(
-            fate,
-            &Extracted {
-                id: &it.id,
-                kind: it.kind,
-                section: &it.section,
-                facts: &it.facts,
-                text: &it.text,
-            },
-        );
-        if let Some(old) = lost {
-            out.changed.push((it.id.clone(), old));
-        }
-        out.text.push_str(&row.render());
-        out.text.push('\n');
-        let section = carry::section_of(&it.id);
-        if items
-            .get(n + 1)
-            .is_none_or(|next| carry::section_of(&next.id) != section)
-        {
-            out.write_orphans_of(section);
-        }
-    }
-    out.write_orphans_of("");
-    Ok(out)
-}
-
-/// The comment lines of `sf2.txt` are kept as written; this is the text of
-/// the file for the extracted `items`: every extracted row takes the extracted
-/// kind, section, facts and digest and keeps the rest of its hand columns while
-/// its sentence is the same ([`carry`]); a hand-written row and the comments
-/// stay where they are; a new extracted id is appended as a `todo` row with no
-/// paraphrase (the gate refuses it).
-pub(super) fn regenerate_sf2(existing: &str, items: &[sf2_spec::Item]) -> Result<Regen, String> {
-    let mut owned = Vec::new();
-    for (n, line) in existing.lines().enumerate() {
-        let t = line.trim();
-        if t.is_empty() || t.starts_with('#') {
-            continue;
-        }
-        let row = parse_row(t).map_err(|e| format!("sf2.txt:{}: {e}", n + 1))?;
-        if sf2_spec::owns(&row.id) {
-            owned.push(row);
-        }
-    }
-    let keys: Vec<(&str, &str)> = items
-        .iter()
-        .map(|i| (i.id.as_str(), i.text.as_str()))
-        .collect();
-    let carried = carry::carry(owned, &keys);
-    let mut out = Regen::new(String::new(), &carried);
-    let mut rows: BTreeMap<&str, Row> = BTreeMap::new();
-    for (it, fate) in items.iter().zip(carried.fates) {
-        if fate == Fate::New {
-            out.added.push(it.id.clone());
-        }
-        let (row, lost) = apply(
-            fate,
-            &Extracted {
-                id: &it.id,
-                kind: it.kind,
-                section: &it.section,
-                facts: &it.facts,
-                text: &it.text,
-            },
-        );
-        if let Some(old) = lost {
-            out.changed.push((it.id.clone(), old));
-        }
-        rows.insert(it.id.as_str(), row);
-    }
-    for line in existing.lines() {
-        let t = line.trim();
-        let id = t.split('|').next().unwrap_or("").trim();
-        let is_orphan = t
-            .split('|')
-            .nth(1)
-            .is_some_and(|c| matches!(Side::parse(c.trim()), Side::Orphan(_)));
-        if is_orphan {
-            continue;
-        }
-        if t.is_empty() || t.starts_with('#') || !sf2_spec::owns(id) {
-            out.text.push_str(line);
-            out.text.push('\n');
-        } else if let Some(row) = rows.remove(id) {
-            out.text.push_str(&row.render());
-            out.text.push('\n');
-        }
-    }
-    for it in items {
-        if let Some(row) = rows.remove(it.id.as_str()) {
-            out.text.push_str(&row.render());
-            out.text.push('\n');
-        }
-    }
-    out.write_orphans_of("");
-    Ok(out)
 }
 
 #[cfg(test)]
@@ -1477,7 +1477,7 @@ mod tests {
 
     fn midi_rows() -> String {
         let items = midi_spec::extract(&midi_spec::M2_104, MIDI_TEXT).unwrap();
-        let r = regenerate_midi(&midi_spec::M2_104, None, &items).unwrap();
+        let r = Regen::midi(&midi_spec::M2_104, None, &items).unwrap();
         assert_eq!(r.added.len(), items.len());
         assert!(r.removed.is_empty());
         r.text
@@ -1617,7 +1617,7 @@ mod tests {
             added,
             orphans,
             ..
-        } = regenerate_midi(&midi_spec::M2_104, Some(&kept), &items).unwrap();
+        } = Regen::midi(&midi_spec::M2_104, Some(&kept), &items).unwrap();
         let row = out.lines().find(|l| l.starts_with(&first.id)).unwrap();
         assert_eq!(
             row,
@@ -1639,7 +1639,7 @@ mod tests {
 
     fn sf2_rows() -> String {
         let spec = sf2_spec::extract(sf2_spec::SAMPLE).unwrap();
-        let r = regenerate_sf2("", &spec.items).unwrap();
+        let r = Regen::sf2("", &spec.items).unwrap();
         assert_eq!(r.added.len(), spec.items.len());
         assert!(r.removed.is_empty());
         r.text
@@ -1756,7 +1756,7 @@ mod tests {
             added,
             orphans,
             ..
-        } = regenerate_sf2(existing, &spec.items).unwrap();
+        } = Regen::sf2(existing, &spec.items).unwrap();
         let lines: Vec<&str> = out.lines().collect();
         assert_eq!(lines[0], "# header");
         assert_eq!(
@@ -1774,16 +1774,14 @@ mod tests {
         assert_eq!(orphans[0].id, "sf2.gen.gone");
         assert_eq!(added.len(), spec.items.len() - 1);
         assert!(lines.iter().any(|l| l.starts_with("sf2.gen.beta | todo |")));
-        assert!(regenerate_sf2("bad line\n", &spec.items).is_err());
+        assert!(Regen::sf2("bad line\n", &spec.items).is_err());
     }
 
     #[test]
     fn each_document_is_held_to_its_own_text() {
         let text_116 = "RUNNING\n 1\n\x0cRUNNING\n 2\n\x0cRUNNING\n 3\n\x0c1 Alpha\nA frob shall spin.\nTable 5 Header\nByte 1  Byte 2\nValue  0x53 0x4D 0x46 0x32 0x43 0x4C 0x49 0x50\nFigure 1 End\n";
         let items = midi_spec::extract(&midi_spec::M2_116, text_116).unwrap();
-        let inv = regenerate_midi(&midi_spec::M2_116, None, &items)
-            .unwrap()
-            .text;
+        let inv = Regen::midi(&midi_spec::M2_116, None, &items).unwrap().text;
         assert!(inv.starts_with("# MIDI Clip File (M2-116 v1.0) inventory."));
         assert!(inv.contains("m2-116/hdr/<n>"));
         assert!(!inv.contains("m2-116/msg"));
@@ -1832,9 +1830,7 @@ mod tests {
     /// A file for `texts` with `hand` as (side, paraphrase) per sentence.
     fn hand_file(texts: &[&str], hand: &[(&str, &str)]) -> String {
         let items: Vec<_> = (1..).zip(texts).map(|(n, t)| sentence(n, t)).collect();
-        let mut file = regenerate_midi(&midi_spec::M2_104, None, &items)
-            .unwrap()
-            .text;
+        let mut file = Regen::midi(&midi_spec::M2_104, None, &items).unwrap().text;
         for (n, (side, words)) in (1..).zip(hand) {
             let id = format!("m2-104/1#{n}");
             let at = file.find(&format!("\n{id} | ")).unwrap() + 1;
@@ -1864,7 +1860,7 @@ mod tests {
             .iter()
             .map(|&(n, t)| sentence(n, t))
             .collect();
-        let r = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
+        let r = Regen::midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
         let rows = rows_of(&r.text);
         assert_eq!(
             (
@@ -1901,7 +1897,7 @@ mod tests {
             .iter()
             .map(|&(n, t)| sentence(n, t))
             .collect();
-        let r = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
+        let r = Regen::midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
         assert_eq!(r.changed.len(), 1);
         assert_eq!(r.changed[0].0, "m2-104/1#2");
         assert_eq!(r.changed[0].1.paraphrase, "bee");
@@ -1922,7 +1918,7 @@ mod tests {
         ));
         assert!(!has(&report, "row `m2-104/1#1`"));
         // Regenerating again does not forget the row.
-        let again = regenerate_midi(&midi_spec::M2_104, Some(&r.text), &new).unwrap();
+        let again = Regen::midi(&midi_spec::M2_104, Some(&r.text), &new).unwrap();
         assert_eq!(again.text, r.text);
     }
 
@@ -1933,7 +1929,7 @@ mod tests {
             &[("host", "ay"), ("client", "bee"), ("todo", "")],
         );
         let new = [sentence(1, "A shall x.")];
-        let r = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
+        let r = Regen::midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
         assert_eq!(r.orphans.len(), 1);
         assert_eq!(r.orphans[0].id, "m2-104/1#2");
         assert_eq!(r.orphans[0].paraphrase, "bee");
@@ -1951,7 +1947,7 @@ mod tests {
             .iter()
             .map(|&(n, t)| sentence(n, t))
             .collect();
-        let r = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
+        let r = Regen::midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
         let rows = rows_of(&r.text);
         assert_eq!(rows[0].side, Side::Spec("todo".to_owned()));
         assert_eq!(rows[1].paraphrase, "first");
@@ -2028,8 +2024,8 @@ mod tests {
             &[("host", "ay"), ("client", "bee")],
         );
         let new = [sentence(1, "A shall x.")];
-        let first = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
-        let second = regenerate_midi(&midi_spec::M2_104, Some(&first.text), &new).unwrap();
+        let first = Regen::midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
+        let second = Regen::midi(&midi_spec::M2_104, Some(&first.text), &new).unwrap();
         for r in [&first, &second] {
             assert_eq!(r.orphans.len(), 1);
             let row = rows_of(&r.text).pop().unwrap();
@@ -2058,7 +2054,7 @@ mod tests {
             sentence_in(1, 1, "A shall x."),
             sentence_in(2, 1, "B shall y."),
         ];
-        let r = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
+        let r = Regen::midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
         assert_eq!(r.orphans.len(), 1);
         assert_eq!(r.orphans[0].paraphrase, "bee");
         assert_eq!(r.added, ["m2-104/2#1"]);
@@ -2088,7 +2084,7 @@ mod tests {
             text: String::new(),
         };
         let old_items = [sentence(1, "A shall x."), table.clone()];
-        let file = regenerate_midi(&midi_spec::M2_104, None, &old_items)
+        let file = Regen::midi(&midi_spec::M2_104, None, &old_items)
             .unwrap()
             .text;
         let file: String = file
@@ -2104,7 +2100,7 @@ mod tests {
             })
             .collect();
         let new = [sentence(1, "Z shall z."), sentence(2, "A shall x."), table];
-        let r = regenerate_midi(&midi_spec::M2_104, Some(&file), &new).unwrap();
+        let r = Regen::midi(&midi_spec::M2_104, Some(&file), &new).unwrap();
         let rows = rows_of(&r.text);
         assert_eq!(rows[2].side, Side::Spec("util".to_owned()));
         assert_eq!(rows[2].paraphrase, "my table");
@@ -2115,7 +2111,7 @@ mod tests {
     #[test]
     fn a_reworded_sf2_sentence_under_hand_columns_becomes_changed_and_fails() {
         let spec = sf2_spec::extract(sf2_spec::SAMPLE).unwrap();
-        let blank = regenerate_sf2("", &spec.items).unwrap().text;
+        let blank = Regen::sf2("", &spec.items).unwrap().text;
         let filled = blank.replacen("sf2.gen.alpha | todo |", "sf2.gen.alpha | reader |", 1);
         let filled = filled
             .lines()
@@ -2133,7 +2129,7 @@ mod tests {
         let mut items = spec.items.clone();
         let at = items.iter().position(|i| i.id == "sf2.gen.alpha").unwrap();
         items[at].text.push_str(" and now more");
-        let r = regenerate_sf2(&filled, &items).unwrap();
+        let r = Regen::sf2(&filled, &items).unwrap();
         assert_eq!(r.changed.len(), 1);
         assert_eq!(r.changed[0].0, "sf2.gen.alpha");
         let row = rows_of(&r.text)

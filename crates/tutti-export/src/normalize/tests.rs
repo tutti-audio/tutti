@@ -193,9 +193,9 @@ mod headroom {
 
 mod measurer {
     use super::*;
+    use crate::Outcome;
     use crate::control::{CancelToken, Progress};
-    use crate::{Outcome, Rendered};
-    use tutti_buffers::{Bed, ChannelTopology};
+    use tutti_buffers::{Bed, ChannelTopology, Wave};
     use tutti_measure::{LoudnessConfig, measure_loudness};
     use tutti_units::{Amplitude, Hz, Samples};
 
@@ -204,7 +204,7 @@ mod measurer {
     /// A 1 kHz sine of `secs` seconds, as planes: amplitude `amp` on the left
     /// and half of it on the right, so a measurement that put a sample on the
     /// wrong channel reads something else.
-    fn sine(secs: usize, amp: f64) -> Rendered {
+    fn sine(secs: usize, amp: f64) -> Wave {
         let plane = |amp: f64| -> Vec<f32> {
             tutti_fixtures::signal::sine(
                 Hz::new(1_000.0),
@@ -213,13 +213,17 @@ mod measurer {
                 Samples::new(secs * 48_000),
             )
         };
-        Rendered::new(vec![plane(amp), plane(amp / 2.0)], RATE, 0).expect("equal planes")
+        let (left, right) = (plane(amp), plane(amp / 2.0));
+        Wave::from_planes(
+            RATE,
+            Planes::from_vecs(&[left, right]).expect("equal planes"),
+        )
     }
 
     /// `measure` of `rendered` under a control that reports to `report`,
     /// which may cancel `token`.
     fn measure(
-        rendered: &Rendered,
+        rendered: &Wave,
         token: &CancelToken,
         report: &mut dyn FnMut(&Progress),
     ) -> Outcome<Loudness> {
@@ -230,7 +234,7 @@ mod measurer {
                 rendered,
                 &Bed::Stereo.topology(),
                 Samples::new(0),
-                rendered.frames(),
+                rendered.len(),
                 &mut control,
             )
             .expect("a measurable sine");
@@ -284,9 +288,15 @@ mod measurer {
             chunked.true_peak
         );
 
+        let mut flat = vec![0.0f32; rendered.layout().interleaved_len(rendered.len())];
+        interleave(
+            rendered.planes(),
+            InterleavedMut::new(&mut flat, rendered.layout()).unwrap(),
+        )
+        .unwrap();
         let one_shot = measure_loudness(
             &LoudnessConfig::new(Bed::Stereo.topology()),
-            Interleaved::new(&rendered.interleaved(), rendered.layout()).unwrap(),
+            Interleaved::new(&flat, rendered.layout()).unwrap(),
             RATE,
         )
         .expect("meterable");
@@ -314,7 +324,7 @@ mod measurer {
             Normalize::peak(Db::new(-1.0)),
         )
         .expect("meterable");
-        let frames = rendered.frames().get();
+        let frames = rendered.len().get();
         let mut at = 0;
         while at < frames {
             let end = (at + 777).min(frames);
@@ -352,7 +362,7 @@ mod measurer {
     fn a_topology_of_another_width_is_refused_by_name() {
         let rendered = sine(1, 0.1);
         let err = Normalize::peak(Db::new(-1.0))
-            .gain_for_rendered(&rendered, &Bed::Surround51.topology())
+            .gain_for_wave(&rendered, &Bed::Surround51.topology())
             .expect_err("stereo audio is not 5.1");
         assert!(
             matches!(
@@ -370,7 +380,7 @@ mod measurer {
         let rendered = sine(2, 0.1);
         let unplaced = ChannelTopology::unassigned(rendered.layout()).unwrap();
         let err = Normalize::lufs(Db::new(-23.0))
-            .gain_for_rendered(&rendered, &unplaced)
+            .gain_for_wave(&rendered, &unplaced)
             .expect_err("two unassigned channels have no angles");
         assert!(
             matches!(
@@ -384,7 +394,7 @@ mod measurer {
         );
         assert!(
             Normalize::peak(Db::new(-1.0))
-                .gain_for_rendered(&rendered, &unplaced)
+                .gain_for_wave(&rendered, &unplaced)
                 .is_ok()
         );
     }

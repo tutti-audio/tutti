@@ -5,6 +5,7 @@ use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_dsp::FreeverbBank;
+use tutti_fixtures::WavePlanes;
 use tutti_fixtures::midi;
 use tutti_fixtures::sf2::{Inst, Preset, bytes, generator};
 use tutti_midi_runtime::TimedMidiEvent;
@@ -116,11 +117,11 @@ fn a_general_midi_bounce_ends_at_the_rooms_tail_after_the_reverb_is_last_fed() {
     )
     .expect("the bounce renders")
     .into_parts();
-    let length = main.into_planes()[0].len();
+    let length = main.to_planes()[0].len();
     let [StemKey::Buffers(send)] = keys.as_slice() else {
         panic!("the send stem is held in memory")
     };
-    let send = done.take_buffers(send).expect("its own key").into_planes();
+    let send = done.take_buffers(send).expect("its own key").to_planes();
     let fed_until = send[0]
         .iter()
         .rposition(|&x| x != 0.0)

@@ -254,7 +254,7 @@ impl Default for FilterModConfig {
 /// Everything a [`PolySynth`](crate::PolySynth) is built from.
 ///
 /// Start from [`SynthConfig::new`], chain the options that differ, and hand it to
-/// [`PolySynth::new`](crate::PolySynth::new). The rate is not here: the synth
+/// `PolySynth::from`. The rate is not here: the synth
 /// renders at the rate its graph prepares it at.
 ///
 /// # Most of this is construction-only

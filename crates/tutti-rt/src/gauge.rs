@@ -351,6 +351,13 @@ impl Shared {
         }
     }
 
+    /// Raises the closed flag. The `Release` store follows the writer's last
+    /// value store, so a reader that sees it closed sees every value written.
+    #[inline]
+    fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+    }
+
     /// Whether the writer has dropped. Read before the value, so a closed
     /// cell is read at its last value.
     #[inline]
@@ -405,7 +412,7 @@ impl<U: Reading> Gauge<U> {
     #[inline]
     #[must_use]
     pub fn get(&self) -> U {
-        U::from_bits(self.cell.value.load(Ordering::Acquire))
+        U::from_bits(self.cell.word(0).load(Ordering::Acquire))
     }
 
     /// Whether no writer is attached: the value read is the last one written,
@@ -460,13 +467,13 @@ impl<U: Reading> GaugeWriter<U> {
     /// the one writer is not shared.
     #[inline]
     pub fn set(&mut self, value: U) {
-        self.cell.value.store(value.to_bits(), Ordering::Release);
+        self.cell.word(0).store(value.to_bits(), Ordering::Release);
     }
 }
 
 impl<U: Reading> Drop for GaugeWriter<U> {
     fn drop(&mut self) {
-        self.cell.closed.store(true, Ordering::Release);
+        self.cell.close();
     }
 }
 
@@ -650,7 +657,7 @@ impl<U: Count> CounterWriter<U> {
 
 impl<U: Count> Drop for CounterWriter<U> {
     fn drop(&mut self) {
-        self.cell.closed.store(true, Ordering::Release);
+        self.cell.close();
     }
 }
 

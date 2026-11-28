@@ -6,6 +6,7 @@
 use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
+use tutti_fixtures::WavePlanes;
 use tutti_session::ToMemory;
 
 use tutti_buffers::ChannelLayout;
@@ -46,7 +47,7 @@ fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
     bounced(session, bounce)
         .expect("the bounce renders")
         .into_main_output()
-        .into_planes()[0]
+        .to_planes()[0]
         .len()
 }
 
@@ -107,7 +108,7 @@ fn a_free_running_voice_rings_out_its_wave() {
     let len = bounced(&mut session, bounce)
         .expect("renders")
         .into_main_output()
-        .into_planes()[0]
+        .to_planes()[0]
         .len();
     assert_eq!(len, second + (RATE * 0.5) as usize);
 }
@@ -136,7 +137,7 @@ fn a_pool_built_with_its_voices_bounces_them() {
     let planes = bounced(&mut session, bounce)
         .expect("renders")
         .into_main_output()
-        .into_planes();
+        .to_planes();
     assert_eq!(planes[0].len(), RATE as usize / 2);
     assert!(
         planes[0].iter().all(|&s| (s - 0.25).abs() < 1e-6),

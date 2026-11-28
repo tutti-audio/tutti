@@ -265,8 +265,8 @@
 //! - Signal-driven modulation sources, feeding a
 //!   control lane's event input: [`EnvelopeFollowerNode`] and
 //!   [`NoteEnvelopeNode`].
-//! - Spatial: [`AmbisonicEncoderNode`], [`AmbisonicRotatorNode`] and
-//!   [`AmbisonicDecoderNode`] ([`AmbisonicError`]), [`VbapPannerNode`] ([`VbapError`]) and [`HrtfBinauralNode`],
+//! - Spatial: [`AmbisonicEncoderNode`], [`AmbisonicRotatorNode`],
+//!   [`AmbisonicDecoderNode`], [`VbapPannerNode`] and [`HrtfBinauralNode`],
 //!   steered by their params (bearing, height, and the VBAP spread and width
 //!   or the HRTF blend).
 //! - Mixing: [`BusStripNode`]. Summing is the graph's (a port or an output
@@ -541,9 +541,9 @@ pub use tutti_dsp::{
 mod spatial;
 pub use spatial::{
     AmbisonicDecoderConfig, AmbisonicDecoderKernel, AmbisonicDecoderNode, AmbisonicDecoderSet,
-    AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicError,
-    AmbisonicRotatorConfig, AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet,
-    HrtfBinauralConfig, HrtfBinauralNode, VbapError, VbapPannerConfig, VbapPannerNode,
+    AmbisonicEncoderConfig, AmbisonicEncoderKernel, AmbisonicEncoderNode, AmbisonicRotatorConfig,
+    AmbisonicRotatorKernel, AmbisonicRotatorNode, Decoding, DirectionSet, HrtfBinauralConfig,
+    HrtfBinauralNode, VbapPannerConfig, VbapPannerNode,
 };
 
 mod modulation;

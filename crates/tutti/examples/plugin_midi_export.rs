@@ -291,7 +291,12 @@ mod tests {
             .apply(tutti_fixtures::block_on(job))
             .unwrap()
             .into_main_output();
-        let left: Vec<i32> = rendered.planes()[0].iter().map(|&s| s as i32).collect();
+        let left: Vec<i32> = rendered
+            .channel(0)
+            .samples()
+            .iter()
+            .map(|&s| s as i32)
+            .collect();
 
         let onsets: Vec<(usize, i32)> = (0..left.len())
             .filter(|&f| left[f] != 0 && (f == 0 || left[f] != left[f - 1]))

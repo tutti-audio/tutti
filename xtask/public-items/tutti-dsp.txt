@@ -972,6 +972,8 @@ fn spatial::vbap::VbapGains::pair
 fn spatial::vbap::VbapGains::process_channel
 fn spatial::vbap::VbapKernel::gains
 fn spatial::vbap::VbapKernel::new
+fn spatial::vbap::layout::BedLayout::bed
+fn spatial::vbap::layout::BedLayout::layout
 fn spatial::vbap::layout::SpeakerLayout::directions
 fn spatial::vbap::layout::SpeakerLayout::gains_into
 fn spectral::spectral_bandwidth
@@ -1311,6 +1313,7 @@ struct spatial::hrtf::sphere::HrirSphere
 struct spatial::vbap::VbapGains
 struct spatial::vbap::VbapKernel
 struct spatial::vbap::error::GainsLengthMismatch
+struct spatial::vbap::layout::BedLayout
 struct spatial::vbap::layout::SpeakerLayout
 struct stereo::WidthBank
 struct stereo::WidthControls

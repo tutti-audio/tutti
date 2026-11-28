@@ -168,8 +168,7 @@ impl<F: Float> Metronome<F> {
             None => TimeSignature::default().bar_at(beat),
         };
 
-        let onset = position.bar_start
-            + position.signature.beat_length() * (position.beat.get() - 1) as f64;
+        let onset = position.beat_onset();
 
         // Inequality, not `>`: a backward jump from a loop wrap must retrigger too. The
         // epsilon is for float drift in the accumulated playhead.
@@ -188,11 +187,8 @@ impl<F: Float> Metronome<F> {
         // may fall mid-beat (the bar before a change is simply short). Measured from the onset
         // actually latched, so a within-epsilon non-change keeps the span it already had.
         let latched = self.onset.unwrap_or(onset);
-        let next_onset = latched + position.signature.beat_length();
-        let changes = meter.map_or(&[][..], |m| m.changes());
-        let next_change = changes
-            .get(changes.partition_point(|c| c.beat <= latched))
-            .map(|c| c.beat);
+        let next_onset = latched + position.beat_length();
+        let next_change = meter.and_then(|m| m.change_after(latched));
         self.latched_until = match next_change {
             Some(change) if change < next_onset => change,
             _ => next_onset,

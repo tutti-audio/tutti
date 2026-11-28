@@ -10,6 +10,7 @@ use tutti::{
     At, BarNumber, Beat, Bpm, Cents, ChannelLayout, Db, Frame, Meter, MeterMap, MotionCommand,
     SampleRate, Seconds, TransportCommand,
 };
+use tutti_fixtures::WavePlanes;
 use tutti_nodes::LfoConfig;
 use tutti_nodes::testing::Const;
 use tutti_timeline::Transport;
@@ -106,7 +107,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
         .apply(rendered)
         .expect("a DC graph renders")
         .into_main_output()
-        .into_planes();
+        .to_planes();
     assert_eq!(planes.len(), 2);
     assert!(planes[0].iter().all(|&s| (s - 0.5).abs() < 1e-6));
 }

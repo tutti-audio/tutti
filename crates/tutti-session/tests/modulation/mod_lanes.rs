@@ -18,6 +18,8 @@ use crate::common;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 #[cfg(feature = "export")]
+use tutti_fixtures::WavePlanes;
+#[cfg(feature = "export")]
 use tutti_session::ToMemory;
 
 use std::sync::Arc;
@@ -235,7 +237,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
     let export = bounced(&mut s, request)
         .expect("the export runs")
         .into_main_output()
-        .into_planes();
+        .to_planes();
 
     // Live: rolling from beat 0 (the play clock restarts there), in
     // ragged blocks.
@@ -1272,7 +1274,7 @@ fn an_added_synth_is_a_modulation_target() {
     use tutti_polysynth::{PolySynth, SynthConfig};
 
     let (mut s, _side) = rig(2);
-    let node = PolySynth::new(SynthConfig::new());
+    let node = PolySynth::from(SynthConfig::new());
     let synth = s.graph().add(node);
     main_output(&mut s, &[synth.erase(), synth.erase()]);
     let volume = ParamRef::unit(synth, UnitParam::Volume);
