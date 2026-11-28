@@ -859,6 +859,29 @@ impl Meter for MeterMap {
 mod tests {
     use super::*;
 
+    /// **The next change is strictly after the beat**: a change on the beat itself is the one
+    /// in force, so it is not "after"; past the last change there is none.
+    #[test]
+    fn change_after_is_the_first_change_strictly_after_the_beat() {
+        let map = MeterMap::new([
+            MeterChange::new(Beat::new(0.0), TimeSignature::default()),
+            MeterChange::new(Beat::new(8.0), seven_eight()),
+            MeterChange::new(Beat::new(15.0), TimeSignature::default()),
+        ]);
+        assert_eq!(map.change_after(Beat::new(0.0)), Some(Beat::new(8.0)));
+        assert_eq!(map.change_after(Beat::new(7.5)), Some(Beat::new(8.0)));
+        assert_eq!(
+            map.change_after(Beat::new(8.0)),
+            Some(Beat::new(15.0)),
+            "one on the beat is in force"
+        );
+        assert_eq!(
+            map.change_after(Beat::new(15.0)),
+            None,
+            "the last stays for good"
+        );
+    }
+
     /// 7/8 — the meter that exposes every "numerator is the bar length" bug.
     fn seven_eight() -> TimeSignature {
         TimeSignature::new(BeatsPerBar::of(7), NoteValue::EIGHTH)

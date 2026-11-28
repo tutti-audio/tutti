@@ -140,7 +140,7 @@ impl Stretch {
             // onto the start was taken into it ([`Snapshot::settle`]).
             usize::try_from(view.frames_between(start, beat).max(1)).ok()
         };
-        let past = Beat::new(self.beat.get().max(self.told.get()));
+        let past = self.beat.max(self.told);
         let point = view
             .map()
             .point_after(past)
