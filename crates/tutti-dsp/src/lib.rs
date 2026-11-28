@@ -274,6 +274,7 @@ pub use comb::{CombBank, CombControls, CombDelay, CombDelayError, CombFilter, Co
 pub use control_rate::COEFF_INTERVAL;
 pub use convolver::{
     Convolver, IrSpectra, MatrixConvolver, MatrixConvolverConfig, MatrixConvolverError,
+    MatrixResponses,
 };
 pub use dc_block::{DC_CORNER, DcBlocker, DcBlockerControls, MIN_DC_CORNER};
 pub use dct::{Dct2, TooManyOutputs};

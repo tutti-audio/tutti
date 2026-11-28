@@ -571,6 +571,7 @@ pub use signal::{
 mod convolution;
 pub use convolution::{
     ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, ImpulseResponses, IrLayout,
+    MatrixLayout,
 };
 
 // Test and stimulus nodes (`Const`, `Osc`, `Through`, `Split`, `Sink`): what a
