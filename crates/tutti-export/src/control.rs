@@ -244,8 +244,6 @@ pub struct Control<'a> {
     progress: Option<&'a mut dyn FnMut(&Progress)>,
     weights: Weights,
     last: Option<Progress>,
-    /// The output the stages after rendering are working on.
-    output: usize,
 }
 
 impl std::fmt::Debug for Control<'_> {
@@ -266,7 +264,6 @@ impl<'a> Control<'a> {
             progress: None,
             weights: Weights::Streaming,
             last: None,
-            output: 0,
         }
     }
 
@@ -289,7 +286,6 @@ impl<'a> Control<'a> {
             progress: None,
             weights: Weights::Streaming,
             last: None,
-            output: 0,
         }
     }
 
@@ -304,13 +300,6 @@ impl<'a> Control<'a> {
     pub(crate) fn weigh(&mut self, weights: Weights) {
         self.weights = weights;
         self.last = None;
-        self.output = 0;
-    }
-
-    /// The output the readings of the stages after rendering name, from the
-    /// next reading on.
-    pub(crate) fn set_output(&mut self, output: usize) {
-        self.output = output;
     }
 
     /// Reports [`Stage::Preparing`]: `done` of `of` steps of building what
@@ -333,18 +322,25 @@ impl<'a> Control<'a> {
         } else {
             (done as f32 / of as f32).clamp(0.0, 1.0)
         };
-        self.at(Stage::Preparing, within);
+        self.at(Stage::Preparing, None, within);
     }
 
-    /// Enters `stage`: always delivered, at the start of its band.
-    pub(crate) fn begin(&mut self, stage: Stage, total: Option<Samples>) {
-        self.deliver(stage, 0.0, total.map(|t| (Samples::new(0), t)));
+    /// Enters `stage` working on `output` ([`Progress::output`]): always
+    /// delivered, at the start of its band.
+    pub(crate) fn begin(&mut self, stage: Stage, output: Option<usize>, total: Option<Samples>) {
+        self.deliver(stage, output, 0.0, total.map(|t| (Samples::new(0), t)));
     }
 
     /// `done` of `total` frames of `stage`: delivered when the stage is
     /// entered, when it completes and after every [`DELIVERY_FRAMES`] since
     /// the last.
-    pub(crate) fn advance(&mut self, stage: Stage, done: Samples, total: Samples) {
+    pub(crate) fn advance(
+        &mut self,
+        stage: Stage,
+        output: Option<usize>,
+        done: Samples,
+        total: Samples,
+    ) {
         let due = match self.last {
             Some(last) if last.stage == stage => {
                 done >= total
@@ -360,19 +356,25 @@ impl<'a> Control<'a> {
             } else {
                 done.get() as f32 / total.get() as f32
             };
-            self.deliver(stage, within, Some((done, total)));
+            self.deliver(stage, output, within, Some((done, total)));
         }
     }
 
     /// A point `within` (`[0, 1]`) of a stage that does not count frames,
     /// always delivered.
-    pub(crate) fn at(&mut self, stage: Stage, within: f32) {
-        self.deliver(stage, within, None);
+    pub(crate) fn at(&mut self, stage: Stage, output: Option<usize>, within: f32) {
+        self.deliver(stage, output, within, None);
     }
 
     /// Delivers the reading for a position in `stage`'s band. The fraction
     /// never falls below the last one delivered.
-    fn deliver(&mut self, stage: Stage, within: f32, frames: Option<(Samples, Samples)>) {
+    fn deliver(
+        &mut self,
+        stage: Stage,
+        output: Option<usize>,
+        within: f32,
+        frames: Option<(Samples, Samples)>,
+    ) {
         let (from, to) = self.weights.band(stage).unwrap_or_else(|| {
             debug_assert!(false, "{stage:?} is not a stage of {:?}", self.weights);
             (0.0, 0.0)
@@ -384,10 +386,7 @@ impl<'a> Control<'a> {
         let progress = Progress {
             stage,
             fraction,
-            output: match stage {
-                Stage::Preparing | Stage::Rendering => None,
-                Stage::Measuring | Stage::Writing | Stage::Finalizing => Some(self.output),
-            },
+            output,
             frames,
         };
         self.last = Some(progress);

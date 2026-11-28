@@ -4,10 +4,79 @@
 //! render, resample, dither, encode) reports through it, so a caller matches one
 //! type whichever entry point it used.
 
-use crate::TargetError;
 use std::io;
 
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{ChannelLayout, FoldError};
+
+/// Why an [`Output`] cannot be rendered ([`RenderError::Target`](crate::RenderError::Target)).
+#[derive(thiserror::Error, Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum TargetError {
+    /// The channels (the graph's, or a tap's lanes) have no place in the
+    /// target's layout: the topology it states cannot take them.
+    #[error("the channels cannot be placed into the target's: {0}")]
+    Placement(FoldError),
+    /// The tap has a lane count other than its [`Placement`]'s width.
+    #[error("the tap carries {lanes:?} but its placement names {placement:?}")]
+    Lanes {
+        /// The tap's width.
+        lanes: ChannelLayout,
+        /// The placement's width.
+        placement: ChannelLayout,
+    },
+    /// A [`Gain::Of`] that names an output that does not measure itself.
+    #[error(
+        "the gain is to come from output {index}, which is not another output that measures itself"
+    )]
+    GainSource {
+        /// The position of the output it names.
+        index: usize,
+    },
+    /// A [`Gain::Of`] key that another [`Outputs`](crate::Outputs) made.
+    #[error("the gain is to come from a key of another Outputs")]
+    ForeignGain,
+    /// A [`Normalize::Lufs`] output whose channels name no speakers: loudness
+    /// is weighted by each speaker's placement, and a file with no stated
+    /// topology is taken to be [`ChannelTopology::default_for`] for its width, which
+    /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
+    /// ([`Encoding::channels`](tutti_codec::Encoding::channels)) that is a known bed, or normalize by
+    /// [`Normalize::Peak`].
+    #[error(
+        "a Lufs output of {channels:?} has no speaker placement to weigh loudness by: \
+         state a known topology with `topology`, or normalize by peak"
+    )]
+    UnplacedLoudness {
+        /// The output's width.
+        channels: ChannelLayout,
+    },
+    /// A [`SinkTarget`](crate::SinkTarget) whose sink is not as wide as the audio the output
+    /// reads. A sink takes the output's width unconverted, so it is refused, never folded.
+    #[error("the sink is {sink:?} wide and the audio it is fed {feed:?}")]
+    SinkWidth {
+        /// The sink's width.
+        sink: ChannelLayout,
+        /// The width of the audio the output reads.
+        feed: ChannelLayout,
+    },
+    /// Another output writes the same path.
+    #[error("output {other} writes the same path")]
+    SamePath {
+        /// The other output.
+        other: usize,
+    },
+}
+
+/// Why a [`Done`] has no result for a key.
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DoneError {
+    /// Another [`Outputs`] made the key.
+    #[error("the key belongs to another Outputs")]
+    Foreign,
+    /// The result was moved out by [`Done::take_file`] or [`Done::take_buffers`].
+    #[error("the result was already taken")]
+    Taken,
+}
 
 /// Anything that can go wrong rendering or writing an export.
 ///

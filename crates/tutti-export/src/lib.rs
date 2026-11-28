@@ -179,7 +179,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod error;
-pub use error::{ConfigError, RenderError, Result, Unmeasured};
+pub use error::{ConfigError, DoneError, RenderError, Result, TargetError, Unmeasured};
 
 mod control;
 pub use control::{CancelToken, Control, Outcome, Progress, Stage};
@@ -188,13 +188,13 @@ mod job;
 pub use job::{EventLossPolicy, Job, JobError, MAX_FRAMES, TailPolicy};
 
 mod output;
-pub use output::{BufferTarget, Feed, FileTarget, Gain, Output, Placement, TargetError};
+pub use output::{BufferKey, BufferTarget, Feed, FileKey, FileTarget, Gain, Output, Placement};
 
 mod sink_target;
 pub use sink_target::SinkTarget;
 
 mod outputs;
-pub use outputs::{BufferKey, Done, DoneError, FileKey, Outputs};
+pub use outputs::{Done, Outputs};
 
 mod normalize;
 pub use normalize::Normalize;

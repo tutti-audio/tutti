@@ -9,8 +9,7 @@
 //! writer apart from the machine.
 
 use super::clock::{Control, TransportClock};
-use super::handle::Transport;
-use super::motion::MotionAudio;
+use super::motion::{MotionAudio, MotionFsm};
 use super::settings::TransportSettings;
 use super::tempo_reader::TempoReader;
 use super::timed::{CommandQueueAudio, Recording, Scheduled, TransportCommand};
@@ -108,9 +107,13 @@ impl Drop for TransportAudio {
 }
 
 impl TransportAudio {
-    pub(crate) fn take(transport: &Transport, rate: SampleRate) -> Result<Self, AudioTaken> {
-        let motion = transport.motion.audio().ok_or(AudioTaken)?;
-        let settings = transport.settings.clone();
+    pub(crate) fn take(
+        machine: &MotionFsm,
+        settings: &TransportSettings,
+        rate: SampleRate,
+    ) -> Result<Self, AudioTaken> {
+        let motion = machine.audio().ok_or(AudioTaken)?;
+        let settings = settings.clone();
         let loop_region = motion.loop_region();
         // The count first, then the tempo: a publish between the two is taken
         // at the first block, never missed.
@@ -123,7 +126,8 @@ impl TransportAudio {
         let (clock, tempo, stepped) = {
             let map = tempo_map.lend();
             let tempo = map.tempo_at(Beat::new(0.0));
-            let mut clock = TransportClock::new(transport.links(), rate, tempo);
+            let mut clock =
+                TransportClock::new(settings.clock_links(machine.seek.clone()), rate, tempo);
             let stepped = map.constant_tempo().is_none();
             if stepped {
                 clock.follow(&map);
@@ -137,7 +141,7 @@ impl TransportAudio {
             seen,
             meter: settings.meter_reader(),
             stepped,
-            schedule: transport.motion.queue_audio(),
+            schedule: machine.queue_audio(),
             motion,
             settings,
         })
@@ -405,7 +409,7 @@ impl TransportAudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MotionCommand, Recording, TakeId, Timeline};
+    use crate::{MotionCommand, Recording, TakeId, Timeline, Transport};
     use tutti_units::{At, Frame};
 
     use tutti_graph::TransportPosition;

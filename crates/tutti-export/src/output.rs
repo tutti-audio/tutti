@@ -1,4 +1,4 @@
-//! What a render writes, and where each output reads from.
+//! What a render writes, where each output reads from, and the keys its results are read by.
 //!
 //! One render pass feeds a list of [`Output`]s. An output is a [`Feed`] (the
 //! audio it reads: the graph's outputs, or a plan tap) and a target (what
@@ -7,13 +7,13 @@
 //! duration.
 
 use std::path::Path;
+use std::sync::{Arc, Weak};
 
+use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
-use tutti_buffers::{Float, FoldError};
 use tutti_codec::ToFile;
 use tutti_graph::TapReader;
 
-use crate::FileKey;
 use crate::normalize::Normalize;
 
 /// How a file output is normalized, and whose reading sets its gain.
@@ -273,60 +273,69 @@ impl<T, F: Float> Output<T, F> {
     }
 }
 
-/// Why an [`Output`] cannot be rendered ([`RenderError::Target`](crate::RenderError::Target)).
-#[derive(thiserror::Error, Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub enum TargetError {
-    /// The channels (the graph's, or a tap's lanes) have no place in the
-    /// target's layout: the topology it states cannot take them.
-    #[error("the channels cannot be placed into the target's: {0}")]
-    Placement(FoldError),
-    /// The tap has a lane count other than its [`Placement`]'s width.
-    #[error("the tap carries {lanes:?} but its placement names {placement:?}")]
-    Lanes {
-        /// The tap's width.
-        lanes: ChannelLayout,
-        /// The placement's width.
-        placement: ChannelLayout,
-    },
-    /// A [`Gain::Of`] that names an output that does not measure itself.
-    #[error(
-        "the gain is to come from output {index}, which is not another output that measures itself"
-    )]
-    GainSource {
-        /// The position of the output it names.
-        index: usize,
-    },
-    /// A [`Gain::Of`] key that another [`Outputs`](crate::Outputs) made.
-    #[error("the gain is to come from a key of another Outputs")]
-    ForeignGain,
-    /// A [`Normalize::Lufs`] output whose channels name no speakers: loudness
-    /// is weighted by each speaker's placement, and a file with no stated
-    /// topology is taken to be [`ChannelTopology::default_for`] for its width, which
-    /// has a placement at 1, 2, 4, 6, 8 and 12 channels only. State a topology
-    /// ([`Encoding::channels`](tutti_codec::Encoding::channels)) that is a known bed, or normalize by
-    /// [`Normalize::Peak`].
-    #[error(
-        "a Lufs output of {channels:?} has no speaker placement to weigh loudness by: \
-         state a known topology with `topology`, or normalize by peak"
-    )]
-    UnplacedLoudness {
-        /// The output's width.
-        channels: ChannelLayout,
-    },
-    /// A [`SinkTarget`](crate::SinkTarget) whose sink is not as wide as the audio the output
-    /// reads. A sink takes the output's width unconverted, so it is refused, never folded.
-    #[error("the sink is {sink:?} wide and the audio it is fed {feed:?}")]
-    SinkWidth {
-        /// The sink's width.
-        sink: ChannelLayout,
-        /// The width of the audio the output reads.
-        feed: ChannelLayout,
-    },
-    /// Another output writes the same path.
-    #[error("output {other} writes the same path")]
-    SamePath {
-        /// The other output.
-        other: usize,
-    },
+/// The identity of one [`Outputs`](crate::Outputs), carried by its keys.
+///
+/// A key holds a weak count of the allocation its `Outputs` owns, so two
+/// brands are equal only when they came from one `Outputs`, and an address is
+/// never reused while a key of it lives.
+#[derive(Debug, Clone)]
+pub(crate) struct Brand(Weak<()>);
+
+impl Brand {
+    /// The brand of the `Outputs` that owns `id`.
+    pub(crate) fn of(id: &Arc<()>) -> Self {
+        Self(Arc::downgrade(id))
+    }
+}
+
+impl PartialEq for Brand {
+    fn eq(&self, other: &Self) -> bool {
+        Weak::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// The key of a file output, from [`Outputs::file`](crate::Outputs::file).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileKey {
+    brand: Brand,
+    index: usize,
+}
+
+impl FileKey {
+    pub(crate) fn new(brand: Brand, index: usize) -> Self {
+        Self { brand, index }
+    }
+
+    /// The index of the file among the file outputs, in the order they were added.
+    pub(crate) fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Whether the `Outputs` of `brand` made this key.
+    pub(crate) fn issued_by(&self, brand: &Brand) -> bool {
+        self.brand == *brand
+    }
+}
+
+/// The key of a buffer output, from [`Outputs::buffers`](crate::Outputs::buffers).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BufferKey {
+    brand: Brand,
+    index: usize,
+}
+
+impl BufferKey {
+    pub(crate) fn new(brand: Brand, index: usize) -> Self {
+        Self { brand, index }
+    }
+
+    /// The index of the buffer output among the buffer outputs, in the order they were added.
+    pub(crate) fn index(&self) -> usize {
+        self.index
+    }
+
+    /// Whether the `Outputs` of `brand` made this key.
+    pub(crate) fn issued_by(&self, brand: &Brand) -> bool {
+        self.brand == *brand
+    }
 }

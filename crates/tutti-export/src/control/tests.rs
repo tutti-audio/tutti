@@ -69,12 +69,12 @@ fn the_bands_are_the_documented_ones() {
 fn frames_are_delivered_on_the_cadence_and_at_every_stage_change() {
     let total = Samples::new(3 * DELIVERY_FRAMES + 100);
     let seen = delivered(Weights::Normalized, |c| {
-        c.begin(Stage::Rendering, Some(total));
+        c.begin(Stage::Rendering, None, Some(total));
         for done in 1..=total.get() {
-            c.advance(Stage::Rendering, Samples::new(done), total);
+            c.advance(Stage::Rendering, None, Samples::new(done), total);
         }
-        c.begin(Stage::Measuring, Some(total));
-        c.advance(Stage::Measuring, total, total);
+        c.begin(Stage::Measuring, Some(0), Some(total));
+        c.advance(Stage::Measuring, Some(0), total, total);
     });
     let rendering: Vec<usize> = seen
         .iter()
@@ -107,11 +107,11 @@ fn frames_are_delivered_on_the_cadence_and_at_every_stage_change() {
 fn the_fraction_never_falls() {
     let total = Samples::new(1000);
     let seen = delivered(Weights::Streaming, |c| {
-        c.begin(Stage::Rendering, Some(total));
-        c.advance(Stage::Rendering, total, total);
-        c.at(Stage::Rendering, 0.1);
-        c.at(Stage::Finalizing, 0.0);
-        c.at(Stage::Finalizing, 1.0);
+        c.begin(Stage::Rendering, None, Some(total));
+        c.advance(Stage::Rendering, None, total, total);
+        c.at(Stage::Rendering, None, 0.1);
+        c.at(Stage::Finalizing, Some(0), 0.0);
+        c.at(Stage::Finalizing, Some(0), 1.0);
     });
     assert!(
         seen.windows(2).all(|w| w[0].fraction() <= w[1].fraction()),
@@ -126,22 +126,20 @@ fn the_fraction_never_falls() {
     assert_eq!(seen.last().unwrap().fraction(), 1.0);
 }
 
-/// A reading's output is the one being measured, written or finalized, and
-/// none while rendering.
+/// A reading carries the output its call names, and none when it names none.
 #[test]
-fn the_output_is_none_only_while_rendering() {
+fn a_reading_carries_the_output_its_call_names() {
     let seen = delivered(Weights::Normalized, |c| {
-        for stage in [
-            Stage::Rendering,
-            Stage::Measuring,
-            Stage::Writing,
-            Stage::Finalizing,
-        ] {
-            c.begin(stage, None);
+        c.begin(Stage::Rendering, None, None);
+        for (output, stage) in [Stage::Measuring, Stage::Writing, Stage::Finalizing]
+            .into_iter()
+            .enumerate()
+        {
+            c.begin(stage, Some(output), None);
         }
     });
     let outputs: Vec<_> = seen.iter().map(Progress::output).collect();
-    assert_eq!(outputs, [None, Some(0), Some(0), Some(0)]);
+    assert_eq!(outputs, [None, Some(0), Some(1), Some(2)]);
 }
 
 /// A token and its clones are one request; a control with no token is never
@@ -193,7 +191,7 @@ fn preparing_reports_steps_in_the_band_the_render_leaves() {
         for (done, _) in steps {
             control.preparing(files, done, 4);
         }
-        control.begin(Stage::Rendering, Some(Samples::new(10)));
+        control.begin(Stage::Rendering, None, Some(Samples::new(10)));
         for (p, (_, want)) in seen.iter().zip(steps) {
             assert!((p.fraction() - want).abs() < 1e-6, "{p:?} want {want}");
             assert_eq!(
