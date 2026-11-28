@@ -30,8 +30,8 @@ use tutti_units::{Latency, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-/// A detached session `outputs` wide at 48 kHz: the executor on this side.
-fn detached(outputs: usize) -> Session {
+/// An offline session `outputs` wide at 48 kHz.
+fn session(outputs: usize) -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::clamped(outputs))
         .outputs(ChannelLayout::clamped(outputs))
@@ -298,7 +298,7 @@ fn every_source_reads_back_as_written() {
 /// state commits, which a stored zero would refuse.
 #[test]
 fn every_setter_stores_silence_as_the_empty_set() {
-    let mut s = detached(2);
+    let mut s = session(2);
     let sink = s.graph().add(ForkByClone(Through::mono()));
     let src = s.graph().add(ForkByClone(Const::frame(&[1.0, 2.0])));
     assert_eq!(s.commit(), Committed::Sent, "fresh main output");
@@ -332,7 +332,7 @@ fn every_setter_stores_silence_as_the_empty_set() {
 /// no-op rather than a panic.
 #[test]
 fn removing_a_node_twice_names_what_was_not_there() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let node = s.graph().add(ForkByClone(Const::mono(1.0)));
     assert!(s.graph_ref().contains(node));
     assert!(s.remove(node).is_ok());
@@ -348,7 +348,7 @@ fn removing_a_node_twice_names_what_was_not_there() {
 /// changes nothing: the graph is not marked edited.
 #[test]
 fn removing_a_stranger_changes_nothing() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let _ = s.update();
     let stranger = tutti_graph::NodeKey(u64::MAX);
     assert_eq!(
@@ -419,7 +419,7 @@ fn main_output_width_takes_the_wider_side_within_the_scratch_bounds() {
 /// commit, and the edit is what renders.
 #[test]
 fn an_edit_between_updates_is_committed_by_the_next() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(a, 0)])
@@ -447,7 +447,7 @@ fn an_edit_between_updates_is_committed_by_the_next() {
 /// **An update with no edit sends no plan.**
 #[test]
 fn an_update_with_no_edit_sends_no_plan() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(a, 0)])
@@ -464,7 +464,7 @@ fn an_update_with_no_edit_sends_no_plan() {
 /// with a message to parse: the caller matches `NoSuchNode(node)`.
 #[test]
 fn a_replace_on_a_removed_node_is_refused_naming_it() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let knob = s.graph().add(Params(Knob::new()));
     s.remove(knob).unwrap();
     let refused = s
@@ -475,8 +475,7 @@ fn a_replace_on_a_removed_node_is_refused_naming_it() {
 }
 
 /// **A replace during a re-prepare lands on a later update**, its params
-/// addressed under the key: the graph an engine runs (the audio side is
-/// taken) changing rate, and a replace before the executor has handed its
+/// addressed under the key: the graph an engine runs changing rate, and a replace before the executor has handed its
 /// units back. The call returns the key; the update that lands it sends
 /// `Replaced`.
 ///
@@ -484,7 +483,7 @@ fn a_replace_on_a_removed_node_is_refused_naming_it() {
 /// without the wait the new unit would be lost.
 #[test]
 fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(knob, 0)])
@@ -550,7 +549,7 @@ fn a_replace_during_a_re_prepare_lands_on_a_later_update() {
 fn removing_a_node_purges_the_replacements_parked_on_it() {
     use std::sync::Arc;
 
-    let mut s = detached(1);
+    let mut s = session(1);
     let knob = s.graph().add(Params(Knob::new()));
     assert!(matches!(s.update().as_slice(), [SessionEvent::Committed]));
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
@@ -580,10 +579,10 @@ fn removing_a_node_purges_the_replacements_parked_on_it() {
     }
 }
 
-/// A detached session with a knob playing at the main output, its first plan sent,
-/// and the audio side taken: the running node a swap fades from.
+/// An offline session with a knob playing at the main output, its first plan sent
+/// and played: the running node a swap fades from.
 fn playing_knob() -> (Session, tutti_session::Key<Params<Knob>>) {
-    let mut s = detached(1);
+    let mut s = session(1);
     let knob = s.graph().add(Params(Knob::new()));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(knob, 0)])
@@ -771,7 +770,7 @@ fn a_write_through_the_key_of_a_parked_swap_lands_with_the_incoming_node() {
 fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
     use tutti_nodes::{MultibandBands, MultibandCompressorConfig, MultibandCompressorNode};
 
-    let mut s = detached(1);
+    let mut s = session(1);
     let band = |n| {
         MultibandCompressorNode::from(MultibandCompressorConfig::new(
             tutti_buffers::ChannelTopology::STEREO,
@@ -844,7 +843,7 @@ fn an_unfaded_removal_cuts_where_the_default_fades_out() {
 /// update will ever take it).
 #[test]
 fn a_replace_on_a_poisoned_graph_is_refused() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let knob = s.graph().add(Params(Knob::new()));
     s.graph().add(Unforkable(Grenade));
     let _ = s.update();
@@ -878,7 +877,7 @@ fn a_replace_on_a_poisoned_graph_is_refused() {
 #[cfg(feature = "export")]
 #[test]
 fn every_param_write_path_reaches_a_fork() {
-    let mut s = detached(2);
+    let mut s = session(2);
     let k0 = s.graph().add(Params(Knob::new()));
     let k1 = s.graph().add(Params(Knob::new()));
     s.graph()
@@ -912,7 +911,7 @@ fn every_param_write_path_reaches_a_fork() {
 /// refused by name, and nothing moves.
 #[test]
 fn move_feeds_moves_every_feeders_sources() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let gone = s.graph().add(ForkByClone(Events::<1, 0>));
     assert!(s.remove(gone).is_ok());
     let g = s.graph();
@@ -1096,7 +1095,7 @@ fn a_latent_branch_is_compensated_on_the_other_to_the_sample() {
 fn a_removal_a_commit_and_an_update_run_on_any_thread() {
     // The test thread is the process's main thread; the work below is not on it.
     let _main = tutti_fixtures::main_thread();
-    let mut s = detached(1);
+    let mut s = session(1);
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     let _ = s.update();
 
@@ -1204,7 +1203,7 @@ fn replace_under_a_held_borrow(controls: &PublishedControls) {
 /// the update that collects its retired unit.
 #[test]
 fn the_update_sweeps_each_nodes_reclaimer_while_it_is_in_the_graph() {
-    let mut s = detached(1);
+    let mut s = session(1);
     // An update sends the edits, a block applies them and hands the units
     // they replaced back, and the next update collects those.
     let land = |s: &mut Session| {
@@ -1346,7 +1345,7 @@ fn a_removed_nodes_controls_live_until_its_fade_out_ends() {
 /// node's controls are held until its unit has left, then dropped.
 #[test]
 fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let (published, outgoing) = Published::new();
     let node = s.graph().add(published);
     s.graph()
@@ -1404,7 +1403,7 @@ fn a_refused_parked_replace_leaves_the_next_ones_controls_under_the_key() {
 }
 
 /// A pool's voice added and then removed, rendered through, so the pool's
-/// audio side parks the removed slot in its retire ring.
+/// render parks the removed slot in its retire ring.
 #[cfg(feature = "sampler")]
 fn park_a_retired_slot(s: &mut Session, handle: &tutti_sampler::VoicePoolHandle<f32>) {
     use tutti_sampler::{MemorySource, Playback, SlotId, VoiceWindow};
@@ -1430,7 +1429,7 @@ fn park_a_retired_slot(s: &mut Session, handle: &tutti_sampler::VoicePoolHandle<
 #[cfg(feature = "sampler")]
 #[test]
 fn the_update_frees_the_slots_a_graph_pool_retired() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let pool = s.graph().add(tutti_sampler::VoicePool::new());
     let handle = s
         .graph_ref()
@@ -1473,7 +1472,7 @@ fn the_update_frees_the_slots_a_graph_pool_retired() {
 #[cfg(feature = "sampler")]
 #[test]
 fn a_handle_is_none_once_its_node_is_removed() {
-    let mut s = detached(1);
+    let mut s = session(1);
     let pool = s.graph().add(tutti_sampler::VoicePool::new());
     assert!(s.graph_ref().handle(&pool).is_some(), "in the graph");
     s.remove(pool).unwrap();

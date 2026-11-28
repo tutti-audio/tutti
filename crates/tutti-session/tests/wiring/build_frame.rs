@@ -6,13 +6,12 @@
 //! a build's frames stay small. The test builds and drops on a 512 KiB stack.
 
 use tutti_session::Session;
-use tutti_units::SampleRate;
 
 /// The stack, in bytes, the build runs on: far under a 2 MiB test thread's.
 const STACK: usize = 512 * 1024;
 
-/// **Building an offline and a detached session, and dropping them, fits 512 KiB of
-/// stack.** The thread is the test's own bound on the build's frame, not a setting that
+/// **Building an offline session, and dropping it, fits 512 KiB of stack.** The
+/// thread is the test's own bound on the build's frame, not a setting that
 /// makes a large one pass: it overflows (and aborts the run) if a `Session` grows back
 /// to a size that its build steps multiply past it.
 #[test]
@@ -24,12 +23,6 @@ fn build_and_drop_fit_a_small_stack() {
                 .build()
                 .expect("an offline session builds");
             drop(offline);
-            let detached = Session::builder()
-                .sample_rate(SampleRate::SR_48K)
-                .block_dates(tutti_session::BlockDates::Frames)
-                .build()
-                .expect("a detached session builds");
-            drop(detached);
         })
         .expect("the thread starts")
         .join()

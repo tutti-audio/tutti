@@ -16,7 +16,7 @@ use tutti_nodes::testing::Const;
 #[cfg(feature = "export")]
 use tutti_session::ToMemory;
 use tutti_session::{
-    Committed, Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
+    Error, MainOutput, MainOutputTopologyStatus, OutputPort, Session, SessionBuilder,
 };
 use tutti_units::{SampleRate, Samples};
 

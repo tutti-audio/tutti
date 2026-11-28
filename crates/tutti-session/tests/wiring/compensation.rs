@@ -19,7 +19,7 @@ use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn detached() -> Session {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .sample_rate(RATE)
@@ -66,7 +66,7 @@ fn skewed(s: &mut Session) -> (tutti_graph::NodeKey, Samples) {
 /// total is zero and the table has a zero per output.
 #[test]
 fn a_graph_with_no_latency_reports_none() {
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(a, 0)])
@@ -96,7 +96,7 @@ fn a_graph_with_no_latency_reports_none() {
 /// wired to.
 #[test]
 fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
-    let mut s = detached();
+    let mut s = session();
     let (_, lat) = skewed(&mut s);
     let authored = [
         s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
@@ -133,7 +133,7 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
 /// publishes its figures.
 #[test]
 fn a_re_prepare_republishes_the_figures_once_it_resumes() {
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     let eff = s.graph().add(limiter());
     s.graph()

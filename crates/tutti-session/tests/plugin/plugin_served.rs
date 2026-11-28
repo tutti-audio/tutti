@@ -776,9 +776,9 @@ fn a_graph_that_refuses_the_swap_is_named_and_the_node_keeps_its_plugin() {
     let (catalog, _dir) = catalog();
     let (mut s, node) = with_node(&catalog);
     s.graph().add(Unforkable(Grenade));
-    // The session's executor is local, so both halves of the re-prepare run
-    // here and the grenade's panic has poisoned the editor when this returns,
-    // with the poisoning as the refusal.
+    // The grenade is staged and not yet sent, so the re-prepare's first half
+    // prepares it: its panic has poisoned the editor when this returns, with
+    // the poisoning as the refusal.
     let poisoned = s.set_sample_rate(SampleRate::SR_96K);
     assert!(
         matches!(

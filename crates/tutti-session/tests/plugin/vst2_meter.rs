@@ -55,7 +55,7 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
         .sample_rate(RATE)
         .block_dates(tutti_session::BlockDates::Frames)
         .build()
-        .expect("a detached session builds");
+        .expect("an offline session builds");
     s.set(
         s.transport_handle()
             .meter()

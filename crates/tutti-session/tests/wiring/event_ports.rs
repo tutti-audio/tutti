@@ -27,7 +27,7 @@ impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
     fn reset(&mut self) {}
 }
 
-fn detached() -> Session {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .outputs(ChannelLayout::MONO)
@@ -43,7 +43,7 @@ fn detached() -> Session {
 /// `disconnect` says whether it was there.
 #[test]
 fn an_event_edge_is_connected_read_back_and_disconnected() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let src = g.add(ForkByClone(Events::<0, 2>));
     let sink = g.add(ForkByClone(Events::<1, 0>));
@@ -88,7 +88,7 @@ fn an_event_edge_is_connected_read_back_and_disconnected() {
 /// onto input 1 is no source of input 0.
 #[test]
 fn event_port_zero_is_the_main_port_and_an_index_names_another() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let src = g.add(ForkByClone(Events::<0, 1>));
     let sink = g.add(ForkByClone(Events::<2, 0>));
@@ -111,7 +111,7 @@ fn event_port_zero_is_the_main_port_and_an_index_names_another() {
 /// feeding itself are refused with the port named, and nothing is stored.**
 #[test]
 fn a_missing_event_port_is_refused_and_stores_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let src = g.add(ForkByClone(Events::<0, 1>));
     let sink = g.add(ForkByClone(Events::<1, 0>));
@@ -153,7 +153,7 @@ fn a_missing_event_port_is_refused_and_stores_nothing() {
 /// goes, an empty set clears.
 #[test]
 fn set_sources_covers_event_inputs() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let a = g.add(ForkByClone(Events::<0, 1>));
     let b = g.add(ForkByClone(Events::<0, 1>));

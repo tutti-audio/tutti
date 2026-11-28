@@ -10,7 +10,7 @@ use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{ChangedBy, Key, Session, ValueErrorKind};
 use tutti_units::{Hz, Q, SampleRate};
 
-fn detached() -> Session {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .outputs(ChannelLayout::MONO)
@@ -33,7 +33,7 @@ fn filter(s: &mut Session) -> Key<SvfFilterNode<f32>> {
 /// write.
 #[test]
 fn a_drag_of_one_target_keeps_one_id_open_until_it_is_dropped() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     let mut drag = s.gesture(lp.cutoff()).unwrap();
@@ -70,7 +70,7 @@ fn a_drag_of_one_target_keeps_one_id_open_until_it_is_dropped() {
 /// the gesture is open and ended after the drop, and the id is the gesture's.
 #[test]
 fn an_xy_pair_is_one_id_and_one_end() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut x = s.watch(lp.cutoff()).unwrap();
     let mut y = s.watch(lp.q()).unwrap();
@@ -104,7 +104,7 @@ fn an_xy_pair_is_one_id_and_one_end() {
 /// no change at its drop.
 #[test]
 fn a_gesture_that_moved_nothing_records_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
 
@@ -122,7 +122,7 @@ fn a_gesture_that_moved_nothing_records_nothing() {
 /// gesture is over, with the value it began at.
 #[test]
 fn a_drag_back_to_its_base_still_ends() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     let mut drag = s.gesture(lp.cutoff()).unwrap();
@@ -140,7 +140,7 @@ fn a_drag_back_to_its_base_still_ends() {
 /// gesture's base for the end is the one before its own first write.
 #[test]
 fn a_write_from_another_thread_lands_ungestured() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     let mut drag = s.gesture(lp.cutoff()).unwrap();
@@ -169,7 +169,7 @@ fn a_write_from_another_thread_lands_ungestured() {
 /// opened over it, and when it is removed after the gesture opened.
 #[test]
 fn a_gesture_on_a_removed_target_answers_no_such_target_and_records_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let gone = filter(&mut s);
     let mut w = s.watch((lp.cutoff(), lp.q())).unwrap();
@@ -195,7 +195,7 @@ fn a_gesture_on_a_removed_target_answers_no_such_target_and_records_nothing() {
 fn a_gesture_dropped_inside_a_modify_ends_with_the_call() {
     let (done, finished) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut s = detached();
+        let mut s = session();
         let lp = filter(&mut s);
         let mut w = s.watch(lp.cutoff()).unwrap();
         let mut drag = s.gesture(lp.cutoff()).unwrap();
@@ -224,7 +224,7 @@ fn a_gesture_dropped_inside_a_modify_ends_with_the_call() {
 /// **A gesture whose session is gone answers `Closed`**, and dropping it records nothing.
 #[test]
 fn a_gesture_of_a_gone_session_is_closed() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let values = s.values();
     let mut drag = values.gesture(lp.cutoff()).unwrap();
@@ -237,7 +237,7 @@ fn a_gesture_of_a_gone_session_is_closed() {
 /// long one each answer `Mismatched` with both counts and write nothing.
 #[test]
 fn a_vec_of_values_not_one_per_target_is_refused_and_writes_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let a = filter(&mut s);
     let b = filter(&mut s);
     let mut w = s.watch((a.cutoff(), b.cutoff())).unwrap();

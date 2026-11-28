@@ -4,9 +4,8 @@
 //! test here declares through [`Session::mods`],
 //! runs the session's updates, and asserts on what the graph renders: the
 //! nodes are [`ProbeUnit`]s, which write the value their param port reads to
-//! their output, so a render is the delivered value frame by frame. The audio
-//! side is taken (`Graph::take_audio_side`) and rendered between updates, as
-//! a device would.
+//! their output, so a render is the delivered value frame by frame. The
+//! session is rendered between updates, as a device would.
 //!
 //! Tests that exist in
 //! `modulation.rs` (the §8.1 render, a lane in the plan of its node's update
@@ -504,8 +503,7 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
 /// A note held from frame 10 into a note envelope (sustain 0.4) routed to
 /// probe 1 (`0..=1`, knob 0.2, depth 0.5); probe 2 (knob 0.1) has a lane
 /// reading a macro of 0. Rendered into the sustain: probe 1 reads 0.4, probe 2
-/// its knob. Returns the session, its audio side, the two cutoffs and the
-/// envelope.
+/// its knob. Returns the session, the two cutoffs and the envelope.
 fn held_envelope_scene() -> (Session, ParamRef, ParamRef, ModSourceId) {
     let mut s = rig(2);
     let one = s.graph().add(ProbeUnit::new(0.2));
@@ -1456,7 +1454,7 @@ fn a_depth_slider_keeps_phase() {
 /// A macro of 1 at depth 0.2 on the cutoff probe's `0..=1000` (knob 500),
 /// scaled by a macro of 0.5 at depth 1:
 /// `1000 * 0.2 * (1 * 0.5)` = 100 over the knob, so 600. Settled; returns the
-/// session, its audio side and the two macros.
+/// session and the two macros.
 fn scaled_scene() -> (Session, ParamRef, ModSourceId, ModSourceId) {
     let mut s = rig(1);
     let probe = s.graph().add(ProbeUnit::new(500.0));

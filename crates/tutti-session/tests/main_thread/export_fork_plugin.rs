@@ -88,7 +88,7 @@ fn stem_planes(session: &mut Session, bounce: Bounce<NodeKey, ToMemory>) -> Vec<
     }
 }
 
-/// A detached stereo session at the export's rate, with the reference plugin
+/// An offline stereo session at the export's rate, with the reference plugin
 /// loaded from `path` in `mode` and routed to the outputs. The switches the
 /// probe's server reads are set until the returned guard drops, so a later case
 /// in the process probes with none set; a switch set through the guard after
@@ -121,7 +121,7 @@ fn session_with_probe_at(
         .sample_rate(SampleRate::DEFAULT)
         .block_dates(tutti_session::BlockDates::Frames)
         .build()
-        .expect("a detached session builds");
+        .expect("an offline session builds");
     session.set_sample_rate(SampleRate::of(RATE)).unwrap();
     let probe = session
         .load_plugin_blocking(

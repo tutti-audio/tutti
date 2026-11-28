@@ -21,7 +21,7 @@ use tutti_rt::Param;
 use tutti_session::{Replacement, Session, ValueErrorKind};
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds, UnitAddr, UnitParam};
 
-fn detached() -> Session {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .outputs(ChannelLayout::MONO)
@@ -37,7 +37,7 @@ fn detached() -> Session {
 /// node's `_at` method, held in `modulation/indexed_params.rs`.)
 #[test]
 fn a_keys_param_methods_name_their_kind_and_index() {
-    let mut s = detached();
+    let mut s = session();
     let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
@@ -54,7 +54,7 @@ fn a_keys_param_methods_name_their_kind_and_index() {
 /// the filter's own control reads what `set` wrote.
 #[test]
 fn a_write_reaches_the_cell_the_key_names() {
-    let mut s = detached();
+    let mut s = session();
     let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
@@ -89,7 +89,7 @@ fn a_write_reaches_the_cell_the_key_names() {
 /// params). Nothing is written.
 #[test]
 fn a_write_to_a_missing_node_or_param_is_no_such_target() {
-    let mut s = detached();
+    let mut s = session();
     let lp = s.graph().add(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
             .freq(Hz::new(1_000.0))
@@ -112,7 +112,7 @@ fn a_write_to_a_missing_node_or_param_is_no_such_target() {
             )))
             .fade(Fade::new(Samples::new(0)).law(FadeLaw::EqualPower)),
         )
-        .unwrap_or_else(|_| panic!("a detached graph swaps at once"));
+        .unwrap_or_else(|_| panic!("the replace is accepted"));
     let refused = s.set(bare.cutoff().to(Hz::new(5.0))).unwrap_err();
     assert_eq!(refused.kind, ValueErrorKind::NoSuchTarget);
     assert!(
@@ -172,7 +172,7 @@ tutti_graph::declare_params!([] Mine, n { Cutoff => Hz = &n.cutoff });
 #[cfg(feature = "export")]
 #[test]
 fn a_params_wrapped_node_is_addressed_and_forks_from_its_values() {
-    let mut s = detached();
+    let mut s = session();
     let mine = s.graph().add(Params(Mine {
         cutoff: Param::new(Hz::new(100.0)),
     }));

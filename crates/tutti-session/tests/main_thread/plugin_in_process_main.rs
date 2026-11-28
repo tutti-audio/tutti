@@ -879,7 +879,7 @@ fn a_port_change_during_a_sample_rate_change_ends_with_the_new_ports() {
         .sample_rate(SampleRate::SR_48K)
         .block_dates(tutti_session::BlockDates::Frames)
         .build()
-        .expect("a detached session builds");
+        .expect("an offline session builds");
     let (_, node) = s
         .load_from(
             tutti_fixtures::main_thread(),

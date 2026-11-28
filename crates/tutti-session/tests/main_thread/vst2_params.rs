@@ -42,7 +42,7 @@ fn session_with_probe() -> (Session, NodeKey, libloading::Library) {
         .sample_rate(SampleRate::DEFAULT)
         .block_dates(tutti_session::BlockDates::Frames)
         .build()
-        .expect("a detached session builds");
+        .expect("an offline session builds");
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),

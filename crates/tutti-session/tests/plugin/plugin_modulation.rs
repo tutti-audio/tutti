@@ -36,23 +36,23 @@ use tutti_units::ParamId;
 use tutti_units::{Bipolar, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
-/// The plugin's pipeline chunk in a detached session: its `MaxBlock`
+/// The plugin's pipeline chunk in an offline session: its `MaxBlock`
 /// (`LIVE_MAX_BLOCK`).
 const CHUNK: usize = 1_024;
 /// The probe's gain parameter, `-60..=12` dB; its default (0 dB) is 60/72 of
 /// the range.
 const GAIN: u32 = 77;
 
-/// A detached stereo session at 48 kHz, the probe's server in the
+/// An offline stereo session at 48 kHz, the probe's server in the
 /// environment.
-fn detached() -> Session {
+fn session() -> Session {
     tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .sample_rate(RATE)
         .block_dates(tutti_session::BlockDates::Frames)
         .build()
-        .expect("a detached session builds")
+        .expect("an offline session builds")
 }
 
 /// Loads the probe into `s` and puts it on the outputs.
@@ -199,7 +199,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_ONCE_FILE", &once);
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -266,7 +266,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
 /// lane leaves the graph with it.
 #[test]
 fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -356,7 +356,7 @@ fn near(v: Option<Normalized>, want: f64) -> bool {
 /// the played value), and the plugin hears the knob plus the route (0.25).
 #[test]
 fn a_set_under_a_lane_writes_the_knob() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -407,7 +407,7 @@ fn a_set_under_a_lane_writes_the_knob() {
 /// hears it plus the route, not the raw value.
 #[test]
 fn a_set_right_after_the_lane_is_added_writes_the_knob() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -443,7 +443,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
 /// typed write, so it is cleared and declared again) it hears `0.4 + 0.5 * 0.5` = 0.65.
 #[test]
 fn narrowing_a_plugin_targets_range_changes_what_lands_by_the_new_span() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -489,7 +489,7 @@ fn narrowing_a_plugin_targets_range_changes_what_lands_by_the_new_span() {
 /// lane's knob is not written, and the plugin takes the value raw.
 #[test]
 fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -538,7 +538,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     // plugin answers `clap.preset-load` only when asked.
     crate::loading::prime(&PluginRef::file(clap_probe()));
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);
@@ -620,7 +620,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     crate::loading::prime(&PluginRef::file(clap_probe()));
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     tutti_fixtures::set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
-    let mut s = detached();
+    let mut s = session();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
     drive.update(&mut s);

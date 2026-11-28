@@ -9,7 +9,7 @@ use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{ChangedBy, Key, Session, ValueErrorKind};
 use tutti_units::{Hz, Q, SampleRate};
 
-fn detached() -> Session {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .outputs(ChannelLayout::MONO)
@@ -31,7 +31,7 @@ fn filter(s: &mut Session) -> Key<SvfFilterNode<f32>> {
 /// nothing, and a lone write belongs to no gesture.
 #[test]
 fn a_set_shows_one_change_with_its_value() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     assert!(w.changes().unwrap().is_none());
@@ -48,7 +48,7 @@ fn a_set_shows_one_change_with_its_value() {
 /// ended, each holding the base before the batch; the next batch is a later gesture.
 #[test]
 fn a_batch_shows_one_gesture_id_across_its_writes() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch((lp.cutoff(), lp.q())).unwrap();
 
@@ -76,7 +76,7 @@ fn a_batch_shows_one_gesture_id_across_its_writes() {
 /// call built, and one slot moved.
 #[test]
 fn two_edits_of_one_target_are_one_change_over_the_first_base() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     let plus_one = |h: &Hz| *h + Hz::new(1.0);
@@ -90,7 +90,7 @@ fn two_edits_of_one_target_are_one_change_over_the_first_base() {
 /// **A set equal to the base shows nothing**, alone, and beside a write that does move.
 #[test]
 fn a_set_equal_to_the_base_shows_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch((lp.cutoff(), lp.q())).unwrap();
 
@@ -111,7 +111,7 @@ fn a_set_equal_to_the_base_shows_nothing() {
 /// gesture**: undoing restores where the first write found it.
 #[test]
 fn two_gestures_between_reads_give_the_first_base_and_the_second_id() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     s.set((lp.cutoff().to(Hz::new(2_000.0)), lp.q().to(Q::new(2.0))))
@@ -134,7 +134,7 @@ fn two_gestures_between_reads_give_the_first_base_and_the_second_id() {
 /// the target back to where the first read saw it.
 #[test]
 fn a_to_b_to_a_between_reads_reports_a() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     s.set(lp.cutoff().to(Hz::new(2_000.0))).unwrap();
@@ -146,7 +146,7 @@ fn a_to_b_to_a_between_reads_reports_a() {
 /// nothing and leaves the lock usable.
 #[test]
 fn a_refused_batch_and_a_panicking_edit_show_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let gone = filter(&mut s);
     s.remove(gone).unwrap();
@@ -170,7 +170,7 @@ fn a_refused_batch_and_a_panicking_edit_show_nothing() {
 /// **Watching a target the graph does not have fails at the call**, at its position.
 #[test]
 fn watching_a_removed_target_is_no_such_target_at_its_position() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let gone = filter(&mut s);
     s.remove(gone).unwrap();
@@ -190,7 +190,7 @@ fn watching_a_removed_target_is_no_such_target_at_its_position() {
 /// every target is gone and read, the watcher ends `Closed`.**
 #[test]
 fn a_removed_target_reads_none_and_the_watcher_then_closes() {
-    let mut s = detached();
+    let mut s = session();
     let (a, b) = (filter(&mut s), filter(&mut s));
     let mut w = s.watch((a.cutoff(), b.cutoff())).unwrap();
     s.set(a.cutoff().to(Hz::new(10.0))).unwrap();
@@ -208,7 +208,7 @@ fn a_removed_target_reads_none_and_the_watcher_then_closes() {
 /// **A watcher of a session that is gone is `Closed`**, from its `Values` too.
 #[test]
 fn a_watcher_outlives_its_session_as_closed() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let values = s.values();
     let mut w = values.watch(lp.cutoff()).unwrap();
@@ -223,7 +223,7 @@ fn a_watcher_outlives_its_session_as_closed() {
 /// **A watch or a read of changes from inside a `modify` is `Reentrant`**.
 #[test]
 fn watching_inside_a_modify_is_reentrant() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     let inside = |h: &Hz| {
@@ -239,7 +239,7 @@ fn watching_inside_a_modify_is_reentrant() {
 /// the target reads.**
 #[test]
 fn racing_writers_leave_the_watcher_at_the_target_value() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let mut w = s.watch(lp.cutoff()).unwrap();
     let writers: Vec<_> = (0..2_u32)

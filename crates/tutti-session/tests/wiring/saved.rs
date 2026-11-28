@@ -8,7 +8,7 @@ use tutti_session::{ChangedBy, Key, OutputPolicy, Session, ValueErrorKind};
 use tutti_tempo::TempoMap;
 use tutti_units::{Bpm, Hz, Q, SampleRate};
 
-fn detached() -> Session {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .outputs(ChannelLayout::MONO)
@@ -30,7 +30,7 @@ fn filter(s: &mut Session) -> Key<SvfFilterNode<f32>> {
 /// watcher shows the saved value, the one id, ended, over the base before the restore.
 #[test]
 fn a_restore_of_two_params_is_one_ended_gesture_by_restore() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let saved = s.saved_values().unwrap();
     s.set((lp.cutoff().to(Hz::new(300.0)), lp.q().to(Q::new(2.0))))
@@ -55,7 +55,7 @@ fn a_restore_of_two_params_is_one_ended_gesture_by_restore() {
 /// change, and the one that moved is by `Restore` with no gesture.
 #[test]
 fn a_restore_changes_only_the_target_that_differs() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let saved = s.saved_values().unwrap();
     s.set(lp.cutoff().to(Hz::new(300.0))).unwrap();
@@ -77,7 +77,7 @@ fn a_restore_changes_only_the_target_that_differs() {
 /// capture is replaced by the one captured.
 #[test]
 fn a_restore_puts_the_tempo_map_back() {
-    let s = detached();
+    let s = session();
     let tempo = s.transport_handle().tempo();
     s.set(tempo.to(TempoMap::constant(Bpm::of(90.0)).unwrap()))
         .unwrap();
@@ -94,7 +94,7 @@ fn a_restore_puts_the_tempo_map_back() {
 /// lands nothing**; `retain_live` drops it and the same call then restores the rest.
 #[test]
 fn a_removed_node_fails_the_restore_until_retain_live_drops_it() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let gone = filter(&mut s);
     let mut saved = s.saved_values().unwrap();
@@ -131,7 +131,7 @@ fn a_removed_node_fails_the_restore_until_retain_live_drops_it() {
 /// **A policy is not saved**: the output policy is in no capture, and the tempo is.
 #[test]
 fn the_output_policy_is_not_saved_and_the_tempo_is() {
-    let s = detached();
+    let s = session();
     let saved = s.saved_values().unwrap();
 
     assert!(saved.iter().all(|(t, _)| !t.is(s.policy::<OutputPolicy>())));
@@ -146,7 +146,7 @@ fn the_output_policy_is_not_saved_and_the_tempo_is() {
 /// param stays, the output policy goes.
 #[test]
 fn values_of_skips_an_assignment_to_the_output_policy() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let items = [
         lp.cutoff().to(Hz::new(500.0)).erase(),
@@ -166,7 +166,7 @@ fn values_of_skips_an_assignment_to_the_output_policy() {
 /// **`remove` takes one target out and leaves the capture it was cloned from**.
 #[test]
 fn removing_a_target_from_a_clone_leaves_the_original() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let saved = s.saved_values().unwrap();
     let mut edited = saved.clone();
@@ -193,7 +193,7 @@ fn removing_a_target_from_a_clone_leaves_the_original() {
 /// **A capture is `Send + Sync` and reads from another thread**.
 #[test]
 fn a_capture_restores_from_the_values_handle_on_another_thread() {
-    let mut s = detached();
+    let mut s = session();
     let lp = filter(&mut s);
     let values = s.values();
     let saved = values.saved_values().unwrap();
@@ -217,7 +217,7 @@ fn a_removed_nodes_mode_mix_and_setting_are_found_by_its_node() {
     use tutti_nodes::{DelayConfig, DelayLayout, DelayNode, DelaySync, MaxDelay, NoteTimes};
     use tutti_units::{Mix, Seconds};
 
-    let mut s = detached();
+    let mut s = session();
     let layout = DelayLayout::builder(ChannelTopology::MONO, MaxDelay::of(Seconds::new(2.0)))
         .notes(NoteTimes::all(NoteDuration::QUARTER))
         .build()

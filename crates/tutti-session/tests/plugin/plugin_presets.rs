@@ -244,7 +244,7 @@ mod vst3 {
             .sample_rate(SampleRate::DEFAULT)
             .block_dates(tutti_session::BlockDates::Frames)
             .build()
-            .expect("a detached session builds");
+            .expect("an offline session builds");
         let opened = s
             .load_out_of_process(&id, &catalog)
             .block()
@@ -308,7 +308,7 @@ mod vst3 {
             .sample_rate(SampleRate::DEFAULT)
             .block_dates(tutti_session::BlockDates::Frames)
             .build()
-            .expect("a detached session builds");
+            .expect("an offline session builds");
         let node = s.graph().add_plugin(Box::new(client(SampleRate::DEFAULT)));
         let other = s.graph().add_plugin(Box::new(client(SampleRate::DEFAULT)));
 
@@ -347,7 +347,7 @@ mod vst3 {
             .sample_rate(SampleRate::DEFAULT)
             .block_dates(tutti_session::BlockDates::Frames)
             .build()
-            .expect("a detached session builds");
+            .expect("an offline session builds");
         let plugin = s.load_out_of_process(&id, &catalog).block().unwrap();
         let node = s.apply(plugin).unwrap();
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(60);
@@ -409,7 +409,7 @@ mod vst2 {
             .sample_rate(SampleRate::DEFAULT)
             .block_dates(tutti_session::BlockDates::Frames)
             .build()
-            .expect("a detached session builds");
+            .expect("an offline session builds");
         let (plugin, node) = s
             .load_plugin_handle(
                 tutti_fixtures::main_thread(),
@@ -520,7 +520,7 @@ mod vst2 {
             .sample_rate(SampleRate::DEFAULT)
             .block_dates(tutti_session::BlockDates::Frames)
             .build()
-            .expect("a detached session builds");
+            .expect("an offline session builds");
         let plugin = PluginRef::file(tutti_fixtures::vst2_probe().to_path_buf());
         let (catalog, id, dir) = crate::loading::catalog_of(&plugin);
         let main = tutti_fixtures::main_thread();

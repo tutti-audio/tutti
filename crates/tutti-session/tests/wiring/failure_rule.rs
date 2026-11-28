@@ -14,7 +14,7 @@ use tutti_units::SampleRate;
 const RATE: SampleRate = SampleRate::SR_48K;
 const GHOST: NodeKey = NodeKey(u64::MAX);
 
-fn detached() -> Session {
+fn session() -> Session {
     Session::builder()
         .outputs_floor(ChannelLayout::MONO)
         .outputs(ChannelLayout::MONO)
@@ -29,7 +29,7 @@ fn detached() -> Session {
 /// `Mix::WET` would have read as an answer.
 #[test]
 fn a_query_of_a_node_that_is_not_there_names_it() {
-    let s = detached();
+    let s = session();
     let g = s.graph_ref();
     let named = |e: tutti_session::NoSuchNode| e.node();
     assert_eq!(named(g.node_inputs(GHOST).unwrap_err()), GHOST);
@@ -44,7 +44,7 @@ fn a_query_of_a_node_that_is_not_there_names_it() {
 /// so the refusal above is the missing key and nothing else.
 #[test]
 fn a_query_of_a_node_that_is_there_answers() {
-    let mut s = detached();
+    let mut s = session();
     let through = s
         .graph()
         .add(ForkByClone(Through::new(ChannelLayout::STEREO)));
@@ -60,7 +60,7 @@ fn a_query_of_a_node_that_is_there_answers() {
 /// node or port": a typo in a key is not a disconnect that found nothing.
 #[test]
 fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let g = s.graph();
 
@@ -122,7 +122,7 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
 /// fail on a later update; it is `NoSuchNode` now and nothing waits.
 #[test]
 fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
-    let mut s = detached();
+    let mut s = session();
     let knob = s.graph().add(ForkByClone(Const::frame(&[1.0])));
     let _ = s.update();
     s.set_sample_rate(SampleRate::SR_44K1).unwrap();
@@ -149,7 +149,7 @@ fn a_replace_of_a_missing_node_is_refused_during_a_re_prepare() {
 fn a_tap_source_past_what_a_port_index_holds_is_refused() {
     use tutti_graph::{MissingSource, TapAlign, TapOptions};
     use tutti_units::Samples;
-    let mut s = detached();
+    let mut s = session();
     let a = s.graph().add(ForkByClone(Const::frame(&[0.5])));
     let far = OutputPort::new(a.erase(), 70_000);
     let refused = s
@@ -211,7 +211,7 @@ impl Node for Events {
 /// reads it. A node removed is as missing as one never added.
 #[test]
 fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let sink = g.add(ForkByClone(Events {
         inputs: 1,
@@ -251,7 +251,7 @@ fn set_feed_refuses_a_sink_that_is_not_there_and_changes_nothing() {
 /// still answers empty.
 #[test]
 fn feed_and_feeds_refuse_a_node_that_is_not_there() {
-    let mut s = detached();
+    let mut s = session();
     let g = s.graph();
     let sink = g.add(ForkByClone(Events {
         inputs: 1,
@@ -268,7 +268,7 @@ fn feed_and_feeds_refuse_a_node_that_is_not_there() {
 /// node's range are accepted.
 #[test]
 fn set_sample_rate_refuses_a_rate_a_node_does_not_run_at_and_keeps_the_rate() {
-    let mut s = detached();
+    let mut s = session();
     let rates = SampleRates::of(SampleRate::SR_44K1, SampleRate::SR_48K);
     let limited = s.graph().add(ForkByClone(Rated(rates)));
     s.graph()

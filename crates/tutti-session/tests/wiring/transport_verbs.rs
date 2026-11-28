@@ -116,7 +116,7 @@ fn the_playhead_is_one_read_of_the_last_block() {
 /// a panic: stopped at the origin with no clock reading, and `beat_now` holds
 /// the origin.
 #[test]
-fn a_detached_session_reads_a_resting_playhead() {
+fn a_session_that_has_not_rendered_reads_a_resting_playhead() {
     let s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .block_dates(tutti_session::BlockDates::Frames)

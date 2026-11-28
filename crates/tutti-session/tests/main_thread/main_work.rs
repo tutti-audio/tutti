@@ -44,7 +44,7 @@ fn session() -> Session {
         .sample_rate(RATE)
         .block_dates(tutti_session::BlockDates::Frames)
         .build()
-        .expect("a detached session builds")
+        .expect("an offline session builds")
 }
 
 /// A probe plugin loaded in `session`, then removed from it and let go of by the session:

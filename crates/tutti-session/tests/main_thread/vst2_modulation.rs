@@ -26,7 +26,7 @@ fn vst2_probe() -> std::path::PathBuf {
     tutti_fixtures::vst2_probe().to_path_buf()
 }
 
-/// A detached stereo session at 48 kHz with the probe loaded in process, on
+/// An offline stereo session at 48 kHz with the probe loaded in process, on
 /// the outputs, its parameter values read.
 fn session_with_probe() -> (Session, NodeKey) {
     let mut s = Session::builder()
@@ -34,7 +34,7 @@ fn session_with_probe() -> (Session, NodeKey) {
         .sample_rate(RATE)
         .block_dates(tutti_session::BlockDates::Frames)
         .build()
-        .expect("a detached session builds");
+        .expect("an offline session builds");
     let node = s
         .load_plugin_blocking(
             tutti_fixtures::main_thread(),
