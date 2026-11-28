@@ -536,7 +536,6 @@ wide-directory crates/tutti-dsp/src/
 wide-directory crates/tutti-dsp/src/dynamics/
 wide-directory crates/tutti-dsp/src/sos/
 wide-directory crates/tutti-engine/src/
-wide-directory crates/tutti-export/src/
 wide-directory crates/tutti-graph/src/compile/
 wide-directory crates/tutti-graph/src/exec/
 wide-directory crates/tutti-graph/src/node/
