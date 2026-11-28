@@ -119,15 +119,14 @@ pub enum LeaseError<K> {
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// Lends the keys of the instrument declared under `key`: the producer of
-    /// its event queue, which plays it on the Group the instrument listens to.
+    /// its event queue, which plays it on Group 1 ([`MidiGroup::FIRST`]).
     /// The session holds them from the patch that declares the instrument
     /// until this call, and the app holds them until it drops them; then a
-    /// call lends a new pair, and the old queue's pushes report
-    /// [`PushError::Disconnected`](tutti_rt::PushError::Disconnected).
+    /// call lends a new pair.
     ///
     /// The keys' life is the instrument's: once a patch no longer declares the
     /// key, or declares it as another kind of node, a push through them reports
-    /// the same. A swap of the instrument's own node (another structure) keeps
+    /// [`PushError::Disconnected`](tutti_rt::PushError::Disconnected). A swap of the instrument's own node (another structure) keeps
     /// them, and they play the new node.
     ///
     /// Live keys are a performance and are not part of a bounce (see

@@ -1106,7 +1106,9 @@ impl<F: Float> Graph<F> {
     /// as the old one was, and returns the new inlet's writer. The old inlet's
     /// writer is disconnected: a push through it reports
     /// [`PushError::Disconnected`](tutti_rt::PushError::Disconnected) once the
-    /// old node has left the graph.
+    /// old node has left the graph. The swap may land at a later update; until
+    /// it does, the new writer's pushes wait in its ring, and a push past its
+    /// capacity is counted.
     ///
     /// # Errors
     ///
