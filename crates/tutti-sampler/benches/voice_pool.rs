@@ -23,7 +23,7 @@
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
 
-use tutti_sampler::testing::{loop_frames, placed_source};
+use tutti_sampler::testing::{loop_frames, placed_config, placed_source, voice_node};
 
 use std::f64::consts::TAU;
 use std::hint::black_box;
@@ -482,9 +482,8 @@ impl Clips {
         let wave = Arc::new(wave);
         let nodes = (0..n)
             .map(|_| {
-                let source = placed_source(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
-                let node = VoiceNode::new(source, Playback::default())
-                    .expect("a finite gain and a nonempty width");
+                let source = placed_config(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)));
+                let node = voice_node(source, Playback::default());
                 Direct::new(node, SampleRate::of(SR), block)
             })
             .collect();

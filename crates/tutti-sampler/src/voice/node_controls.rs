@@ -68,9 +68,10 @@ impl FreeRunning {
         }
     }
 
-    /// The steering in force, read on the control side.
+    /// The steering in force, read on the control side: the mirror the setters
+    /// edit, under its lock, which every read of the steering shares.
     pub(crate) fn current(&self) -> Steering {
-        *self.cell.current()
+        *self.latest.lock()
     }
 
     /// The cell the node reads, which is the node's published entry.
@@ -105,7 +106,7 @@ impl FreeRunning {
     /// Whether the voice is playing (not [`stop`](Self::stop)ped).
     #[must_use]
     pub fn is_playing(&self) -> bool {
-        !self.latest.lock().stopped
+        !self.current().stopped
     }
 }
 
@@ -176,13 +177,14 @@ pub(crate) struct Cells {
 /// payload (a boxed `Voice`, a wave, a vocoder) to drop on the audio thread.
 ///
 /// ```compile_fail
-/// # use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode};
+/// # use tutti_sampler::{MemorySourceConfig, VoiceNode, VoiceNodeConfig};
 /// # use tutti_buffers::{ChannelLayout, Mono, Wave};
 /// # use tutti_graph::IntoNode;
 /// # use std::sync::Arc;
 /// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
-/// # let source = MemorySource::from(MemorySourceConfig::new(wave.clone(), ChannelLayout::STEREO).expect("a placeable wave"));
-/// let parts = IntoNode::<f32>::into_parts(VoiceNode::new(source, Playback::default()).expect("a finite gain and a nonempty width"));
+/// # let source = MemorySourceConfig::new(wave.clone(), ChannelLayout::STEREO).expect("a placeable wave");
+/// let config = VoiceNodeConfig::free(source).expect("a finite gain and a free source");
+/// let parts = IntoNode::<f32>::into_parts(VoiceNode::from(config));
 /// // A standalone voice node has no door for a pool's wave swap.
 /// let _ = parts.controls.replace_wave(tutti_sampler::SlotId(0), wave);
 /// ```
@@ -204,13 +206,13 @@ impl<F: SamplerFloat> VoiceNodeControls<F> {
         cells: Cells,
         gain: Param<Amplitude>,
         params: ParamSet,
-        stream: Option<StreamHandle<F>>,
+        stream: Option<Arc<Mutex<StreamHandle<F>>>>,
     ) -> Self {
         Self {
             cells,
             gain,
             params,
-            stream: stream.map(|s| Arc::new(Mutex::new(s))),
+            stream,
         }
     }
 

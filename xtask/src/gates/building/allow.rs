@@ -476,6 +476,24 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "a wave's channels and the width are valid together (a channel no speaker names, a frame with no place for one): no single value's type holds it",
     ),
     ty(
+        "crates/tutti-sampler/src/voice/node_config.rs",
+        "VoiceNodeConfig::free",
+        CTOR,
+        "a play's gain is finite (no single value's type holds it) and the source is not placed on the transport: a source config's window is a runtime value",
+    ),
+    ty(
+        "crates/tutti-sampler/src/voice/node_config.rs",
+        "VoiceNodeConfig::placed",
+        CTOR,
+        "a play's gain is finite (no single value's type holds it) and the source is placed on the transport: a source config's window is a runtime value",
+    ),
+    ty(
+        "crates/tutti-sampler/src/voice/node_config.rs",
+        "VoiceNodeConfig::streaming",
+        CTOR,
+        "a play's gain is finite (no single value's type holds it) and the stream's voice is a width the sampler runs: the voice's channel count is a runtime value",
+    ),
+    ty(
         "crates/tutti-sampler/",
         "DiskStreamer::manual",
         CTOR,

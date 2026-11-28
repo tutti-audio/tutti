@@ -179,6 +179,36 @@ impl<F: Float> MemorySourceConfig<F> {
     }
 }
 
+impl<F: Float> MemorySourceConfig<F> {
+    /// The window this config plays on the transport: `None` when free-running.
+    pub(crate) fn window_value(&self) -> Option<VoiceWindow> {
+        self.window
+    }
+
+    /// The gain, speed and loop this config was given: what a voice takes as its own.
+    pub(crate) fn values(&self) -> (Amplitude, PlaybackRate, Option<Loop>) {
+        (self.gain, self.speed, self.loop_)
+    }
+
+    /// This config at the defaults of the values a voice node owns (unity gain
+    /// and speed, no loop), which the node applies over the source.
+    pub(crate) fn without_values(mut self) -> Self {
+        self.gain = Amplitude::new(1.0);
+        self.speed = PlaybackRate::UNITY;
+        self.loop_ = None;
+        self
+    }
+
+    /// This config with `other`'s window, where both are placed: a window is a
+    /// value of a placed voice, and being placed is structure.
+    pub(crate) fn with_window_of(mut self, other: &Self) -> Self {
+        if self.window.is_some() && other.window.is_some() {
+            self.window = other.window;
+        }
+        self
+    }
+}
+
 // Hand-written: a `Wave` is not `Debug`. Prints the wave's length and the options.
 impl<F: Float> std::fmt::Debug for MemorySourceConfig<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

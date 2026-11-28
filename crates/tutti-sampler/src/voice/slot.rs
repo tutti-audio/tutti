@@ -95,7 +95,7 @@ impl<F: SamplerFloat> PlaybackSlot<F> {
     /// A slot that arrives needing stretch gets its vocoder built on the
     /// control thread: `VoicePool` takes one from the sender (see
     /// `VoicePoolHandle::prepare`, which fills `AddVoice`'s `stretch`), and
-    /// `VoiceNode::with_channels` builds its own.
+    /// `VoiceNode`'s `From` builds its own.
     ///
     /// Turning stretch on later (`VoiceCommand::UpdateStretch`, which reaches
     /// `set_stretch` below through the pool's drain) is a pool-only

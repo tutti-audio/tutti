@@ -27,7 +27,7 @@
 
 use tutti_buffers::Mono;
 use tutti_sampler::VoiceWindow;
-use tutti_sampler::testing::placed_source;
+use tutti_sampler::testing::{source_config, voice_node};
 
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
@@ -42,7 +42,7 @@ use tutti_graph::{
 };
 use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNode, VoiceNodeControls};
+use tutti_sampler::{MemorySource, MemorySourceConfig, Playback, VoiceNodeControls};
 use tutti_units::{
     Amplitude, Beat, BeatsPerCycle, Bipolar, Bpm, Frame, PhaseIncrement, SampleRate, Samples,
     UnitParam,
@@ -81,10 +81,13 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
 fn solo_voice() -> (Renderer, NodeKey, VoiceNodeControls<f32>) {
-    let source = placed_source(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)));
+    let source = source_config(
+        flat_wave(48_000),
+        ChannelLayout::MONO,
+        Some(VoiceWindow::from(Beat::new(0.0))),
+    );
     let (mut solo, key, handle) = Renderer::alone(
-        VoiceNode::with_channels(source, Playback::default(), ChannelLayout::MONO)
-            .expect("a finite gain and a nonempty width"),
+        voice_node(source, Playback::default()),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
     solo.set_transport_fn(rolling);
@@ -324,13 +327,16 @@ fn a_lane_drives_a_memory_sources_gain_around_its_cell() {
 fn a_voices_gain_port_reads_its_cell_as_its_base() {
     use tutti_graph::Node;
 
-    let source = placed_source(flat_wave(64), VoiceWindow::from(Beat::new(0.0)));
+    let source = source_config(
+        flat_wave(64),
+        ChannelLayout::MONO,
+        Some(VoiceWindow::from(Beat::new(0.0))),
+    );
     let play = Playback {
         gain: Amplitude::new(0.25),
         ..Playback::default()
     };
-    let node = VoiceNode::with_channels(source, play, ChannelLayout::MONO)
-        .expect("a finite gain and a nonempty width");
+    let node = voice_node(source, play);
     assert_eq!(
         node.shape().params.as_slice(),
         &[tutti_units::UnitParam::Volume][..]
